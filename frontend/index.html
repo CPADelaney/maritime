@@ -1,65 +1,53 @@
-<!-- frontend/index.html -->
+Here’s a **drop-in `frontend/index.html`** with 25-per-page vessel search + pagination (Prev/Next + page numbers). It also adds `x-init="init()"` so the page boots reliably.
+
+> If needed, change `API_BASE` near the top to your API URL.
+
+```html
 <!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Maritime MVP — Port Call Intelligence Platform</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Tailwind CDN for quick styling -->
+  <!-- Tailwind + Alpine -->
   <script src="https://cdn.tailwindcss.com"></script>
-  <!-- Alpine.js for interactivity -->
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
   <style>
-    @keyframes slideUp {
-      from { transform: translateY(10px); opacity: 0; }
-      to { transform: translateY(0); opacity: 1; }
-    }
-    .animate-slide-up { animation: slideUp 0.3s ease-out forwards; }
-    
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-    .animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-    
-    .glass {
-      background: rgba(255, 255, 255, 0.95);
-      backdrop-filter: blur(10px);
-      -webkit-backdrop-filter: blur(10px);
-    }
+    @keyframes slideUp { from { transform: translateY(10px); opacity:0 } to { transform: translateY(0); opacity:1 } }
+    .animate-slide-up { animation: slideUp .3s ease-out forwards }
+    .glass { background: rgba(255,255,255,.95); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px) }
   </style>
 </head>
 <body class="bg-gradient-to-br from-blue-50 to-indigo-100 min-h-screen text-slate-900">
-  
-  <!-- Configuration -->
+
+  <!-- Configure your API base (no trailing slash) -->
   <script>
-    // CHANGE THIS to your API URL (no trailing slash)
     const API_BASE = "https://maritime-ee6i.onrender.com";
   </script>
 
-  <div class="max-w-7xl mx-auto p-4 sm:p-6" x-data="portCallApp()">
-    
+  <div class="max-w-7xl mx-auto p-4 sm:p-6" x-data="portCallApp()" x-init="init()">
+
     <!-- Header -->
     <header class="mb-8">
       <div class="flex items-center justify-between">
         <div>
           <h1 class="text-3xl font-bold text-gray-900">Port Call Intelligence Platform</h1>
-          <p class="text-gray-600 mt-1">Real-time vessel tracking, fee estimation, and compliance monitoring</p>
+          <p class="text-gray-600 mt-1">Real-time vessel search, fee estimation, and compliance</p>
         </div>
         <div class="text-right text-sm text-gray-500">
-          <div>API Status: <span x-text="apiStatus" :class="apiStatus === 'Online' ? 'text-green-600' : 'text-red-600'"></span></div>
+          <div>API Status:
+            <span x-text="apiStatus" :class="apiStatus === 'Online' ? 'text-green-600' : 'text-red-600'"></span>
+          </div>
           <div>Cache: <span x-text="cacheStats"></span></div>
         </div>
       </div>
     </header>
 
-    <!-- Main Grid -->
     <div class="grid lg:grid-cols-3 gap-6">
-      
-      <!-- Left Column: Vessel Search & Selection -->
+      <!-- Left Column -->
       <div class="lg:col-span-1 space-y-4">
-        
-        <!-- Vessel Search Card -->
+
+        <!-- Vessel Search -->
         <div class="glass rounded-2xl shadow-lg p-5">
           <h2 class="text-lg font-semibold mb-3 flex items-center">
             <svg class="w-5 h-5 mr-2 text-indigo-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -67,49 +55,96 @@
             </svg>
             Vessel Search
           </h2>
-          
+
           <div class="space-y-3">
-            <div class="relative">
-              <input 
-                x-model="vesselQuery" 
-                @keyup.enter="searchVessel"
-                class="w-full border border-gray-300 rounded-lg px-3 py-2 pr-10 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500" 
-                placeholder="Enter vessel name..."
+            <div class="flex gap-2">
+              <input
+                x-model="vesselQuery"
+                @keyup.enter="searchVessel(1)"
+                class="w-full border border-gray-300 rounded-lg px-3 py-2 focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500"
+                placeholder="Enter vessel name…"
                 :disabled="searchLoading"
               />
-              <button 
-                @click="searchVessel"
-                :disabled="searchLoading"
-                class="absolute right-1 top-1 p-1.5 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 disabled:opacity-50">
-                <svg x-show="!searchLoading" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
-                </svg>
-                <svg x-show="searchLoading" class="w-5 h-5 animate-spin" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-                </svg>
+              <button
+                @click="searchVessel(1)"
+                :disabled="searchLoading || !vesselQuery.trim()"
+                class="px-3 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                <span x-show="!searchLoading">Search</span>
+                <span x-show="searchLoading" class="inline-flex items-center">
+                  <svg class="w-5 h-5 animate-spin mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5m0 0H9m7 11v-5m0 0h5M9 20a8 8 0 108-8"></path>
+                  </svg>
+                  Loading
+                </span>
               </button>
             </div>
-            
+
+            <!-- Results -->
             <div x-show="vesselResults.length > 0" class="max-h-60 overflow-y-auto space-y-2">
-              <template x-for="vessel in vesselResults" :key="vessel.VesselID || vessel.vesselid">
-                <button 
-                  @click="selectVessel(vessel)"
+              <template x-for="v in vesselResults" :key="v.VesselID || v.vesselid || (v.VesselName || v.vesselname)">
+                <button
+                  @click="selectVessel(v)"
                   class="w-full text-left border border-gray-200 rounded-lg px-3 py-2 hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
-                  <div class="font-medium" x-text="vessel.VesselName || vessel.vesselname || '(unnamed)'"></div>
+                  <div class="font-medium" x-text="v.VesselName || v.vesselname || '(unnamed)'"></div>
                   <div class="text-xs text-gray-500">
-                    <span x-text="`${vessel.CallSign || vessel.callsign || '—'}`"></span> • 
-                    <span x-text="`${vessel.Flag || vessel.flag || '—'}`"></span> •
-                    <span x-text="`${vessel.VesselType || vessel.vesseltype || 'Unknown type'}`"></span>
+                    <span x-text="v.CallSign || v.callsign || '—'"></span> •
+                    <span x-text="v.Flag || v.flag || '—'"></span> •
+                    <span x-text="v.VesselType || v.vesseltype || '—'"></span>
                   </div>
                 </button>
               </template>
             </div>
-            
+
+            <!-- Empty / Error -->
+            <div x-show="!searchLoading && vesselResults.length === 0 && vesselSearched" class="text-sm text-gray-500">
+              No vessels found.
+            </div>
             <div x-show="searchError" class="text-sm text-red-600" x-text="searchError"></div>
+
+            <!-- Summary -->
+            <div x-show="vesselTotal > 0" class="text-xs text-gray-500">
+              Showing <span x-text="vesselStart"></span>–<span x-text="vesselEnd"></span> of
+              <span x-text="vesselTotal"></span>
+            </div>
+
+            <!-- Pagination -->
+            <div x-show="vesselPages > 1" class="flex items-center gap-2">
+              <button @click="prevVesselPage" :disabled="vesselPage <= 1"
+                      class="px-2 py-1 border rounded disabled:opacity-50">Prev</button>
+
+              <!-- First -->
+              <template x-if="vesselPage > 3">
+                <button @click="goToVesselPage(1)" class="px-2 py-1 border rounded hover:bg-gray-100">1</button>
+              </template>
+              <template x-if="vesselPage > 4">
+                <span class="px-1 text-gray-500">…</span>
+              </template>
+
+              <!-- Window around current -->
+              <template x-for="p in pageWindow()" :key="p">
+                <button
+                  @click="goToVesselPage(p)"
+                  class="px-2 py-1 border rounded"
+                  :class="p === vesselPage ? 'bg-indigo-600 text-white border-indigo-600' : 'hover:bg-gray-100'"
+                  x-text="p"></button>
+              </template>
+
+              <!-- Last -->
+              <template x-if="vesselPage < vesselPages - 3">
+                <span class="px-1 text-gray-500">…</span>
+              </template>
+              <template x-if="vesselPage < vesselPages - 2">
+                <button @click="goToVesselPage(vesselPages)"
+                        class="px-2 py-1 border rounded hover:bg-gray-100" x-text="vesselPages"></button>
+              </template>
+
+              <button @click="nextVesselPage" :disabled="vesselPage >= vesselPages"
+                      class="px-2 py-1 border rounded disabled:opacity-50">Next</button>
+            </div>
           </div>
         </div>
 
-        <!-- Selected Vessel Card -->
+        <!-- Selected Vessel -->
         <div x-show="selectedVessel" class="glass rounded-2xl shadow-lg p-5 animate-slide-up">
           <h3 class="text-lg font-semibold mb-3">Selected Vessel</h3>
           <div class="space-y-2 text-sm">
@@ -118,31 +153,29 @@
             <div><span class="text-gray-500">Flag:</span> <span x-text="selectedVessel?.Flag || selectedVessel?.flag || '—'"></span></div>
             <div><span class="text-gray-500">Type:</span> <span x-text="selectedVessel?.VesselType || selectedVessel?.vesseltype || '—'"></span></div>
             <div x-show="selectedVessel?.GrossTonnage || selectedVessel?.grosstonnage">
-              <span class="text-gray-500">Gross Tonnage:</span> 
+              <span class="text-gray-500">Gross Tonnage:</span>
               <span x-text="selectedVessel?.GrossTonnage || selectedVessel?.grosstonnage"></span>
             </div>
           </div>
         </div>
 
-        <!-- Port Selection Card -->
+        <!-- Port & ETA -->
         <div class="glass rounded-2xl shadow-lg p-5">
           <h3 class="text-lg font-semibold mb-3">Port & ETA</h3>
           <div class="space-y-3">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Port</label>
               <select x-model="selectedPort" @change="loadLiveData" class="w-full border border-gray-300 rounded-lg px-3 py-2">
-                <option value="">Select a port...</option>
-                <template x-for="port in ports" :key="port.code">
-                  <option :value="port.code" x-text="`${port.name} (${port.state || port.country})`"></option>
+                <option value="">Select a port…</option>
+                <template x-for="p in ports" :key="p.code">
+                  <option :value="p.code" x-text="`${p.name} (${p.state || p.country})`"></option>
                 </template>
               </select>
             </div>
-            
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">ETA</label>
               <input x-model="eta" type="date" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
             </div>
-            
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Arrival Type</label>
               <select x-model="arrivalType" class="w-full border border-gray-300 rounded-lg px-3 py-2">
@@ -150,56 +183,46 @@
                 <option value="COASTWISE">COASTWISE</option>
               </select>
             </div>
-            
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Net Tonnage</label>
               <input x-model="netTonnage" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Optional" />
             </div>
-            
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">YTD CBP Paid</label>
               <input x-model="ytdCbpPaid" type="number" step="0.01" class="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="0.00" />
             </div>
           </div>
-          
-          <button 
+          <button
             @click="getEstimate"
             :disabled="!selectedPort || !eta || estimateLoading"
-            class="w-full mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed font-medium">
+            class="w-full mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
             <span x-show="!estimateLoading">Calculate Estimate</span>
-            <span x-show="estimateLoading">Calculating...</span>
+            <span x-show="estimateLoading">Calculating…</span>
           </button>
         </div>
       </div>
 
-      <!-- Right Column: Results & Live Data -->
+      <!-- Right Column -->
       <div class="lg:col-span-2 space-y-4">
-        
+
         <!-- Alerts -->
-        <div x-show="liveData?.alerts && liveData.alerts.length > 0" class="bg-amber-50 border-l-4 border-amber-400 rounded-lg p-4 animate-slide-up">
+        <div x-show="liveData?.alerts && liveData.alerts.length" class="bg-amber-50 border-l-4 border-amber-400 rounded-lg p-4 animate-slide-up">
           <h4 class="font-semibold text-amber-800 mb-2">⚠️ Compliance Alerts</h4>
           <ul class="text-sm text-amber-700 space-y-1">
-            <template x-for="alert in liveData.alerts" :key="alert">
-              <li x-text="alert"></li>
-            </template>
+            <template x-for="a in liveData.alerts" :key="a"><li x-text="a"></li></template>
           </ul>
         </div>
 
-        <!-- Fee Estimate -->
+        <!-- Estimate -->
         <div x-show="estimate" class="glass rounded-2xl shadow-lg p-6 animate-slide-up">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-xl font-semibold">Fee Estimate</h3>
             <div class="flex gap-2">
-              <button @click="exportEstimate('csv')" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">
-                Export CSV
-              </button>
-              <button @click="exportEstimate('json')" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">
-                Export JSON
-              </button>
+              <button @click="exportEstimate('csv')" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">Export CSV</button>
+              <button @click="exportEstimate('json')" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">Export JSON</button>
             </div>
           </div>
-          
-          <!-- Mandatory Fees -->
+
           <div class="overflow-x-auto">
             <table class="min-w-full">
               <thead class="bg-gray-50">
@@ -227,18 +250,14 @@
               </tfoot>
             </table>
           </div>
-          
-          <!-- Optional Services -->
-          <div x-show="estimate.optional_services && estimate.optional_services.length > 0" class="mt-4 pt-4 border-t">
+
+          <div x-show="estimate.optional_services?.length" class="mt-4 pt-4 border-t">
             <h4 class="font-semibold mb-2">Optional Services (Estimates)</h4>
             <div class="space-y-2">
-              <template x-for="service in estimate.optional_services" :key="service.service">
+              <template x-for="s in estimate.optional_services" :key="s.service">
                 <div class="flex justify-between text-sm">
-                  <span>
-                    <span x-text="service.service"></span>
-                    <span class="text-xs text-gray-500" x-text="`(${service.note})`"></span>
-                  </span>
-                  <span class="font-mono" x-text="`$${service.estimated_low.toLocaleString()} - $${service.estimated_high.toLocaleString()}`"></span>
+                  <span><span x-text="s.service"></span> <span class="text-xs text-gray-500" x-text="`(${s.note})`"></span></span>
+                  <span class="font-mono" x-text="`$${s.estimated_low.toLocaleString()} - $${s.estimated_high.toLocaleString()}`"></span>
                 </div>
               </template>
             </div>
@@ -247,81 +266,54 @@
               <span x-text="`$${estimate.total_with_optional_low} - $${estimate.total_with_optional_high}`"></span>
             </div>
           </div>
-          
+
           <p class="text-xs text-gray-500 mt-4" x-text="estimate.disclaimer"></p>
         </div>
 
         <!-- Live Data Tabs -->
         <div x-show="liveData" class="glass rounded-2xl shadow-lg p-6 animate-slide-up">
           <h3 class="text-xl font-semibold mb-4">Live Verification & References</h3>
-          
+
           <div class="border-b border-gray-200">
             <nav class="flex space-x-6">
-              <button 
-                @click="activeTab = 'documents'"
-                :class="activeTab === 'documents' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'"
-                class="pb-2 font-medium text-sm">
-                Documents
-              </button>
-              <button 
-                @click="activeTab = 'pilotage'"
-                :class="activeTab === 'pilotage' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'"
-                class="pb-2 font-medium text-sm">
-                Pilotage
-              </button>
-              <button 
-                @click="activeTab = 'marine_exchange'"
-                :class="activeTab === 'marine_exchange' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'"
-                class="pb-2 font-medium text-sm">
-                Marine Exchange
-              </button>
-              <button 
-                @click="activeTab = 'cofr'"
-                :class="activeTab === 'cofr' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'"
-                class="pb-2 font-medium text-sm">
-                COFR
-              </button>
-              <button 
-                x-show="liveData.misp && Object.keys(liveData.misp).length > 0"
-                @click="activeTab = 'misp'"
-                :class="activeTab === 'misp' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'"
-                class="pb-2 font-medium text-sm">
-                CA MISP
-              </button>
+              <button @click="activeTab='documents'" :class="activeTab==='documents' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">Documents</button>
+              <button @click="activeTab='pilotage'"  :class="activeTab==='pilotage'  ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">Pilotage</button>
+              <button @click="activeTab='marine_exchange'" :class="activeTab==='marine_exchange' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">Marine Exchange</button>
+              <button @click="activeTab='cofr'" :class="activeTab==='cofr' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">COFR</button>
+              <button x-show="liveData.misp && Object.keys(liveData.misp).length" @click="activeTab='misp'"
+                :class="activeTab==='misp' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">CA MISP</button>
             </nav>
           </div>
-          
+
           <div class="mt-4">
-            <!-- Documents Tab -->
-            <div x-show="activeTab === 'documents'" class="space-y-3">
-              <template x-for="doc in liveData.documents" :key="doc.name">
+            <!-- Documents -->
+            <div x-show="activeTab==='documents'" class="space-y-3">
+              <template x-for="d in liveData.documents" :key="d.name">
                 <div class="border-l-4 border-blue-400 pl-3 py-2">
-                  <div class="font-medium" x-text="doc.name"></div>
+                  <div class="font-medium" x-text="d.name"></div>
                   <div class="text-sm text-gray-600">
-                    <span x-show="doc.expires_on">Expires: <span x-text="doc.expires_on"></span></span>
-                    <span x-show="doc.status" class="ml-3">Status: <span x-text="doc.status"></span></span>
-                    <span class="ml-3 text-xs">Source: <span x-text="doc.source"></span></span>
+                    <span x-show="d.expires_on">Expires: <span x-text="d.expires_on"></span></span>
+                    <span x-show="d.status" class="ml-3">Status: <span x-text="d.status"></span></span>
+                    <span class="ml-3 text-xs">Source: <span x-text="d.source"></span></span>
                   </div>
                 </div>
               </template>
-              <div x-show="!liveData.documents || liveData.documents.length === 0" class="text-gray-500">
-                No documents found in PSIX
-              </div>
+              <div x-show="!liveData.documents?.length" class="text-gray-500">No documents found in PSIX</div>
             </div>
-            
-            <!-- Pilotage Tab -->
-            <div x-show="activeTab === 'pilotage'" class="space-y-3">
+
+            <!-- Pilotage -->
+            <div x-show="activeTab==='pilotage'" class="space-y-3">
               <template x-for="(pilot, key) in liveData.pilotage" :key="key">
                 <div class="border rounded-lg p-3">
                   <div class="font-medium" x-text="pilot.provider || pilot.title"></div>
                   <a :href="pilot.url" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline" x-text="pilot.url"></a>
                   <div class="text-sm text-gray-600 mt-2">
-                    <span x-show="pilot.vhf_channel">VHF: Channel <span x-text="pilot.vhf_channel"></span></span>
+                    <span x-show="pilot.vhf_channel">VHF: Ch <span x-text="pilot.vhf_channel"></span></span>
                     <span x-show="pilot.boarding_grounds" class="ml-3">Boarding: <span x-text="pilot.boarding_grounds"></span></span>
                     <span x-show="pilot.max_draft" class="ml-3">Max Draft: <span x-text="pilot.max_draft"></span></span>
                   </div>
-                  <div x-show="pilot.pdf_links && pilot.pdf_links.length > 0" class="mt-2">
-                    <span class="text-xs text-gray-500">PDF Resources:</span>
+                  <div x-show="pilot.pdf_links?.length" class="mt-2">
+                    <span class="text-xs text-gray-500">PDFs:</span>
                     <template x-for="pdf in pilot.pdf_links" :key="pdf">
                       <a :href="pdf" target="_blank" class="text-xs text-indigo-600 hover:text-indigo-800 underline ml-2" x-text="pdf.split('/').pop()"></a>
                     </template>
@@ -329,9 +321,9 @@
                 </div>
               </template>
             </div>
-            
-            <!-- Marine Exchange Tab -->
-            <div x-show="activeTab === 'marine_exchange'" class="space-y-3">
+
+            <!-- Marine Exchange -->
+            <div x-show="activeTab==='marine_exchange'" class="space-y-3">
               <template x-for="(mx, key) in liveData.marine_exchange" :key="key">
                 <div class="border rounded-lg p-3">
                   <div class="font-medium" x-text="mx.provider || mx.title"></div>
@@ -340,23 +332,19 @@
                 </div>
               </template>
             </div>
-            
-            <!-- COFR Tab -->
-            <div x-show="activeTab === 'cofr'" class="space-y-3">
+
+            <!-- COFR -->
+            <div x-show="activeTab==='cofr'" class="space-y-3">
               <div class="border rounded-lg p-3">
                 <div class="font-medium">Certificate of Financial Responsibility</div>
-                <a :href="liveData.cofr?.entrypoint" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline">
-                  COFR Vessel Search
-                </a>
-                <div x-show="liveData.cofr?.search_guidance" class="mt-2 text-sm text-gray-600">
+                <a :href="liveData.cofr?.entrypoint" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline">COFR Vessel Search</a>
+                <div x-show="liveData.cofr?.search_guidance?.length" class="mt-2 text-sm text-gray-600">
                   <div class="font-medium">Search Guidance:</div>
                   <ul class="list-disc list-inside">
-                    <template x-for="guide in liveData.cofr.search_guidance" :key="guide">
-                      <li x-text="guide"></li>
-                    </template>
+                    <template x-for="g in liveData.cofr.search_guidance" :key="g"><li x-text="g"></li></template>
                   </ul>
                 </div>
-                <div x-show="liveData.cofr?.requirements" class="mt-2 text-sm text-gray-600">
+                <div class="mt-2 text-sm text-gray-600">
                   <div class="font-medium">Requirements:</div>
                   <ul class="list-disc list-inside">
                     <li>Tankers over 300 GT: Required</li>
@@ -365,26 +353,24 @@
                 </div>
               </div>
             </div>
-            
-            <!-- MISP Tab -->
-            <div x-show="activeTab === 'misp'" class="space-y-3">
+
+            <!-- MISP -->
+            <div x-show="activeTab==='misp'" class="space-y-3">
               <div class="border rounded-lg p-3">
                 <div class="font-medium" x-text="liveData.misp?.program"></div>
                 <div class="text-sm text-gray-600 mt-2">
                   <div>Current Fee: <span class="font-mono" x-text="liveData.misp?.current_fee"></span></div>
-                  <div x-show="liveData.misp?.exemptions" class="mt-2">
+                  <div x-show="liveData.misp?.exemptions?.length" class="mt-2">
                     Exemptions:
                     <ul class="list-disc list-inside">
-                      <template x-for="exempt in liveData.misp.exemptions" :key="exempt">
-                        <li x-text="exempt"></li>
-                      </template>
+                      <template x-for="ex in liveData.misp.exemptions" :key="ex"><li x-text="ex"></li></template>
                     </ul>
                   </div>
                 </div>
-                <div x-show="liveData.misp?.pages" class="mt-3">
+                <div x-show="liveData.misp?.pages?.length" class="mt-3">
                   <div class="text-xs text-gray-500">Resources:</div>
-                  <template x-for="page in liveData.misp.pages" :key="page.url">
-                    <a :href="page.url" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline block" x-text="page.title || page.url"></a>
+                  <template x-for="pg in liveData.misp.pages" :key="pg.url">
+                    <a :href="pg.url" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline block" x-text="pg.title || pg.url"></a>
                   </template>
                 </div>
               </div>
@@ -394,31 +380,37 @@
 
         <!-- Quick Actions -->
         <div class="flex gap-2 justify-end">
-          <button @click="refreshAll" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">
-            Refresh All Data
-          </button>
-          <button @click="clearCache" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">
-            Clear Cache
-          </button>
+          <button @click="refreshAll" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">Refresh All Data</button>
+          <button @click="clearCache" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">Clear Cache</button>
         </div>
       </div>
     </div>
 
-    <!-- Footer -->
     <footer class="mt-12 pt-8 border-t border-gray-200 text-center text-sm text-gray-500">
-      <p>Maritime MVP v0.2.0 | Data sources: USCG PSIX, CBP, APHIS, California SLC</p>
-      <p class="mt-1">Estimates for reference only. Verify with official sources.</p>
+      <p>Maritime MVP v0.2.x | Data sources: USCG PSIX, CBP, APHIS, CA SLC</p>
+      <p class="mt-1">Estimates are for reference only. Verify with official sources.</p>
     </footer>
   </div>
 
   <script>
     function portCallApp() {
       return {
-        // State
-        apiStatus: 'Checking...',
+        // status
+        apiStatus: 'Checking…',
         cacheStats: '',
+        // search & paging
         vesselQuery: '',
+        vesselSearched: false,
+        searchLoading: false,
+        searchError: null,
         vesselResults: [],
+        vesselPage: 1,
+        vesselLimit: 25,
+        vesselPages: 1,
+        vesselTotal: 0,
+        vesselStart: 0,
+        vesselEnd: 0,
+        // selection & forms
         selectedVessel: null,
         ports: [],
         selectedPort: '',
@@ -427,105 +419,118 @@
         netTonnage: '',
         ytdCbpPaid: '0',
         estimate: null,
+        estimateLoading: false,
         liveData: null,
         activeTab: 'documents',
-        searchLoading: false,
-        estimateLoading: false,
-        searchError: null,
-        
-        // Initialize
+
         async init() {
           await this.checkHealth();
           await this.loadPorts();
         },
-        
-        // Check API health
+
         async checkHealth() {
           try {
             const r = await fetch(`${API_BASE}/health`);
-            const data = await r.json();
-            this.apiStatus = data.ok ? 'Online' : 'Offline';
-            if (data.cache_stats) {
-              this.cacheStats = `${data.cache_stats.active_entries} cached`;
-            }
+            const d = await r.json();
+            this.apiStatus = d.ok ? 'Online' : 'Offline';
+            this.cacheStats = d.cache_stats ? `${d.cache_stats.active_entries} cached` : '';
           } catch (e) {
             this.apiStatus = 'Error';
-            console.error('Health check failed:', e);
+            console.error('Health failed:', e);
           }
         },
-        
-        // Load ports
+
         async loadPorts() {
           try {
             const r = await fetch(`${API_BASE}/ports`);
             this.ports = await r.json();
           } catch (e) {
-            console.error('Failed to load ports:', e);
+            console.error('Ports load failed:', e);
           }
         },
-        
-        // Search vessels
-        async searchVessel() {
+
+        // --- Vessel search with pagination ---
+        async searchVessel(page = 1) {
           if (!this.vesselQuery.trim()) return;
-          
+          this.vesselSearched = true;
           this.searchLoading = true;
           this.searchError = null;
-          this.vesselResults = [];
-          
+
+          this.vesselPage = page;
+
           try {
-            const r = await fetch(`${API_BASE}/vessels/search?name=${encodeURIComponent(this.vesselQuery)}`);
+            const params = new URLSearchParams({
+              name: this.vesselQuery,
+              page: String(this.vesselPage),
+              limit: String(this.vesselLimit),
+            });
+            const r = await fetch(`${API_BASE}/vessels/search?${params}`);
             if (!r.ok) throw new Error('Search failed');
-            
             const data = await r.json();
-            this.vesselResults = data.Table || [];
-            
-            if (this.vesselResults.length === 0) {
-              this.searchError = 'No vessels found';
+
+            // Fallbacks if backend not yet paginated
+            const rows = data.Table || [];
+            this.vesselResults = rows;
+            this.vesselTotal = data.total ?? rows.length;
+            this.vesselPages = data.pages ?? Math.max(Math.ceil(rows.length / this.vesselLimit), 1);
+
+            // If backend not paginated, slice locally
+            if (data.total == null) {
+              const start = (this.vesselPage - 1) * this.vesselLimit;
+              const end = start + this.vesselLimit;
+              this.vesselResults = rows.slice(start, end);
             }
+
+            // Range (human)
+            const startIdx = (this.vesselPage - 1) * this.vesselLimit;
+            this.vesselStart = this.vesselTotal ? startIdx + 1 : 0;
+            this.vesselEnd = Math.min(startIdx + this.vesselResults.length, this.vesselTotal);
+
+            if (this.vesselResults.length === 0) this.searchError = 'No vessels found';
           } catch (e) {
-            this.searchError = e.message;
+            this.searchError = e.message || 'Search failed';
             console.error('Vessel search failed:', e);
           } finally {
             this.searchLoading = false;
           }
         },
-        
-        // Select vessel
-        selectVessel(vessel) {
-          this.selectedVessel = vessel;
-          this.vesselResults = [];
-          if (this.selectedPort) {
-            this.loadLiveData();
-          }
+
+        prevVesselPage() { if (this.vesselPage > 1) this.searchVessel(this.vesselPage - 1); },
+        nextVesselPage() { if (this.vesselPage < this.vesselPages) this.searchVessel(this.vesselPage + 1); },
+        goToVesselPage(p) { if (p >= 1 && p <= this.vesselPages) this.searchVessel(p); },
+        pageWindow() {
+          const win = 2; // current ±2
+          const start = Math.max(1, this.vesselPage - win);
+          const end = Math.min(this.vesselPages, this.vesselPage + win);
+          const arr = [];
+          for (let i = start; i <= end; i++) arr.push(i);
+          return arr;
         },
-        
-        // Get estimate
+
+        selectVessel(v) {
+          this.selectedVessel = v;
+          if (this.selectedPort) this.loadLiveData();
+        },
+
         async getEstimate() {
           if (!this.selectedPort || !this.eta) return;
-          
           this.estimateLoading = true;
           this.estimate = null;
-          
+
           const params = new URLSearchParams({
             port_code: this.selectedPort,
             eta: this.eta,
             arrival_type: this.arrivalType,
             include_optional: 'true'
           });
-          
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
-          
+
           try {
             const r = await fetch(`${API_BASE}/estimate?${params}`);
             if (!r.ok) throw new Error('Estimate failed');
-            
             this.estimate = await r.json();
-            
-            // Also load live data if we have a vessel
-            if (this.selectedVessel) {
-              await this.loadLiveData();
-            }
+            if (this.selectedVessel) await this.loadLiveData();
           } catch (e) {
             console.error('Estimate failed:', e);
             alert('Failed to calculate estimate: ' + e.message);
@@ -533,46 +538,39 @@
             this.estimateLoading = false;
           }
         },
-        
-        // Load live data
+
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
-          
+
           const params = new URLSearchParams({
             vessel_name: this.selectedVessel.VesselName || this.selectedVessel.vesselname || '',
             port_code: this.selectedPort
           });
-          
-          if (this.selectedVessel.VesselID || this.selectedVessel.vesselid) {
-            params.set('vessel_id', this.selectedVessel.VesselID || this.selectedVessel.vesselid);
-          }
-          
+          const vid = this.selectedVessel.VesselID || this.selectedVessel.vesselid;
+          if (vid) params.set('vessel_id', vid);
+
           try {
             const r = await fetch(`${API_BASE}/live/portbundle?${params}`);
             if (!r.ok) throw new Error('Live data failed');
-            
             this.liveData = await r.json();
           } catch (e) {
             console.error('Live data failed:', e);
           }
         },
-        
-        // Export estimate
+
         async exportEstimate(format) {
           if (!this.estimate) return;
-          
           const params = new URLSearchParams({
             port_code: this.selectedPort,
             eta: this.eta,
             arrival_type: this.arrivalType,
-            format: format
+            format
           });
-          
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
-          
+
           const url = `${API_BASE}/estimate/export?${params}`;
-          
+
           if (format === 'csv') {
             window.open(url, '_blank');
           } else {
@@ -589,16 +587,12 @@
             }
           }
         },
-        
-        // Refresh all data
+
         async refreshAll() {
           await this.checkHealth();
-          if (this.selectedPort && this.eta) {
-            await this.getEstimate();
-          }
+          if (this.selectedPort && this.eta) await this.getEstimate();
         },
-        
-        // Clear cache
+
         async clearCache() {
           try {
             const r = await fetch(`${API_BASE}/admin/cache/clear`, { method: 'POST' });
@@ -615,3 +609,4 @@
   </script>
 </body>
 </html>
+```
