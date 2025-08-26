@@ -231,14 +231,18 @@ if frontend_dir:
 
 # ----- Startup -----
 @app.on_event("startup")
-def _startup() -> None:
-    ok = init_db(safe=True)
-    if ok:
+def _startup():
+    """Initialize database on startup."""
+    try:
+        init_db()  # ← removed safe=True to match current db.init_db signature
         logger.info("Startup complete, DB initialized.")
-    else:
-        logger.warning("Startup complete, but DB init failed (see logs).")
+    except Exception:
+        # Preserve the previous 'safe=True' behavior: log and keep booting.
+        logger.exception("DB init failed during startup; continuing without blocking app.")
     if frontend_dir:
         logger.info("Frontend available at /app")
+    else:
+        logger.warning("Frontend not mounted - directory not found")
 
 # ----- Root & Frontend -----
 @app.get("/", include_in_schema=False, response_class=HTMLResponse, response_model=None)
