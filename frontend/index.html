@@ -76,7 +76,7 @@
 
             <!-- Results -->
             <div x-show="vesselResults.length > 0" class="max-h-60 overflow-y-auto space-y-2">
-              <template x-for="v in vesselResults" :key="v.VesselID || v.vesselid || (v.VesselName || v.vesselname)">
+              <template x-for="(v, idx) in vesselResults" :key="v.VesselID ?? v.vesselid ?? idx">
                 <button
                   @click="selectVessel(v)"
                   class="w-full text-left border border-gray-200 rounded-lg px-3 py-2 hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
@@ -393,6 +393,7 @@
         // status
         apiStatus: 'Checking…',
         cacheStats: '',
+  
         // search & paging
         vesselQuery: '',
         vesselSearched: false,
@@ -405,6 +406,7 @@
         vesselTotal: 0,
         vesselStart: 0,
         vesselEnd: 0,
+  
         // selection & forms
         selectedVessel: null,
         ports: [],
@@ -417,12 +419,12 @@
         estimateLoading: false,
         liveData: null,
         activeTab: 'documents',
-
+  
         async init() {
           await this.checkHealth();
           await this.loadPorts();
         },
-
+  
         async checkHealth() {
           try {
             const r = await fetch(`${API_BASE}/health`);
@@ -434,7 +436,7 @@
             console.error('Health failed:', e);
           }
         },
-
+  
         async loadPorts() {
           try {
             const r = await fetch(`${API_BASE}/ports`);
@@ -443,44 +445,57 @@
             console.error('Ports load failed:', e);
           }
         },
-
-        // --- Vessel search with pagination ---
+  
+        // --- Vessel search with client-side pagination ---
         async searchVessel(page = 1) {
           if (!this.vesselQuery.trim()) return;
+  
           this.vesselSearched = true;
           this.searchLoading = true;
           this.searchError = null;
-
           this.vesselPage = page;
-
+  
           try {
             const params = new URLSearchParams({
               name: this.vesselQuery,
-              page: String(this.vesselPage),
-              limit: String(this.vesselLimit),
+              page: String(this.vesselPage),   // harmless if backend ignores
+              limit: String(this.vesselLimit), // harmless if backend ignores
             });
+  
             const r = await fetch(`${API_BASE}/vessels/search?${params}`);
             if (!r.ok) throw new Error('Search failed');
             const data = await r.json();
-
-            // Fallbacks if backend not yet paginated
-            const rows = data.Table || [];
-            this.vesselResults = rows;
-            this.vesselTotal = data.total ?? rows.length;
-            this.vesselPages = data.pages ?? Math.max(Math.ceil(rows.length / this.vesselLimit), 1);
-
-            // If backend not paginated, slice locally
+  
+            // Raw rows from API
+            const rows = Array.isArray(data.Table) ? data.Table : [];
+            console.debug('PSIX rows received:', rows.length);
+  
+            // Total rows: use server-provided total if present, else full length
+            this.vesselTotal = (typeof data.total === 'number') ? data.total : rows.length;
+  
+            // Pages: use server-provided pages if present, else compute
+            this.vesselPages = (typeof data.pages === 'number')
+              ? data.pages
+              : Math.max(Math.ceil(this.vesselTotal / this.vesselLimit), 1);
+  
+            // Slice locally when server doesn't paginate
             if (data.total == null) {
               const start = (this.vesselPage - 1) * this.vesselLimit;
               const end = start + this.vesselLimit;
               this.vesselResults = rows.slice(start, end);
+            } else {
+              // If the server paginated, assume it already returned the current page
+              this.vesselResults = rows;
             }
-
-            // Range (human)
+  
+            // Range (human-friendly)
             const startIdx = (this.vesselPage - 1) * this.vesselLimit;
             this.vesselStart = this.vesselTotal ? startIdx + 1 : 0;
             this.vesselEnd = Math.min(startIdx + this.vesselResults.length, this.vesselTotal);
-
+  
+            console.debug('Showing slice:', this.vesselResults.length, 'items. First item:',
+              this.vesselResults[0]?.VesselName || this.vesselResults[0]?.vesselname);
+  
             if (this.vesselResults.length === 0) this.searchError = 'No vessels found';
           } catch (e) {
             this.searchError = e.message || 'Search failed';
@@ -489,10 +504,16 @@
             this.searchLoading = false;
           }
         },
-
-        prevVesselPage() { if (this.vesselPage > 1) this.searchVessel(this.vesselPage - 1); },
-        nextVesselPage() { if (this.vesselPage < this.vesselPages) this.searchVessel(this.vesselPage + 1); },
-        goToVesselPage(p) { if (p >= 1 && p <= this.vesselPages) this.searchVessel(p); },
+  
+        prevVesselPage() {
+          if (this.vesselPage > 1) this.searchVessel(this.vesselPage - 1);
+        },
+        nextVesselPage() {
+          if (this.vesselPage < this.vesselPages) this.searchVessel(this.vesselPage + 1);
+        },
+        goToVesselPage(p) {
+          if (p >= 1 && p <= this.vesselPages) this.searchVessel(p);
+        },
         pageWindow() {
           const win = 2; // current ±2
           const start = Math.max(1, this.vesselPage - win);
@@ -501,17 +522,17 @@
           for (let i = start; i <= end; i++) arr.push(i);
           return arr;
         },
-
+  
         selectVessel(v) {
           this.selectedVessel = v;
           if (this.selectedPort) this.loadLiveData();
         },
-
+  
         async getEstimate() {
           if (!this.selectedPort || !this.eta) return;
           this.estimateLoading = true;
           this.estimate = null;
-
+  
           const params = new URLSearchParams({
             port_code: this.selectedPort,
             eta: this.eta,
@@ -520,7 +541,7 @@
           });
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
-
+  
           try {
             const r = await fetch(`${API_BASE}/estimate?${params}`);
             if (!r.ok) throw new Error('Estimate failed');
@@ -533,17 +554,17 @@
             this.estimateLoading = false;
           }
         },
-
+  
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
-
+  
           const params = new URLSearchParams({
             vessel_name: this.selectedVessel.VesselName || this.selectedVessel.vesselname || '',
             port_code: this.selectedPort
           });
           const vid = this.selectedVessel.VesselID || this.selectedVessel.vesselid;
           if (vid) params.set('vessel_id', vid);
-
+  
           try {
             const r = await fetch(`${API_BASE}/live/portbundle?${params}`);
             if (!r.ok) throw new Error('Live data failed');
@@ -552,7 +573,7 @@
             console.error('Live data failed:', e);
           }
         },
-
+  
         async exportEstimate(format) {
           if (!this.estimate) return;
           const params = new URLSearchParams({
@@ -563,9 +584,9 @@
           });
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
-
+  
           const url = `${API_BASE}/estimate/export?${params}`;
-
+  
           if (format === 'csv') {
             window.open(url, '_blank');
           } else {
@@ -582,12 +603,12 @@
             }
           }
         },
-
+  
         async refreshAll() {
           await this.checkHealth();
           if (this.selectedPort && this.eta) await this.getEstimate();
         },
-
+  
         async clearCache() {
           try {
             const r = await fetch(`${API_BASE}/admin/cache/clear`, { method: 'POST' });
@@ -602,5 +623,6 @@
       }
     }
   </script>
+
 </body>
 </html>
