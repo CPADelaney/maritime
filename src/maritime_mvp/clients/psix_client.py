@@ -1,12 +1,13 @@
 # src/maritime_mvp/clients/psix_client.py
 """
 PSIX client – robust parser (diffgram/NewDataSet, escaped XML, Table/Table1, etc.)
+Parses ALL columns from each row and normalizes common display fields.
 """
 from __future__ import annotations
 import os, re, html as _html, logging, requests, warnings
 from typing import Any, Dict, List, Optional
 
-from lxml import etree as LET  # lxml is already in your requirements
+from lxml import etree as LET  # lxml is already in requirements
 
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 logger = logging.getLogger(__name__)
@@ -15,16 +16,10 @@ PSIX_URL = os.getenv("PSIX_URL", "https://cgmix.uscg.mil/xml/PSIXData.asmx")
 VERIFY_SSL = os.getenv("PSIX_VERIFY_SSL", "false").lower() in ("1", "true", "yes", "y")
 TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 
-FIELDS = [
-    "VesselID","VesselName","CallSign","IMONumber","OfficialNumber","Flag",
-    "VesselType","GrossTonnage","NetTonnage","DeadWeight","YearBuilt","Builder",
-    "HullMaterial","PropulsionType","DocumentationExpirationDate","COIExpirationDate",
-    "Owner","Operator","ManagingOwner"
-]
-
 def _ln(tag: str) -> str:
     """local-name() helper for XPath fragments"""
-    return f'local-name()="{tag}"'
+    return f"local-name()='{tag}'"
+
 
 class PsixClient:
     def __init__(self, url: str | None = None, verify_ssl: bool | None = None, timeout: int | None = None):
@@ -40,6 +35,8 @@ class PsixClient:
         })
         logger.info(f"PSIX client initialized with URL: {self.url}")
 
+    # --------------------------- public API ---------------------------
+
     def get_vessel_summary(
         self,
         *,
@@ -52,10 +49,13 @@ class PsixClient:
         service: str = "",
         build_year: str = ""
     ) -> Dict[str, Any]:
-        # MUST send 0 when searching by anything other than a specific ID
+        """
+        Call getVesselSummary. IMPORTANT: when not looking up a specific ID,
+        send <VesselID>0</VesselID> or the service returns nothing.
+        """
         vid = vessel_id if vessel_id is not None else 0
 
-        # These two namespaces work in practice
+        # Known working namespaces for SOAPAction + body ns
         namespaces = ["https://cgmix.uscg.mil", "http://cgmix.uscg.mil"]
 
         for ns in namespaces:
@@ -82,14 +82,17 @@ class PsixClient:
                 resp = self.session.post(self.url, data=body, headers={"SOAPAction": soap_action}, timeout=self.timeout)
                 txt = resp.text
 
-                # Find the inner <getVesselSummaryResult> … </…>
-                m = re.search(r"<getVesselSummaryResult[^>]*>(.*?)</getVesselSummaryResult>",
-                              txt, re.IGNORECASE | re.DOTALL)
+                # Extract the inner result payload
+                m = re.search(
+                    r"<getVesselSummaryResult[^>]*>(.*?)</getVesselSummaryResult>",
+                    txt, re.IGNORECASE | re.DOTALL
+                )
                 if not m:
                     continue
 
                 payload = m.group(1)
-                # If it’s HTML-escaped XML (&lt;…&gt;), unescape it
+
+                # Unescape if the dataset is HTML-escaped
                 if "&lt;" in payload or "&amp;lt;" in payload:
                     payload = _html.unescape(payload)
 
@@ -98,7 +101,6 @@ class PsixClient:
                     logger.info(f"Got response with namespace: {ns} — parsed {len(rows)} vessels")
                     return {"Table": rows}
 
-                # No rows? log a short safe snippet so we can see structure
                 snippet = re.sub(r"\s+", " ", payload)[:400]
                 logger.debug(f"PSIX result had no rows. Decoded snippet: {snippet}")
 
@@ -108,19 +110,29 @@ class PsixClient:
         logger.warning(f"No results found for vessel_name={vessel_name!r} vessel_id={vessel_id!r}")
         return {"Table": []}
 
-    # ---------------- parsing ----------------
+    def search_by_name(self, name: str) -> Dict[str, Any]:
+        return self.get_vessel_summary(vessel_name=name)
+
+    def list_cases(self, vessel_id: int) -> Dict[str, Any]:
+        logger.warning("list_cases not implemented in HTTP client")
+        return {"Cases": []}
+
+    def list_deficiencies(self, vessel_id: int, activity_number: str) -> Dict[str, Any]:
+        logger.warning("list_deficiencies not implemented in HTTP client")
+        return {"Deficiencies": []}
+
+    # --------------------------- parsing ---------------------------
 
     def _extract_rows(self, xml_payload: str) -> List[Dict[str, Any]]:
         """
-        Accepts either:
-          - full diffgram/NewDataSet XML
-          - raw DataSet XML
-          - a fragment containing multiple <Table>, <Table1>, …
-        Returns a list of {field:value} dicts.
+        Accepts:
+          - diffgram/NewDataSet XML
+          - plain NewDataSet XML
+          - fragments with <Table>, <Table1>, ...
+        Returns a list of dicts with ALL fields per row + normalized display fields.
         """
         rows: List[Dict[str, Any]] = []
 
-        # Try to locate diffgram/NewDataSet fragment if the payload contains extra wrappers
         frag = self._slice_to_dataset(xml_payload)
 
         parser = LET.XMLParser(recover=True, huge_tree=True)
@@ -130,35 +142,103 @@ class PsixClient:
             # last resort: wrap with a dummy root
             root = LET.fromstring(f"<root>{frag}</root>".encode("utf-8"), parser=parser)
 
-        # Strategy A: rows under NewDataSet/* (often Table, Table1, …)
+        # Prefer rows under NewDataSet/* (Table, Table1, ...)
         dataset_nodes = root.xpath(".//*[local-name()='NewDataSet']") or [root]
         for ds in dataset_nodes:
             row_elems = ds.xpath(".//*[starts-with(local-name(), 'Table')]")
             if not row_elems:
-                # fallback: any element that looks like a record (has a VesselName child)
+                # fallback: any node that looks like a record (has a VesselName child)
                 row_elems = ds.xpath(f".//*[./*[{_ln('VesselName')}]]")
 
             for elem in row_elems:
-                rows.append(self._elem_to_record(elem))
+                rec = self._elem_to_record(elem)
+                if rec:
+                    self._normalize_row(rec)
+                    rows.append(rec)
 
-        # Strategy B: if still empty, scan entire tree for record-ish nodes
+        # Fallback: scan the whole tree for record-ish nodes
         if not rows:
             for elem in root.xpath(f".//*[./*[{_ln('VesselName')}]]"):
-                rows.append(self._elem_to_record(elem))
+                rec = self._elem_to_record(elem)
+                if rec:
+                    self._normalize_row(rec)
+                    rows.append(rec)
 
         # Keep only rows that at least have a name or id
         rows = [r for r in rows if r.get("VesselName") or r.get("VesselID")]
         return rows
 
     def _elem_to_record(self, elem: LET._Element) -> Dict[str, Any]:
+        """
+        Convert a <Table…> node into a flat dict of ALL child <Field> values.
+        """
         rec: Dict[str, Any] = {}
-        for f in FIELDS:
-            hit = elem.xpath(f".//*[local-name()='{f}']/text()")
-            if hit:
-                val = (hit[0] or "").strip()
-                if val and val.lower() != "none":
-                    rec[f] = val
+
+        # Prefer direct children as columns, but handle nested safely
+        for child in elem:
+            tag = self._local(child.tag)
+            if not tag:
+                continue
+            # pull all text inside child (covers typed/nested nodes)
+            val = "".join(child.itertext()).strip()
+            if not val or val.lower() == "none":
+                continue
+            # strip CDATA if present
+            if val.startswith("<![CDATA[") and val.endswith("]]>"):
+                val = val[9:-3]
+            rec[tag] = val
+
+        # If for some reason the row uses deeper nesting, add those too (without clobbering)
+        for sub in elem.xpath(".//*"):
+            tag = self._local(sub.tag)
+            if not tag or tag in rec:
+                continue
+            val = "".join(sub.itertext()).strip()
+            if val and val.lower() != "none":
+                rec[tag] = val
+
         return rec
+
+    def _normalize_row(self, rec: Dict[str, Any]) -> None:
+        """
+        Populate common display keys from PSIX's actual column names, if missing.
+        (We do not overwrite existing values.)
+        """
+        def first(*keys: str) -> Optional[str]:
+            for k in keys:
+                v = rec.get(k)
+                if v:
+                    return v
+            return None
+
+        # IDs & name
+        rec.setdefault("VesselID", first("VesselID", "VesselNumber", "ID", "id", "vesselid"))
+        rec.setdefault("VesselName", first("VesselName", "Name", "name", "vesselname", "Vessel_Name"))
+
+        # Display fields
+        rec.setdefault("CallSign", first("CallSign", "VesselCallSign", "RadioCallSign", "Call_Sign", "callsign", "radio_callsign"))
+        rec.setdefault("Flag", first(
+            "Flag", "CountryLookupName", "CountryOfRegistry", "FlagName",
+            "FlagOfRegistry", "FlagState", "FlagCountry", "Country", "FlagCode", "flag"
+        ))
+        rec.setdefault("VesselType", first(
+            "VesselType", "ServiceType", "VesselService", "VesselTypeDescription", "ShipType", "Type", "vesseltype"
+        ))
+        rec.setdefault("GrossTonnage", first("GrossTonnage", "GrossTons", "GT", "Gross_Tonnage", "grosstonnage", "GrossRegisteredTonnage"))
+        rec.setdefault("YearBuilt", first("YearBuilt", "ConstructionCompletedYear", "BuildYear", "YearOfBuild"))
+        rec.setdefault("Status", first("Status", "StatusLookupName", "VesselStatus"))
+
+        # Common identifiers (handy for the UI)
+        rec.setdefault("IMONumber", first("IMONumber", "IMO", "IMO_Number"))
+        rec.setdefault("OfficialNumber", first("OfficialNumber", "USOfficialNumber", "US_Official_Number"))
+        rec.setdefault("PrimaryIdentification", first("PrimaryIdentification", "OfficialNumber", "IMONumber"))
+
+    @staticmethod
+    def _local(tag: str) -> str:
+        """Strip XML namespace from a tag name."""
+        if not tag:
+            return ""
+        return re.sub(r"^\{.*\}", "", tag)
 
     def _slice_to_dataset(self, s: str) -> str:
         """
@@ -178,15 +258,3 @@ class PsixClient:
         if m:
             return f"<NewDataSet>{m.group(0)}</NewDataSet>"
         return s
-
-    # ------------- simple convenience -------------
-    def search_by_name(self, name: str) -> Dict[str, Any]:
-        return self.get_vessel_summary(vessel_name=name)
-
-    def list_cases(self, vessel_id: int) -> Dict[str, Any]:
-        logger.warning("list_cases not implemented in HTTP client")
-        return {"Cases": []}
-
-    def list_deficiencies(self, vessel_id: int, activity_number: str) -> Dict[str, Any]:
-        logger.warning("list_deficiencies not implemented in HTTP client")
-        return {"Deficiencies": []}
