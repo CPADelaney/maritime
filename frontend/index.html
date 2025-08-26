@@ -446,7 +446,51 @@
           }
         },
   
-        // --- Vessel search with client-side pagination ---
+        // Normalize/augment any vessel row so UI keys always exist
+        augmentVessel(v) {
+          const out = { ...v };
+  
+          // keep id canonical too
+          out.VesselID = out.VesselID ?? out.vesselid ?? out.ID ?? out.id ?? null;
+  
+          // Canonical display fields with common fallbacks
+          out.VesselName = out.VesselName ?? out.vesselname ?? out.Name ?? out.name ?? '(unnamed)';
+          out.CallSign =
+            out.CallSign ??
+            out.Call_Sign ??
+            out.RadioCallSign ??
+            out.callsign ??
+            out.radio_callsign ??
+            null;
+          out.Flag =
+            out.Flag ??
+            out.FlagName ??
+            out.FlagOfRegistry ??
+            out.FlagState ??
+            out.FlagCountry ??
+            out.FlagCode ??
+            out.flag ??
+            null;
+          out.VesselType =
+            out.VesselType ??
+            out.VesselTypeDescription ??
+            out.VesselService ??
+            out.Service ??
+            out.ShipType ??
+            out.vesseltype ??
+            null;
+          out.GrossTonnage =
+            out.GrossTonnage ??
+            out.GT ??
+            out.Gross_Tonnage ??
+            out.grosstonnage ??
+            out.GrossTons ??
+            null;
+  
+          return out;
+        },
+  
+        // --- Vessel search with client-side pagination + augmentation ---
         async searchVessel(page = 1) {
           if (!this.vesselQuery.trim()) return;
   
@@ -467,11 +511,14 @@
             const data = await r.json();
   
             // Raw rows from API
-            const rows = Array.isArray(data.Table) ? data.Table : [];
-            console.debug('PSIX rows received:', rows.length);
+            const raw = Array.isArray(data.Table) ? data.Table : [];
+            console.debug('PSIX rows received:', raw.length);
+  
+            // Augment rows so UI has stable keys
+            const augmented = raw.map(this.augmentVessel);
   
             // Total rows: use server-provided total if present, else full length
-            this.vesselTotal = (typeof data.total === 'number') ? data.total : rows.length;
+            this.vesselTotal = (typeof data.total === 'number') ? data.total : augmented.length;
   
             // Pages: use server-provided pages if present, else compute
             this.vesselPages = (typeof data.pages === 'number')
@@ -482,10 +529,10 @@
             if (data.total == null) {
               const start = (this.vesselPage - 1) * this.vesselLimit;
               const end = start + this.vesselLimit;
-              this.vesselResults = rows.slice(start, end);
+              this.vesselResults = augmented.slice(start, end);
             } else {
               // If the server paginated, assume it already returned the current page
-              this.vesselResults = rows;
+              this.vesselResults = augmented;
             }
   
             // Range (human-friendly)
@@ -493,8 +540,10 @@
             this.vesselStart = this.vesselTotal ? startIdx + 1 : 0;
             this.vesselEnd = Math.min(startIdx + this.vesselResults.length, this.vesselTotal);
   
-            console.debug('Showing slice:', this.vesselResults.length, 'items. First item:',
-              this.vesselResults[0]?.VesselName || this.vesselResults[0]?.vesselname);
+            console.debug(
+              'Showing slice:', this.vesselResults.length,
+              'First item:', this.vesselResults[0]?.VesselName
+            );
   
             if (this.vesselResults.length === 0) this.searchError = 'No vessels found';
           } catch (e) {
@@ -505,15 +554,9 @@
           }
         },
   
-        prevVesselPage() {
-          if (this.vesselPage > 1) this.searchVessel(this.vesselPage - 1);
-        },
-        nextVesselPage() {
-          if (this.vesselPage < this.vesselPages) this.searchVessel(this.vesselPage + 1);
-        },
-        goToVesselPage(p) {
-          if (p >= 1 && p <= this.vesselPages) this.searchVessel(p);
-        },
+        prevVesselPage() { if (this.vesselPage > 1) this.searchVessel(this.vesselPage - 1); },
+        nextVesselPage() { if (this.vesselPage < this.vesselPages) this.searchVessel(this.vesselPage + 1); },
+        goToVesselPage(p) { if (p >= 1 && p <= this.vesselPages) this.searchVessel(p); },
         pageWindow() {
           const win = 2; // current ±2
           const start = Math.max(1, this.vesselPage - win);
@@ -524,7 +567,8 @@
         },
   
         selectVessel(v) {
-          this.selectedVessel = v;
+          // Augment the selected one so your existing HTML bindings show values
+          this.selectedVessel = this.augmentVessel(v);
           if (this.selectedPort) this.loadLiveData();
         },
   
@@ -559,10 +603,10 @@
           if (!this.selectedVessel || !this.selectedPort) return;
   
           const params = new URLSearchParams({
-            vessel_name: this.selectedVessel.VesselName || this.selectedVessel.vesselname || '',
+            vessel_name: this.selectedVessel.VesselName || '',
             port_code: this.selectedPort
           });
-          const vid = this.selectedVessel.VesselID || this.selectedVessel.vesselid;
+          const vid = this.selectedVessel.VesselID;
           if (vid) params.set('vessel_id', vid);
   
           try {
@@ -612,7 +656,7 @@
         async clearCache() {
           try {
             const r = await fetch(`${API_BASE}/admin/cache/clear`, { method: 'POST' });
-            if (r.ok) {
+          if (r.ok) {
               await this.checkHealth();
               alert('Cache cleared successfully');
             }
@@ -623,6 +667,7 @@
       }
     }
   </script>
+
 
 </body>
 </html>
