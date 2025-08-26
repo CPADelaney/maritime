@@ -11,22 +11,24 @@ from fastapi.responses import RedirectResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 from zeep.helpers import serialize_object
+from sqlalchemy.engine.url import make_url
 
-from ..db import SessionLocal, init_db
+from ..db import SessionLocal, init_db, ping_db
 from ..rules.fee_engine import FeeEngine, EstimateContext
 from ..clients.psix_client import PsixClient
 from ..models import Port
+from ..settings import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("maritime-api")
 
-app = FastAPI(title="Maritime MVP API", version="0.1.3")
+app = FastAPI(title="Maritime MVP API", version="0.1.4")
 
-from sqlalchemy.engine.url import make_url
-from ..settings import settings
+# Log which DSN we think we’re using
 try:
     u = make_url(settings.sqlalchemy_url)
     logger.info("DB target → user=%s host=%s port=%s db=%s", u.username, u.host, u.port, u.database)
+    logger.info("DB config source → %s", "DATABASE_URL" if settings.database_url else "PGVARS")
 except Exception:
     logger.exception("Could not parse DB URL")
 
@@ -43,18 +45,41 @@ app.add_middleware(
 
 @app.on_event("startup")
 def _startup():
-    # Ensures tables exist; no-op if already created
-    init_db()
-    logger.info("Startup complete, DB initialized.")
+    # Do not fail startup if DB is unhappy; log only.
+    ok = init_db(safe=True)
+    if ok:
+        logger.info("Startup complete, DB initialized.")
+    else:
+        logger.warning("Startup complete, but DB init failed (see logs).")
+
 
 # Root → docs
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")
 
+
 @app.get("/health")
-def health() -> Dict[str, bool]:
-    return {"ok": True}
+def health() -> Dict[str, Any]:
+    info = ping_db()
+    return {"ok": True, "db_ok": info.get("connect_ok", False)}
+
+
+# ---------- DEBUG ENDPOINTS (remove later) ----------
+
+@app.get("/debug/db/info")
+def db_info() -> Dict[str, Any]:
+    """Show sanitized DSN details the app is using."""
+    return ping_db()
+
+
+@app.get("/debug/db/ping")
+def db_ping() -> Dict[str, Any]:
+    """Try to connect and return server identity or error."""
+    return ping_db()
+
+
+# ---------- APP ENDPOINTS ----------
 
 @app.get("/ports")
 def list_ports() -> List[Dict[str, Optional[str] | bool]]:
@@ -78,6 +103,7 @@ def list_ports() -> List[Dict[str, Optional[str] | bool]]:
     finally:
         db.close()
 
+
 @app.get("/vessels/search")
 def search_vessels(name: str) -> Any:
     client = PsixClient()
@@ -87,6 +113,7 @@ def search_vessels(name: str) -> Any:
     except Exception as e:
         logger.exception("PSIX search failed")
         raise HTTPException(status_code=502, detail=f"PSIX search failed: {e!s}")
+
 
 @app.get("/estimate")
 def estimate(
