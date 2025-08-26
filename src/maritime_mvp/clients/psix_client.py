@@ -1,3 +1,4 @@
+from __future__ import annotations
 import os
 import httpx
 from zeep import Client, Settings
@@ -8,14 +9,8 @@ VERIFY_SSL = os.getenv("PSIX_VERIFY_SSL", "false").lower() in ("1","true","yes",
 TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 
 class PsixClient:
-    """
-    Minimal PSIX SOAP client.
+    """Minimal PSIX SOAP client."""
 
-    Methods mirrored from CGMIX PSIXData.asmx:
-      - getVesselSummary(VesselID, VesselName, CallSign, VIN, HIN, Flag, Service, BuildYear)
-      - getVesselCases(VesselID)
-      - getVesselDeficiencies(VesselID, ActivityNumber)
-    """
     def __init__(self, wsdl: str | None = None, verify_ssl: bool | None = None, timeout: int | None = None):
         wsdl = wsdl or PSIX_WSDL
         verify_ssl = VERIFY_SSL if verify_ssl is None else verify_ssl
@@ -24,7 +19,9 @@ class PsixClient:
         settings = Settings(strict=False, xml_huge_tree=True)
         self.client = Client(wsdl=wsdl, transport=transport, settings=settings)
 
-    def get_vessel_summary(self, *, vessel_id: int | None = None, vessel_name: str = "", call_sign: str = "", vin: str = "", hin: str = "", flag: str = "", service: str = "", build_year: str = ""):
+    def get_vessel_summary(self, *, vessel_id: int | None = None, vessel_name: str = "",
+                           call_sign: str = "", vin: str = "", hin: str = "", flag: str = "",
+                           service: str = "", build_year: str = ""):
         vid = vessel_id if vessel_id is not None else ""
         return self.client.service.getVesselSummary(
             VesselID=vid,
