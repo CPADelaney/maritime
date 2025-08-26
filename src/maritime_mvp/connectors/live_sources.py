@@ -9,7 +9,7 @@ import httpx
 from lxml import html
 from zeep.helpers import serialize_object
 
-# Reuse your existing SOAP client
+# Import the fixed PSIX client
 from ..clients.psix_client import PsixClient
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,7 @@ DEFAULT_TIMEOUT = 20
 UA = "MaritimeMVP/0.2 (+https://maritime-mvp.onrender.com)"
 CACHE_TTL_S = 900  # 15 min default
 
-# Simple in-process TTL cache; swap with Redis later
+# Simple in-process TTL cache
 _cache: Dict[str, Tuple[float, Any]] = {}
 
 def _get_cached(key: str) -> Optional[Any]:
@@ -53,13 +53,13 @@ class PilotageInfo:
 
 @dataclass
 class LiveBundle:
-    vessel: Dict[str, Any]              # PSIX summary row
-    documents: List[VesselDoc]          # expiries/statuses we can infer
-    pilotage: Dict[str, Any]            # snapshot of relevant pilot page(s)
-    marine_exchange: Dict[str, Any]     # snapshot of MX page
-    misp: Dict[str, Any]                # CA ballast fee snapshot
-    cofr: Dict[str, Any]                # COFR search snapshot/link(s)
-    alerts: List[str]                   # warnings about missing/expiring docs
+    vessel: Dict[str, Any]              
+    documents: List[VesselDoc]          
+    pilotage: Dict[str, Any]            
+    marine_exchange: Dict[str, Any]     
+    misp: Dict[str, Any]                
+    cofr: Dict[str, Any]                
+    alerts: List[str]                   
 
 # ---- generic HTML helpers ----------------------------------------------------
 
@@ -71,55 +71,76 @@ def fetch_html(url: str, *, ttl: int = CACHE_TTL_S, parse_extra: bool = False) -
         return cached
     
     try:
-        with httpx.Client(timeout=DEFAULT_TIMEOUT, headers={"User-Agent": UA}) as c:
-            r = c.get(url, follow_redirects=True)
+        with httpx.Client(timeout=DEFAULT_TIMEOUT, headers={"User-Agent": UA}, verify=False) as client:
+            r = client.get(url, follow_redirects=True)
             r.raise_for_status()
-            tree = html.fromstring(r.text)
-            title = (tree.xpath("//title/text()") or [""])[0].strip()
             
-            # Extract visible text
-            text_bits = tree.xpath("//body//*[not(self::script or self::style)]/text()")
-            text = " ".join(t.strip() for t in text_bits if t.strip())
-            
-            # Look for common maritime patterns
-            extra = {}
-            if parse_extra:
-                # VHF channels
-                vhf_match = re.search(r"VHF.*?Channel[s]?\s*(\d+[A-B]?)", text, re.IGNORECASE)
-                if vhf_match:
-                    extra["vhf_channel"] = vhf_match.group(1)
+            try:
+                tree = html.fromstring(r.text)
+                title = (tree.xpath("//title/text()") or [""])[0].strip()
                 
-                # Draft limits
-                draft_match = re.search(r"(?:maximum|max).*?draft.*?(\d+\.?\d*)\s*(?:feet|ft|meters|m)", 
-                                      text, re.IGNORECASE)
-                if draft_match:
-                    extra["max_draft"] = draft_match.group(1)
+                # Extract visible text
+                text_bits = tree.xpath("//body//*[not(self::script or self::style)]/text()")
+                text = " ".join(t.strip() for t in text_bits if t.strip())
                 
-                # Advance notice requirements
-                notice_match = re.search(r"(\d+)\s*(?:hours?|hrs?).*?advance.*?notice", 
-                                       text, re.IGNORECASE)
-                if notice_match:
-                    extra["advance_notice_hours"] = notice_match.group(1)
+                # Look for common maritime patterns
+                extra = {}
+                if parse_extra:
+                    # VHF channels
+                    vhf_match = re.search(r"VHF.*?Channel[s]?\s*(\d+[A-B]?)", text, re.IGNORECASE)
+                    if vhf_match:
+                        extra["vhf_channel"] = vhf_match.group(1)
+                    
+                    # Draft limits
+                    draft_match = re.search(r"(?:maximum|max).*?draft.*?(\d+\.?\d*)\s*(?:feet|ft|meters|m)", 
+                                          text, re.IGNORECASE)
+                    if draft_match:
+                        extra["max_draft"] = draft_match.group(1)
+                    
+                    # Advance notice requirements
+                    notice_match = re.search(r"(\d+)\s*(?:hours?|hrs?).*?advance.*?notice", 
+                                           text, re.IGNORECASE)
+                    if notice_match:
+                        extra["advance_notice_hours"] = notice_match.group(1)
+                    
+                    # Find PDF links (often contain tariffs)
+                    pdf_links = tree.xpath("//a[contains(@href, '.pdf')]/@href")
+                    if pdf_links:
+                        # Make PDF links absolute if they're relative
+                        from urllib.parse import urljoin
+                        extra["pdf_links"] = [urljoin(url, link) for link in pdf_links[:5]]
                 
-                # Find PDF links (often contain tariffs)
-                pdf_links = tree.xpath("//a[contains(@href, '.pdf')]/@href")
-                if pdf_links:
-                    extra["pdf_links"] = pdf_links[:5]  # limit to first 5
-            
-            snap = {
-                "url": url,
-                "title": title,
-                "text_sample": (text[:1500] + "…") if len(text) > 1500 else text,
-                "fetched_at": int(time.time()),
-                **extra
-            }
-            _set_cached(ck, snap, ttl)
-            return snap
+                snap = {
+                    "url": url,
+                    "title": title,
+                    "text_sample": (text[:1500] + "…") if len(text) > 1500 else text,
+                    "fetched_at": int(time.time()),
+                    **extra
+                }
+                _set_cached(ck, snap, ttl)
+                return snap
+                
+            except Exception as e:
+                logger.warning(f"Failed to parse HTML from {url}: {e}")
+                # Return basic info even if parsing fails
+                snap = {
+                    "url": url,
+                    "title": "Parse error",
+                    "text_sample": r.text[:500] if r.text else "",
+                    "fetched_at": int(time.time()),
+                    "error": "HTML parsing failed"
+                }
+                _set_cached(ck, snap, ttl)
+                return snap
+                
+    except httpx.HTTPStatusError as e:
+        logger.warning(f"HTTP error fetching {url}: {e.response.status_code}")
+        return {"url": url, "error": f"HTTP {e.response.status_code}", "fetched_at": int(time.time())}
     except Exception as e:
         logger.warning(f"Failed to fetch {url}: {e}")
         return {"url": url, "error": str(e), "fetched_at": int(time.time())}
 
-# ---- PSIX enhanced wrapper ---------------------------------------------------
+# ---- PSIX enhanced wrapper with error handling -------------------------------
 
 def psix_summary_by_name(name: str) -> Dict[str, Any]:
     """Get vessel summary from PSIX by name with caching."""
@@ -130,7 +151,19 @@ def psix_summary_by_name(name: str) -> Dict[str, Any]:
     try:
         client = PsixClient()
         raw = client.search_by_name(name)
-        data = serialize_object(raw, dict)
+        
+        # Check if raw is already a dict or needs serialization
+        if raw is None:
+            data = {"Table": []}
+        elif isinstance(raw, dict):
+            data = raw
+        else:
+            # Serialize Zeep response object to dict
+            try:
+                data = serialize_object(raw, dict)
+            except:
+                data = {"Table": []}
+        
         rows = (data or {}).get("Table") or []
         summary = rows[0] if rows else {}
         
@@ -141,9 +174,13 @@ def psix_summary_by_name(name: str) -> Dict[str, Any]:
             
         _set_cached(ck, summary, 600)
         return summary
+        
     except Exception as e:
         logger.error(f"PSIX search failed for {name}: {e}")
-        return {"error": str(e), "vessel_name": name}
+        # Cache the failure to avoid hammering a broken service
+        empty_result = {"error": str(e), "vessel_name": name}
+        _set_cached(ck, empty_result, 60)  # Cache failures for 1 minute
+        return empty_result
 
 def psix_summary_by_id(vessel_id: int) -> Dict[str, Any]:
     """Get vessel summary from PSIX by ID with caching."""
@@ -154,7 +191,18 @@ def psix_summary_by_id(vessel_id: int) -> Dict[str, Any]:
     try:
         client = PsixClient()
         raw = client.get_vessel_summary(vessel_id=vessel_id)
-        data = serialize_object(raw, dict)
+        
+        # Handle response
+        if raw is None:
+            data = {"Table": []}
+        elif isinstance(raw, dict):
+            data = raw
+        else:
+            try:
+                data = serialize_object(raw, dict)
+            except:
+                data = {"Table": []}
+        
         rows = (data or {}).get("Table") or []
         summary = rows[0] if rows else {}
         
@@ -163,9 +211,12 @@ def psix_summary_by_id(vessel_id: int) -> Dict[str, Any]:
             
         _set_cached(ck, summary, 600)
         return summary
+        
     except Exception as e:
         logger.error(f"PSIX lookup failed for ID {vessel_id}: {e}")
-        return {"error": str(e), "vessel_id": vessel_id}
+        empty_result = {"error": str(e), "vessel_id": vessel_id}
+        _set_cached(ck, empty_result, 60)
+        return empty_result
 
 def _doc_field(row: Dict[str, Any], *keys: str) -> Optional[str]:
     """Extract field from PSIX row with case-insensitive key matching."""
@@ -178,6 +229,9 @@ def _doc_field(row: Dict[str, Any], *keys: str) -> Optional[str]:
 def extract_docs_from_psix_row(row: Dict[str, Any]) -> List[VesselDoc]:
     """Extract document information from PSIX vessel data."""
     docs: List[VesselDoc] = []
+    
+    if not row or "error" in row:
+        return docs
     
     # Certificate of Documentation
     doc_exp = _doc_field(row, "DocumentationExpirationDate", "documentationexpirationdate")
@@ -304,14 +358,18 @@ def pilot_snapshot_for_region(region: str) -> Dict[str, Any]:
     
     for key in keys:
         if key in REGISTRY:
-            info = REGISTRY[key]
-            snap = fetch_html(info["url"], parse_extra=True)
-            snap.update({
-                "provider": info["provider"],
-                "vhf_channel": info.get("vhf"),
-                "boarding_grounds": info.get("boarding")
-            })
-            pilots[key] = snap
+            try:
+                info = REGISTRY[key]
+                snap = fetch_html(info["url"], parse_extra=True)
+                snap.update({
+                    "provider": info["provider"],
+                    "vhf_channel": info.get("vhf"),
+                    "boarding_grounds": info.get("boarding")
+                })
+                pilots[key] = snap
+            except Exception as e:
+                logger.warning(f"Failed to fetch pilot info for {key}: {e}")
+                pilots[key] = {"error": str(e), "provider": REGISTRY[key]["provider"]}
     
     return pilots
 
@@ -326,10 +384,14 @@ def mx_snapshot_for_region(region: str) -> Dict[str, Any]:
     
     key = mx_map.get(region)
     if key and key in REGISTRY:
-        info = REGISTRY[key]
-        snap = fetch_html(info["url"], parse_extra=True)
-        snap["provider"] = info["provider"]
-        return {"primary": snap}
+        try:
+            info = REGISTRY[key]
+            snap = fetch_html(info["url"], parse_extra=True)
+            snap["provider"] = info["provider"]
+            return {"primary": snap}
+        except Exception as e:
+            logger.warning(f"Failed to fetch MX info for {key}: {e}")
+            return {"primary": {"error": str(e), "provider": REGISTRY[key]["provider"]}}
     return {}
 
 # ---- California MISP (Marine Invasive Species Program) ----------------------
@@ -350,12 +412,16 @@ def fetch_misp_snapshot() -> Dict[str, Any]:
     """Fetch current MISP fee information from California sources."""
     snaps = []
     for url in MISP_INFO["sites"]:
-        snap = fetch_html(url)
-        snaps.append(snap)
+        try:
+            snap = fetch_html(url)
+            snaps.append(snap)
+        except Exception as e:
+            logger.warning(f"Failed to fetch MISP from {url}: {e}")
+            snaps.append({"url": url, "error": str(e)})
     
     # Extract dollar amounts from CDTFA page
     dollars = []
-    if len(snaps) > 1:
+    if len(snaps) > 1 and "text_sample" in snaps[-1]:
         dollars = MONEY_RE.findall(snaps[-1].get("text_sample", ""))
     
     return {
@@ -377,7 +443,11 @@ COFR_URLS = {
 
 def cofr_snapshot(vessel_name: Optional[str], imo_or_official_no: Optional[str]) -> Dict[str, Any]:
     """Get COFR lookup information and guidance."""
-    snap = fetch_html(COFR_URLS["search"], parse_extra=True)
+    try:
+        snap = fetch_html(COFR_URLS["search"], parse_extra=True)
+    except Exception as e:
+        logger.warning(f"Failed to fetch COFR page: {e}")
+        snap = {"url": COFR_URLS["search"], "error": str(e)}
     
     # Build search guidance
     guidance = []
@@ -416,19 +486,23 @@ def check_document_alerts(docs: List[VesselDoc]) -> List[str]:
     for doc in docs:
         if doc.expires_on:
             try:
-                exp_date = datetime.strptime(doc.expires_on[:10], "%Y-%m-%d").date()
+                # Handle various date formats
+                date_str = doc.expires_on[:10] if len(doc.expires_on) >= 10 else doc.expires_on
+                exp_date = datetime.strptime(date_str, "%Y-%m-%d").date()
                 days_until = (exp_date - today).days
                 
                 if days_until < 0:
                     alerts.append(f"⚠️ {doc.name} EXPIRED {abs(days_until)} days ago")
                 elif days_until <= warning_days:
                     alerts.append(f"⚠️ {doc.name} expires in {days_until} days")
-            except (ValueError, TypeError):
-                pass
+            except (ValueError, TypeError) as e:
+                logger.warning(f"Could not parse date {doc.expires_on}: {e}")
     
     # Check for missing critical docs
     doc_names = [d.name.lower() for d in docs]
-    if "certificate of documentation" not in " ".join(doc_names):
+    doc_names_str = " ".join(doc_names)
+    
+    if not docs or "certificate of documentation" not in doc_names_str:
         alerts.append("📋 Certificate of Documentation not found in PSIX")
     
     return alerts
@@ -447,7 +521,11 @@ def choose_region(port_code: Optional[str], port_name: Optional[str],
         "COLRIV": "columbia",
         "STKN": "bay_area",
         "OAK": "bay_area",
-        "SDG": "socal"
+        "SDG": "socal",
+        "HUM": "bay_area",
+        "GRH": "columbia",
+        "VAN": "columbia",
+        "EVR": "puget"
     }
     
     if port_code and port_code in code_map:
@@ -455,13 +533,13 @@ def choose_region(port_code: Optional[str], port_name: Optional[str],
     
     # Name-based detection
     name = (port_name or "").lower()
-    if any(x in name for x in ["san francisco", "oakland", "richmond", "stockton", "sacramento"]):
+    if any(x in name for x in ["san francisco", "oakland", "richmond", "stockton", "sacramento", "alameda", "redwood"]):
         return "bay_area"
-    if any(x in name for x in ["los angeles", "long beach", "san diego", "hueneme"]):
+    if any(x in name for x in ["los angeles", "long beach", "san diego", "hueneme", "port hueneme"]):
         return "socal"
-    if any(x in name for x in ["seattle", "tacoma", "everett", "olympia", "bellingham"]):
+    if any(x in name for x in ["seattle", "tacoma", "everett", "olympia", "bellingham", "anacortes"]):
         return "puget"
-    if any(x in name for x in ["portland", "astoria", "columbia", "vancouver usa"]):
+    if any(x in name for x in ["portland", "astoria", "columbia", "vancouver usa", "longview", "kalama"]):
         return "columbia"
     
     # State-based fallback
@@ -494,12 +572,20 @@ def build_live_bundle(*,
     
     logger.info(f"Building live bundle for vessel={vessel_name}, port={port_code}")
     
-    # 1) Fetch vessel data from PSIX
-    if vessel_id is not None:
-        vrow = psix_summary_by_id(vessel_id)
-    elif vessel_name:
-        vrow = psix_summary_by_name(vessel_name)
-    else:
+    # 1) Fetch vessel data from PSIX with error handling
+    vrow = {}
+    try:
+        if vessel_id is not None:
+            vrow = psix_summary_by_id(vessel_id)
+        elif vessel_name:
+            vrow = psix_summary_by_name(vessel_name)
+        
+        # Check for errors in the result
+        if vrow and "error" in vrow:
+            logger.warning(f"PSIX returned error: {vrow.get('error')}")
+            vrow = {}  # Use empty dict if there was an error
+    except Exception as e:
+        logger.error(f"Exception getting PSIX data: {e}")
         vrow = {}
     
     # Extract documents and check for alerts
@@ -510,20 +596,38 @@ def build_live_bundle(*,
     region = choose_region(port_code, port_name, state, is_cascadia)
     logger.info(f"Selected region: {region}")
     
-    # 3) Fetch regional information
-    pilot = pilot_snapshot_for_region(region)
-    mx = mx_snapshot_for_region(region)
+    # 3) Fetch regional information with error handling
+    pilot = {}
+    mx = {}
+    misp = {}
+    cofr_data = {}
+    
+    try:
+        pilot = pilot_snapshot_for_region(region)
+    except Exception as e:
+        logger.warning(f"Failed to get pilotage info: {e}")
+    
+    try:
+        mx = mx_snapshot_for_region(region)
+    except Exception as e:
+        logger.warning(f"Failed to get marine exchange info: {e}")
     
     # 4) California-specific fees
-    misp = {}
     if (state or "").upper() == "CA":
-        misp = fetch_misp_snapshot()
+        try:
+            misp = fetch_misp_snapshot()
+        except Exception as e:
+            logger.warning(f"Failed to get MISP info: {e}")
     
     # 5) COFR lookup
-    cofr = cofr_snapshot(
-        vessel_name=vessel_name or vrow.get("VesselName") or vrow.get("vesselname"),
-        imo_or_official_no=imo_or_official_no or vrow.get("IMONumber") or vrow.get("OfficialNumber")
-    )
+    try:
+        cofr_data = cofr_snapshot(
+            vessel_name=vessel_name or vrow.get("VesselName") or vrow.get("vesselname"),
+            imo_or_official_no=imo_or_official_no or vrow.get("IMONumber") or vrow.get("OfficialNumber")
+        )
+    except Exception as e:
+        logger.warning(f"Failed to get COFR info: {e}")
+        cofr_data = {"error": str(e)}
     
     # 6) Build final bundle
     bundle = LiveBundle(
@@ -532,7 +636,7 @@ def build_live_bundle(*,
         pilotage=pilot,
         marine_exchange=mx,
         misp=misp,
-        cofr=cofr,
+        cofr=cofr_data,
         alerts=alerts
     )
     
