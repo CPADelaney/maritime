@@ -7,7 +7,6 @@ from dataclasses import dataclass, asdict
 from typing import Any, Dict, Optional, Tuple, List
 import httpx
 from lxml import html
-from zeep.helpers import serialize_object
 
 # Import the fixed PSIX client
 from ..clients.psix_client import PsixClient
@@ -150,20 +149,9 @@ def psix_summary_by_name(name: str) -> Dict[str, Any]:
     
     try:
         client = PsixClient()
-        raw = client.search_by_name(name)
+        data = client.search_by_name(name)
         
-        # Check if raw is already a dict or needs serialization
-        if raw is None:
-            data = {"Table": []}
-        elif isinstance(raw, dict):
-            data = raw
-        else:
-            # Serialize Zeep response object to dict
-            try:
-                data = serialize_object(raw, dict)
-            except:
-                data = {"Table": []}
-        
+        # With the new client, data is already a dict
         rows = (data or {}).get("Table") or []
         summary = rows[0] if rows else {}
         
@@ -190,19 +178,9 @@ def psix_summary_by_id(vessel_id: int) -> Dict[str, Any]:
     
     try:
         client = PsixClient()
-        raw = client.get_vessel_summary(vessel_id=vessel_id)
+        data = client.get_vessel_summary(vessel_id=vessel_id)
         
-        # Handle response
-        if raw is None:
-            data = {"Table": []}
-        elif isinstance(raw, dict):
-            data = raw
-        else:
-            try:
-                data = serialize_object(raw, dict)
-            except:
-                data = {"Table": []}
-        
+        # With the new client, data is already a dict
         rows = (data or {}).get("Table") or []
         summary = rows[0] if rows else {}
         
@@ -217,7 +195,7 @@ def psix_summary_by_id(vessel_id: int) -> Dict[str, Any]:
         empty_result = {"error": str(e), "vessel_id": vessel_id}
         _set_cached(ck, empty_result, 60)
         return empty_result
-
+        
 def _doc_field(row: Dict[str, Any], *keys: str) -> Optional[str]:
     """Extract field from PSIX row with case-insensitive key matching."""
     for k in keys:
