@@ -467,62 +467,62 @@
         augmentVessel(v) {
           const out = { ...v };
         
+          const pick = (...cands) => {
+            for (const c of cands) {
+              if (c in out && out[c] != null) {
+                const s = String(out[c]).trim();
+                if (s && s.toLowerCase() !== 'none') return s;
+              }
+            }
+            return null;
+          };
+        
           // Canonical id & name
-          out.VesselID   = out.VesselID ?? out.vesselid ?? out.ID ?? out.id ?? null;
-          out.VesselName = out.VesselName ?? out.vesselname ?? out.Name ?? out.name ?? '(unnamed)';
+          out.VesselID   = pick('VesselID','vesselid','ID','id');
+          out.VesselName = pick('VesselName','vesselname','Name','name') ?? '(unnamed)';
         
-          // Call sign — prefer PSIX "VesselCallSign"
+          // Call sign — try PSIX variants, then regex scan
           out.CallSign =
-            out.VesselCallSign ??
-            out.CallSign ??
-            out.Call_Sign ??
-            out.RadioCallSign ??
-            out.callsign ??
-            out.radio_callsign ??
-            null;
+            pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign') ??
+            this.scanByKey(out, /(call.?sign|radio.?call)/i);
         
-          // Flag — prefer PSIX "CountryLookupName"
+          // Flag / country — try common label + regex
           out.Flag =
-            out.CountryLookupName ??
-            out.Flag ??
-            out.FlagName ??
-            out.FlagOfRegistry ??
-            out.FlagState ??
-            out.FlagCountry ??
-            out.FlagCode ??
-            out.flag ??
-            null;
+            pick('CountryLookupName','Flag','FlagName','FlagOfRegistry','FlagState','FlagCountry','FlagCode','flag') ??
+            this.scanByKey(out, /(flag|country).*(name|lookup|state|country)?/i, v => isNaN(v));
         
-          // Type — prefer PSIX "ServiceType"
+          // Type / service — prefer human text, not IDs
           out.VesselType =
-            out.ServiceType ??
-            out.VesselType ??
-            out.VesselTypeDescription ??
-            out.VesselService ??
-            out.Service ??
-            out.ShipType ??
-            out.vesseltype ??
-            null;
+            pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype') ??
+            this.scanByKey(out, /(service|type)/i, v => isNaN(v) && String(v).length < 80);
         
           // Gross tonnage
           out.GrossTonnage =
-            out.GrossTonnage ??
-            out.GT ??
-            out.Gross_Tonnage ??
-            out.grosstonnage ??
-            out.GrossTons ??
-            null;
+            pick('GrossTonnage','GT','Gross_Tonnage','grosstonnage','GrossTons','GrossTonnageText') ??
+            this.scanByKey(out, /(gross.*ton|^gt$)/i);
         
-          // Nice-to-haves from PSIX (shown if present)
-          out.YearBuilt = out.ConstructionCompletedYear ?? out.YearBuilt ?? out.BuildYear ?? out.build_year ?? null;
-          out.Status    = out.StatusLookupName ?? out.Status ?? null;
+          // Nice-to-haves
+          out.YearBuilt = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year');
+          out.Status    = pick('StatusLookupName','Status','VesselStatus');
         
-          // Identifiers (don’t relabel as IMO unless you know it is)
-          out.PrimaryIdentification = out.PrimaryIdentification ?? out.Identification ?? out.primary_identification ?? null;
-          out.OfficialNumber        = out.OfficialNumber ?? out.OfficialNumberText ?? out.Official_No ?? out.USOfficialNumber ?? null;
-          out.IMONumber             = out.IMONumber ?? out.IMO ?? out.IMONo ?? out.ImoNumber ?? out.IMO_Number ?? null;
+          // Identifiers
+          out.PrimaryIdentification = pick('PrimaryIdentification','Identification','primary_identification');
+          out.OfficialNumber        = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber');
+          out.IMONumber             = pick('IMONumber','IMO','IMONo','ImoNumber','IMO_Number');
         
           return out;
+        },
+        
+        // Helper: scan any unknown key names
+        scanByKey(obj, keyRegex, accept = (v) => String(v).trim() !== '') {
+          for (const [k, val] of Object.entries(obj)) {
+            if (val == null) continue;
+            if (keyRegex.test(k)) {
+              const s = String(val).trim();
+              if (accept(s)) return s;
+            }
+          }
+          return null;
         },
   
         // --- Vessel search with client-side pagination + augmentation ---
@@ -547,6 +547,7 @@
   
             // Raw rows from API
             const raw = Array.isArray(data.Table) ? data.Table : [];
+            if (raw.length) console.debug('First raw row keys:', Object.keys(raw[0]), raw[0]);
             console.debug('PSIX rows received:', raw.length);
   
             // Augment rows so UI has stable keys
