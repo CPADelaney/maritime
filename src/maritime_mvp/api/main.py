@@ -336,24 +336,75 @@ def get_port(port_code: str) -> Dict[str, Any]:
 @app.get("/vessels/search", tags=["Vessels"])
 def search_vessels(
     name: str = Query(..., description="Vessel name to search for"),
-    limit: int = Query(25, ge=1, le=200),
-    offset: int = Query(0, ge=0),
-) -> Dict[str, Any]:
+    page: int = Query(1, ge=1, description="Page number (1-based)"),
+    limit: int = Query(25, ge=1, le=100, description="Rows per page (default 25)")
+) -> Any:
     """
-    Return PSIX vessel **list** (array) for the given name.
-    Always returns {"Table": [...], "_count": N, "_limit": L, "_offset": O}
+    Search PSIX by name and return a paginated, trimmed list.
+
+    Response shape:
+    {
+      "Table": [...],
+      "total": <int>,         # total matches
+      "count": <int>,         # number returned (<= limit)
+      "page": <int>,
+      "limit": <int>,
+      "pages": <int>,         # total pages
+      "has_prev": <bool>,
+      "has_next": <bool>,
+      "start": <int>,         # 1-based start index in overall results
+      "end": <int>            # 1-based end index in overall results
+    }
     """
     client = PsixClient()
     try:
-        data = client.search_by_name(name)  # {"Table": [...]}
-        table = data.get("Table", [])
-        # Normalize: if a single dict sneaks through, wrap it
-        if isinstance(table, dict):
-            table = [table]
-        total = len(table)
-        # paginate
-        sliced = table[offset: offset + limit] if (offset or limit) else table
-        return {"Table": sliced, "_count": total, "_limit": limit, "_offset": offset}
+        raw = client.search_by_name(name)  # {"Table": [...]}
+        rows = (raw or {}).get("Table") or []
+
+        # Optional: stable sort by VesselName then CallSign
+        def _nm(r): return (r.get("VesselName") or r.get("vesselname") or "").upper()
+        def _cs(r): return (r.get("CallSign") or r.get("callsign") or "").upper()
+        rows.sort(key=lambda r: (_nm(r), _cs(r)))
+
+        total = len(rows)
+        pages = max((total + limit - 1) // limit, 1)
+        page = min(max(page, 1), pages)
+        start_idx = (page - 1) * limit
+        end_idx = start_idx + limit
+
+        page_rows = rows[start_idx:end_idx]
+
+        # Trim fields to what the UI needs
+        def pick(r):
+            return {
+                "VesselID": r.get("VesselID") or r.get("vesselid"),
+                "VesselName": r.get("VesselName") or r.get("vesselname"),
+                "CallSign": r.get("CallSign") or r.get("callsign"),
+                "Flag": r.get("Flag") or r.get("flag"),
+                "VesselType": r.get("VesselType") or r.get("vesseltype"),
+                "IMONumber": r.get("IMONumber") or r.get("imonumber"),
+                "OfficialNumber": r.get("OfficialNumber") or r.get("officialnumber"),
+                "GrossTonnage": r.get("GrossTonnage") or r.get("grosstonnage"),
+                "NetTonnage": r.get("NetTonnage") or r.get("nettonnage"),
+            }
+
+        trimmed = [pick(r) for r in page_rows if (r.get("VesselName") or r.get("vesselname"))]
+
+        start_human = (start_idx + 1) if total else 0
+        end_human = min(end_idx, total)
+
+        return {
+            "Table": trimmed,
+            "total": total,
+            "count": len(trimmed),
+            "page": page,
+            "limit": limit,
+            "pages": pages,
+            "has_prev": page > 1,
+            "has_next": page < pages,
+            "start": start_human,
+            "end": end_human,
+        }
     except Exception as e:
         logger.exception("PSIX search failed")
         raise HTTPException(status_code=502, detail=f"PSIX search failed: {e!s}")
