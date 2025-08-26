@@ -1,3 +1,4 @@
+# requirements.txt
 fastapi
 uvicorn
 pydantic>=2
@@ -10,3 +11,5 @@ httpx
 python-dateutil
 jinja2
 gunicorn
+lxml
+redis  # optional, for future cache upgrade
