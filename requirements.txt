@@ -1,10 +1,10 @@
-# requirements.txt
+# requirements.txt - Python 3.13 compatible
 fastapi==0.111.0
 uvicorn==0.30.0
 pydantic>=2.0,<3.0
 pydantic-settings>=2.0
 sqlalchemy>=2.0,<3.0
-psycopg2-binary==2.9.9
+psycopg[binary]==3.2.3  # Python 3.13 compatible version
 alembic>=1.13
 requests>=2.31
 httpx==0.27.0
@@ -12,4 +12,4 @@ python-dateutil>=2.8
 jinja2>=3.1
 gunicorn==22.0.0
 lxml>=4.9,<6.0
-redis>=5.0  # optional, for future cache upgrade
+redis>=5.0
