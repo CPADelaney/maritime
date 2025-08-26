@@ -1,23 +1,26 @@
-# src/maritime_mvp/api/main.py
 from __future__ import annotations
-
+import os
+import logging
 from datetime import date
 from decimal import Decimal
 from typing import Any, Dict, List, Optional
-import os
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 from zeep.helpers import serialize_object
 
-from ..db import SessionLocal
+from ..db import SessionLocal, init_db
 from ..rules.fee_engine import FeeEngine, EstimateContext
 from ..clients.psix_client import PsixClient
 from ..models import Port
 
-app = FastAPI(title="Maritime MVP API", version="0.1.2")
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("maritime-api")
+
+app = FastAPI(title="Maritime MVP API", version="0.1.3")
 
 # ----- CORS -----
 _allow = os.getenv("ALLOW_ORIGINS")
@@ -30,7 +33,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Root → redirect to docs
+@app.on_event("startup")
+def _startup():
+    # Ensures tables exist; no-op if already created
+    init_db()
+    logger.info("Startup complete, DB initialized.")
+
+# Root → docs
 @app.get("/", include_in_schema=False)
 def root() -> RedirectResponse:
     return RedirectResponse(url="/docs")
@@ -39,12 +48,11 @@ def root() -> RedirectResponse:
 def health() -> Dict[str, bool]:
     return {"ok": True}
 
-# ----- Ports (for frontend dropdown) -----
 @app.get("/ports")
-def list_ports() -> List[Dict[str, Optional[str]]]:
+def list_ports() -> List[Dict[str, Optional[str] | bool]]:
     db: Session = SessionLocal()
     try:
-        rows = db.query(Port).order_by(Port.name).all()
+        rows = db.execute(select(Port).order_by(Port.name)).scalars().all()
         return [
             {
                 "code": p.code,
@@ -56,10 +64,12 @@ def list_ports() -> List[Dict[str, Optional[str]]]:
             }
             for p in rows
         ]
+    except Exception:
+        logger.exception("Failed to list ports")
+        raise HTTPException(status_code=500, detail="ports query failed")
     finally:
         db.close()
 
-# ----- PSIX proxy search -----
 @app.get("/vessels/search")
 def search_vessels(name: str) -> Any:
     client = PsixClient()
@@ -67,9 +77,9 @@ def search_vessels(name: str) -> Any:
         raw = client.search_by_name(name)
         return serialize_object(raw, dict)
     except Exception as e:
+        logger.exception("PSIX search failed")
         raise HTTPException(status_code=502, detail=f"PSIX search failed: {e!s}")
 
-# ----- Estimator -----
 @app.get("/estimate")
 def estimate(
     port_code: str,
@@ -90,7 +100,6 @@ def estimate(
         )
         items = engine.compute(ctx)
         total = sum((i.amount for i in items), Decimal("0.00"))
-
         return {
             "port_code": port_code,
             "eta": str(eta),
@@ -102,7 +111,8 @@ def estimate(
             "total": str(total),
             "disclaimer": "Estimate only. Verify against official tariffs/guidance and your negotiated contracts.",
         }
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"estimate failed: {e!s}")
+    except Exception:
+        logger.exception("Estimate failed")
+        raise HTTPException(status_code=500, detail="estimate failed")
     finally:
         db.close()
