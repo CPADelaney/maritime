@@ -5,6 +5,9 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.exc import OperationalError
 from .settings import settings
 
+# Make all functions available for import
+__all__ = ['SessionLocal', 'engine', 'init_db', 'test_connection']
+
 logger = logging.getLogger("maritime-api")
 
 # Supabase can drop idle conns; pre_ping + recycle helps.
