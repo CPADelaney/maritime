@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     psix_wsdl: str = Field(default="https://cgmix.uscg.mil/xml/PSIXData.asmx?WSDL", alias="PSIX_WSDL")
     psix_verify_ssl: bool = Field(default=False, alias="PSIX_VERIFY_SSL")
     request_timeout: int = Field(default=30, alias="REQUEST_TIMEOUT")
+    debug_show_db_password: bool = Field(default=False, alias="DEBUG_SHOW_DB_PASSWORD")
 
     model_config = {"env_file": ".env", "extra": "ignore"}
 
