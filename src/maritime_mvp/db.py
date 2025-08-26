@@ -1,122 +1,56 @@
-# db.py
 from __future__ import annotations
 import logging
-from typing import Any, Dict
-import hashlib  # ← add this
-
-import psycopg2
-from sqlalchemy import create_engine
-from sqlalchemy.engine.url import URL
+from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
-
+from sqlalchemy.exc import OperationalError
 from .settings import settings
-from .models import Base
 
 logger = logging.getLogger("maritime-api")
 
+# Supabase can drop idle conns; pre_ping + recycle helps.
 engine = create_engine(
     settings.sqlalchemy_url,
     pool_pre_ping=True,
-    pool_recycle=1800,
-    pool_size=5,
-    max_overflow=5,
-    future=True,
+    pool_recycle=300,
+    # Add these for better debugging
+    echo=False,  # Set to True for SQL query logging
+    connect_args={
+        "connect_timeout": 10,  # Connection timeout in seconds
+    }
 )
 
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine, future=True)
+SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-def init_db(safe: bool = True) -> bool:
+def test_connection() -> bool:
+    """Test database connection before creating tables"""
     try:
-        Base.metadata.create_all(bind=engine)
-        logger.info("DB init: metadata.create_all completed.")
-        return True
-    except Exception:
-        logger.exception("DB init failed (create_all).")
-        if not safe:
-            raise
+        with engine.connect() as conn:
+            result = conn.execute(text("SELECT 1"))
+            logger.info("Database connection test successful")
+            return True
+    except OperationalError as e:
+        logger.error(f"Database connection test failed: {e}")
         return False
 
-def _psycopg2_kwargs(u: URL) -> Dict[str, Any]:
-    kw: Dict[str, Any] = {
-        "user": u.username,
-        "password": u.password,
-        "host": u.host,
-        "port": u.port,
-        "dbname": u.database,
-    }
-    sslmode = u.query.get("sslmode")
-    if sslmode:
-        kw["sslmode"] = sslmode
-    if not kw.get("password") and settings.pg_password:
-        kw["password"] = settings.pg_password
-    return kw
-
-def ping_db() -> Dict[str, Any]:
-    url = engine.url
-    info: Dict[str, Any] = {
-        "source": "DATABASE_URL" if settings.database_url else "PGVARS",
-        "dsn_user": url.username,
-        "dsn_host": url.host,
-        "dsn_port": url.port,
-        "dsn_database": url.database,
-        "dsn_sslmode": url.query.get("sslmode"),
-    }
-
-    # Build connect kwargs up front so we can inspect them even if connect() fails
-    kw = _psycopg2_kwargs(url)
-
-    # DEBUG (guarded): reveal *exact* password strings + repr + sha256
-    if settings.debug_show_db_password:
-        pw_url = url.password or ""
-        pw_env = settings.pg_password or ""
-        pw_sent = kw.get("password") or ""
-
-        info.update({
-            # What’s parsed off the URL:
-            "debug_password_from_url": pw_url,
-            "debug_password_from_url_repr": repr(pw_url),
-            "debug_password_from_url_len": len(pw_url),
-            "debug_password_from_url_sha256": hashlib.sha256(pw_url.encode()).hexdigest() if pw_url else None,
-
-            # What’s in PG* env (if any):
-            "debug_password_from_env": pw_env or None,
-            "debug_password_from_env_repr": repr(pw_env) if pw_env else None,
-            "debug_password_from_env_len": len(pw_env) if pw_env else 0,
-            "debug_password_from_env_sha256": hashlib.sha256(pw_env.encode()).hexdigest() if pw_env else None,
-
-            # What will actually be sent to psycopg2:
-            "debug_password_psycopg2_sent": pw_sent,
-            "debug_password_psycopg2_sent_repr": repr(pw_sent),
-            "debug_password_psycopg2_sent_len": len(pw_sent),
-            "debug_password_psycopg2_sent_sha256": hashlib.sha256(pw_sent.encode()).hexdigest() if pw_sent else None,
-
-            # Quick equality checks:
-            "debug_url_equals_env": (pw_url == pw_env) if pw_env else None,
-            "debug_url_equals_sent": (pw_url == pw_sent),
-            "debug_env_equals_sent": (pw_env == pw_sent) if pw_env else None,
-        })
-
-    conn = None
+def init_db() -> None:
+    """Initialize database tables with better error handling"""
     try:
-        conn = psycopg2.connect(**kw)
-        with conn.cursor() as cur:
-            cur.execute("select current_user, inet_server_addr()::text, inet_server_port(), version()")
-            row = cur.fetchone()
-            info.update({
-                "connect_ok": True,
-                "server_current_user": row[0],
-                "server_addr": row[1],
-                "server_port": row[2],
-                "server_version": row[3],
-            })
+        # First test the connection
+        if not test_connection():
+            logger.error("Skipping table creation due to connection failure")
+            logger.warning("Database initialization failed, but API will start. Some endpoints may not work.")
+            return
+        
+        # Safe if tables already exist
+        from .models import Base
+        Base.metadata.create_all(bind=engine)
+        logger.info("Database tables initialized successfully")
+        
+    except OperationalError as e:
+        logger.error(f"DB init failed (create_all): {e}")
+        logger.warning("Startup complete, but DB init failed (see logs).")
+        # Don't raise - let the app start even if DB is down
+        # Individual endpoints will fail with proper error messages
     except Exception as e:
-        info["connect_ok"] = False
-        info["error"] = str(e)
-    finally:
-        try:
-            if conn:
-                conn.close()
-        except Exception:
-            pass
-
-    return info
+        logger.error(f"Unexpected error during DB init: {e}")
+        logger.warning("Startup complete, but DB init failed (see logs).")
