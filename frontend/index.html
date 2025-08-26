@@ -82,9 +82,9 @@
                   class="w-full text-left border border-gray-200 rounded-lg px-3 py-2 hover:bg-indigo-50 hover:border-indigo-300 transition-colors">
                   <div class="font-medium" x-text="v.VesselName || v.vesselname || '(unnamed)'"></div>
                   <div class="text-xs text-gray-500">
-                    <span x-text="v.CallSign || v.callsign || '—'"></span> •
-                    <span x-text="v.Flag || v.flag || '—'"></span> •
-                    <span x-text="v.VesselType || v.vesseltype || '—'"></span>
+                    <span x-text="v.VesselCallSign || v.CallSign || v.callsign || '—'"></span> •
+                    <span x-text="v.CountryLookupName || v.Flag || v.flag || '—'"></span> •
+                    <span x-text="v.ServiceType || v.VesselType || v.vesseltype || '—'"></span>
                   </div>
                 </button>
               </template>
@@ -144,9 +144,26 @@
           <h3 class="text-lg font-semibold mb-3">Selected Vessel</h3>
           <div class="space-y-2 text-sm">
             <div><span class="text-gray-500">Name:</span> <span class="font-medium" x-text="selectedVessel?.VesselName || selectedVessel?.vesselname"></span></div>
-            <div><span class="text-gray-500">Call Sign:</span> <span x-text="selectedVessel?.CallSign || selectedVessel?.callsign || '—'"></span></div>
-            <div><span class="text-gray-500">Flag:</span> <span x-text="selectedVessel?.Flag || selectedVessel?.flag || '—'"></span></div>
-            <div><span class="text-gray-500">Type:</span> <span x-text="selectedVessel?.VesselType || selectedVessel?.vesseltype || '—'"></span></div>
+            <div><span class="text-gray-500">Call Sign:</span>
+              <span x-text="selectedVessel?.VesselCallSign || selectedVessel?.CallSign || selectedVessel?.callsign || '—'"></span>
+            </div>
+            
+            <div><span class="text-gray-500">Flag:</span>
+              <span x-text="selectedVessel?.CountryLookupName || selectedVessel?.Flag || selectedVessel?.flag || '—'"></span>
+            </div>
+            
+            <div><span class="text-gray-500">Type:</span>
+              <span x-text="selectedVessel?.ServiceType || selectedVessel?.VesselType || selectedVessel?.vesseltype || '—'"></span>
+            </div>
+            <div x-show="selectedVessel?.Status"><span class="text-gray-500">Status:</span>
+              <span x-text="selectedVessel.Status"></span>
+            </div>
+            <div x-show="selectedVessel?.YearBuilt"><span class="text-gray-500">Year Built:</span>
+              <span x-text="selectedVessel.YearBuilt"></span>
+            </div>
+            <div x-show="selectedVessel?.PrimaryIdentification"><span class="text-gray-500">Identification:</span>
+              <span x-text="selectedVessel.PrimaryIdentification"></span>
+            </div>
             <div x-show="selectedVessel?.GrossTonnage || selectedVessel?.grosstonnage">
               <span class="text-gray-500">Gross Tonnage:</span>
               <span x-text="selectedVessel?.GrossTonnage || selectedVessel?.grosstonnage"></span>
@@ -449,20 +466,24 @@
         // Normalize/augment any vessel row so UI keys always exist
         augmentVessel(v) {
           const out = { ...v };
-  
-          // keep id canonical too
-          out.VesselID = out.VesselID ?? out.vesselid ?? out.ID ?? out.id ?? null;
-  
-          // Canonical display fields with common fallbacks
+        
+          // Canonical id & name
+          out.VesselID   = out.VesselID ?? out.vesselid ?? out.ID ?? out.id ?? null;
           out.VesselName = out.VesselName ?? out.vesselname ?? out.Name ?? out.name ?? '(unnamed)';
+        
+          // Call sign — prefer PSIX "VesselCallSign"
           out.CallSign =
+            out.VesselCallSign ??
             out.CallSign ??
             out.Call_Sign ??
             out.RadioCallSign ??
             out.callsign ??
             out.radio_callsign ??
             null;
+        
+          // Flag — prefer PSIX "CountryLookupName"
           out.Flag =
+            out.CountryLookupName ??
             out.Flag ??
             out.FlagName ??
             out.FlagOfRegistry ??
@@ -471,7 +492,10 @@
             out.FlagCode ??
             out.flag ??
             null;
+        
+          // Type — prefer PSIX "ServiceType"
           out.VesselType =
+            out.ServiceType ??
             out.VesselType ??
             out.VesselTypeDescription ??
             out.VesselService ??
@@ -479,6 +503,8 @@
             out.ShipType ??
             out.vesseltype ??
             null;
+        
+          // Gross tonnage
           out.GrossTonnage =
             out.GrossTonnage ??
             out.GT ??
@@ -486,7 +512,16 @@
             out.grosstonnage ??
             out.GrossTons ??
             null;
-  
+        
+          // Nice-to-haves from PSIX (shown if present)
+          out.YearBuilt = out.ConstructionCompletedYear ?? out.YearBuilt ?? out.BuildYear ?? out.build_year ?? null;
+          out.Status    = out.StatusLookupName ?? out.Status ?? null;
+        
+          // Identifiers (don’t relabel as IMO unless you know it is)
+          out.PrimaryIdentification = out.PrimaryIdentification ?? out.Identification ?? out.primary_identification ?? null;
+          out.OfficialNumber        = out.OfficialNumber ?? out.OfficialNumberText ?? out.Official_No ?? out.USOfficialNumber ?? null;
+          out.IMONumber             = out.IMONumber ?? out.IMO ?? out.IMONo ?? out.ImoNumber ?? out.IMO_Number ?? null;
+        
           return out;
         },
   
