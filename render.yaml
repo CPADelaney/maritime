@@ -8,13 +8,25 @@ services:
     startCommand: gunicorn -k uvicorn.workers.UvicornWorker maritime_mvp.api.main:app --chdir src --bind 0.0.0.0:$PORT --workers 2 --timeout 90
     healthCheckPath: /health
     envVars:
-      - key: DATABASE_URL
-        sync: false                       # set in Render → Environment (include ?sslmode=require)
+      # Use PG* only – all set in Render UI; we keep them here as placeholders without secrets
+      - key: PGHOST
+        sync: false            # put the exact host from Supabase Connect → Shared Pooler (e.g., aws-1-us-west-1.pooler.supabase.com)
+      - key: PGPORT
+        value: "6543"          # start with Transaction Pooler; switch to 5432 if you prefer Session and it’s open
+      - key: PGUSER
+        sync: false            # e.g., postgres.wqurepavtbknyfpwcbmw
+      - key: PGPASSWORD
+        sync: false            # set in Render UI, not in repo
+      - key: PGDATABASE
+        value: postgres
+      - key: SUPABASE_PROJECT_REF
+        value: wqurepavtbknyfpwcbmw
+
       - key: PSIX_WSDL
         value: https://cgmix.uscg.mil/xml/PSIXData.asmx?WSDL
       - key: PSIX_VERIFY_SSL
         value: "false"
-      - key: ALLOW_ORIGINS                 # optional: lock CORS to your static site domain
+      - key: ALLOW_ORIGINS
         value: "*"
       - key: REDIS_URL
         fromService:
