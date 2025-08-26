@@ -13,6 +13,10 @@ def search_vessels(name: str):
     client = PsixClient()
     return client.search_by_name(name)
 
+@app.get("/health")
+def health():
+    return {"ok": True}
+
 @app.get("/estimate")
 def estimate(
     port_code: str,
