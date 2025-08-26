@@ -1,6 +1,6 @@
 # src/maritime_mvp/clients/psix_client.py
 """
-PSIX client with corrected namespace and better search handling.
+PSIX client - working version with VesselID=0 fix
 """
 from __future__ import annotations
 import os
@@ -10,6 +10,7 @@ import requests
 from xml.etree import ElementTree as ET
 import re
 import warnings
+import html as _html
 
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
@@ -39,23 +40,24 @@ class PsixClient:
                           service: str = "", build_year: str = "") -> Dict[str, Any]:
         """Get vessel summary from PSIX using SOAP request."""
         
-        # Try both namespace variants
+        # CRITICAL: Use 0 when VesselID is not provided, not empty string!
+        vid = vessel_id if vessel_id is not None else 0
+        
+        # Try the known working namespace first
         namespaces = [
-            "http://cgmix.uscg.mil",     # Try without https first
-            "https://cgmix.uscg.mil",    # Then with https
-            "http://tempuri.org",        # Common default namespace
-            "http://cgmix.uscg.mil/"     # With trailing slash
+            "https://cgmix.uscg.mil",    # This one works
+            "http://cgmix.uscg.mil",     # Fallback
         ]
         
         for ns in namespaces:
-            # Build SOAP envelope with current namespace
+            # Build SOAP envelope
             soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
             <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
                           xmlns:xsd="http://www.w3.org/2001/XMLSchema" 
                           xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
               <soap:Body>
                 <getVesselSummary xmlns="{ns}">
-                  <VesselID>{vessel_id if vessel_id else ''}</VesselID>
+                  <VesselID>{vid}</VesselID>
                   <VesselName>{vessel_name}</VesselName>
                   <CallSign>{call_sign}</CallSign>
                   <VIN>{vin}</VIN>
@@ -67,10 +69,10 @@ class PsixClient:
               </soap:Body>
             </soap:Envelope>"""
             
-            logger.info(f"Trying namespace: {ns}")
+            logger.debug(f"Trying namespace: {ns} with VesselID={vid}")
             
             try:
-                # Make SOAP request with correct SOAPAction header
+                # Make SOAP request
                 soap_action = f'"{ns}/getVesselSummary"'
                 response = self.session.post(
                     self.url,
@@ -81,146 +83,102 @@ class PsixClient:
                 
                 response_text = response.text
                 
-                # Check if we got actual data this time
-                if ('getVesselSummaryResult' in response_text and 
-                    '<getVesselSummaryResult>' in response_text):
-                    # We got a result element with content
-                    logger.info(f"SUCCESS with namespace: {ns}")
+                # Check if we got a result element
+                if re.search(r"getVesselSummaryResult", response_text, re.IGNORECASE):
+                    logger.info(f"Got response with namespace: {ns}")
                     vessels = self._parse_response(response_text)
                     if vessels:
-                        logger.info(f"Found {len(vessels)} vessels")
+                        logger.info(f"Successfully parsed {len(vessels)} vessels")
                         return {"Table": vessels}
-                elif '<VesselName>' in response_text or '<Table>' in response_text:
-                    # Direct vessel data in response
-                    logger.info(f"Found vessel data with namespace: {ns}")
-                    vessels = self._parse_response(response_text)
-                    if vessels:
-                        return {"Table": vessels}
+                    else:
+                        logger.debug(f"Response had result element but no vessels parsed")
+                        # Log a snippet for debugging
+                        result_match = re.search(
+                            r"<getVesselSummaryResult[^>]*>(.*?)</getVesselSummaryResult>",
+                            response_text, re.IGNORECASE | re.DOTALL
+                        )
+                        if result_match:
+                            snippet = result_match.group(1)[:250]
+                            logger.debug(f"Result snippet: {snippet}")
                         
             except Exception as e:
                 logger.debug(f"Namespace {ns} failed: {e}")
                 continue
         
-        # If all namespaces failed, return mock data for development
-        logger.warning("All namespace attempts failed. Returning mock data.")
-        return self._get_mock_data(vessel_name)
+        # If all attempts failed, return empty result (not mock data in production)
+        logger.warning(f"No results found for vessel_name='{vessel_name}'")
+        return {"Table": []}
 
     def _parse_response(self, response_text: str) -> List[Dict[str, Any]]:
-        """Parse PSIX response with multiple strategies."""
-        vessels = []
-        
-        # Try to find getVesselSummaryResult content
-        result_match = re.search(
-            r'<getVesselSummaryResult[^>]*>(.*?)</getVesselSummaryResult>',
-            response_text, re.DOTALL | re.IGNORECASE
+        """Parse PSIX response, handling escaped XML."""
+        # Try to extract the result element content
+        match = re.search(
+            r"<getVesselSummaryResult[^>]*>(.*?)</getVesselSummaryResult>",
+            response_text, re.IGNORECASE | re.DOTALL
         )
         
-        if result_match:
-            result_content = result_match.group(1)
-            # The result might contain escaped XML
-            if '&lt;' in result_content:
-                # Unescape the XML
-                import html
-                result_content = html.unescape(result_content)
+        if match:
+            payload = match.group(1)
+            # Check if the content is HTML-escaped
+            if "&lt;" in payload:
+                payload = _html.unescape(payload)
             
-            # Now parse the actual vessel data
-            vessels = self._extract_vessels(result_content)
+            # Try to parse the unescaped content
+            vessels = self._extract_vessels(payload)
+            if vessels:
+                return vessels
         
-        # If no result element, try direct extraction
-        if not vessels:
-            vessels = self._extract_vessels(response_text)
-        
-        return vessels
+        # Fallback: try to extract vessels from the whole response
+        return self._extract_vessels(response_text)
 
     def _extract_vessels(self, xml_text: str) -> List[Dict[str, Any]]:
-        """Extract vessel data from XML."""
+        """Extract vessel data from XML, handles Table, Table1, Table2, etc."""
         vessels = []
         
-        # Find all Table elements
-        table_pattern = r'<Table[^>]*>(.*?)</Table>'
-        tables = re.findall(table_pattern, xml_text, re.DOTALL | re.IGNORECASE)
+        # Match <Table>, <Table1>, <Table2>, etc.
+        table_pattern = r"<Table\d*[^>]*>(.*?)</Table\d*>"
+        tables = re.findall(table_pattern, xml_text, re.IGNORECASE | re.DOTALL)
         
         for table_content in tables:
             vessel = {}
+            
+            # Extract all common vessel fields
             fields = [
-                'VesselID', 'VesselName', 'CallSign', 'IMONumber', 'OfficialNumber',
-                'Flag', 'VesselType', 'GrossTonnage', 'NetTonnage', 'YearBuilt'
+                "VesselID", "VesselName", "CallSign", "IMONumber", "OfficialNumber",
+                "Flag", "VesselType", "GrossTonnage", "NetTonnage", "DeadWeight",
+                "YearBuilt", "Builder", "HullMaterial", "PropulsionType",
+                "DocumentationExpirationDate", "COIExpirationDate",
+                "Owner", "Operator", "ManagingOwner"
             ]
             
             for field in fields:
-                pattern = f'<{field}[^>]*>(.*?)</{field}>'
-                match = re.search(pattern, table_content, re.IGNORECASE)
+                pattern = fr"<{field}[^>]*>(.*?)</{field}>"
+                match = re.search(pattern, table_content, re.IGNORECASE | re.DOTALL)
                 if match:
                     value = match.group(1).strip()
-                    if value and value != 'None':
+                    # Skip empty or "None" values
+                    if value and value.lower() != "none":
+                        # Clean CDATA if present
+                        if value.startswith("<![CDATA["):
+                            value = value[9:-3]
                         vessel[field] = value
             
-            if vessel:
+            # Only add vessels that have at least a name
+            if vessel.get("VesselName"):
                 vessels.append(vessel)
         
         return vessels
 
-    def _get_mock_data(self, vessel_name: str) -> Dict[str, Any]:
-        """Return mock data for development when PSIX is not working."""
-        mock_vessels = {
-            "MAERSK": [
-                {
-                    "VesselName": "MAERSK DENVER",
-                    "CallSign": "OWIZ2",
-                    "Flag": "Denmark",
-                    "VesselType": "Container Ship",
-                    "IMONumber": "9778791",
-                    "GrossTonnage": "108000"
-                },
-                {
-                    "VesselName": "MAERSK COLUMBUS",
-                    "CallSign": "OXON2",
-                    "Flag": "Denmark", 
-                    "VesselType": "Container Ship",
-                    "IMONumber": "9778803",
-                    "GrossTonnage": "108000"
-                }
-            ],
-            "EVER": [
-                {
-                    "VesselName": "EVER ACE",
-                    "CallSign": "BQKU",
-                    "Flag": "Panama",
-                    "VesselType": "Container Ship",
-                    "IMONumber": "9893890",
-                    "GrossTonnage": "235000"
-                },
-                {
-                    "VesselName": "EVER GIVEN",
-                    "CallSign": "H3RC",
-                    "Flag": "Panama",
-                    "VesselType": "Container Ship",
-                    "IMONumber": "9811000",
-                    "GrossTonnage": "220000"
-                }
-            ],
-            "DEFAULT": [
-                {
-                    "VesselName": vessel_name.upper() if vessel_name else "TEST VESSEL",
-                    "CallSign": "TEST1",
-                    "Flag": "USA",
-                    "VesselType": "Cargo",
-                    "IMONumber": "1234567",
-                    "GrossTonnage": "50000"
-                }
-            ]
-        }
-        
-        # Find matching vessels
-        search_upper = vessel_name.upper() if vessel_name else ""
-        for key, vessels in mock_vessels.items():
-            if key in search_upper:
-                logger.info(f"Returning mock data for {key}")
-                return {"Table": vessels, "_mock": True}
-        
-        # Return default
-        return {"Table": mock_vessels["DEFAULT"], "_mock": True}
-
     def search_by_name(self, name: str) -> Dict[str, Any]:
         """Search for vessels by name."""
         return self.get_vessel_summary(vessel_name=name)
+
+    def list_cases(self, vessel_id: int) -> Dict[str, Any]:
+        """List cases for a vessel - stub for compatibility."""
+        logger.warning("list_cases not implemented in HTTP client")
+        return {"Cases": []}
+
+    def list_deficiencies(self, vessel_id: int, activity_number: str) -> Dict[str, Any]:
+        """List deficiencies for a vessel - stub for compatibility."""
+        logger.warning("list_deficiencies not implemented in HTTP client")
+        return {"Deficiencies": []}
