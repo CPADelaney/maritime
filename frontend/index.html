@@ -1,0 +1,209 @@
+<!-- frontend/index.html -->
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Maritime MVP — Port Call Estimator</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- Tailwind CDN for quick styling -->
+  <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-slate-50 text-slate-900">
+  <div class="max-w-5xl mx-auto p-6">
+    <header class="mb-6">
+      <h1 class="text-2xl font-bold">Port Call Estimator</h1>
+      <p class="text-sm text-slate-600">Search vessel, pick a USWC port, set ETA, and get an estimate.</p>
+    </header>
+
+    <!-- Config -->
+    <script>
+      // CHANGE THIS to your API URL (no trailing slash)
+      const API_BASE = "https://maritime-ee6i.onrender.com";
+    </script>
+
+    <!-- Card -->
+    <div class="bg-white shadow rounded-2xl p-5 space-y-6">
+      <!-- Vessel search -->
+      <section>
+        <label class="block text-sm font-medium mb-1">Vessel Search (PSIX)</label>
+        <div class="flex gap-2">
+          <input id="vesselQuery" class="flex-1 border rounded-lg px-3 py-2" placeholder="e.g., EVER ACE" />
+          <button id="btnSearch" class="px-4 py-2 rounded-lg bg-black text-white">Search</button>
+        </div>
+        <p class="text-xs text-slate-500 mt-1">Search by name; pick a result below (PSIX SOAP proxy).</p>
+        <div id="results" class="mt-3 grid gap-2"></div>
+      </section>
+
+      <!-- Selection & inputs -->
+      <section class="grid md:grid-cols-2 gap-4">
+        <div>
+          <label class="block text-sm font-medium mb-1">Selected Vessel</label>
+          <input id="selectedVessel" class="w-full border rounded-lg px-3 py-2 bg-slate-100" placeholder="(choose from search)" readonly />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Port</label>
+          <select id="portSelect" class="w-full border rounded-lg px-3 py-2"></select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">ETA</label>
+          <input id="eta" type="date" class="w-full border rounded-lg px-3 py-2" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Arrival Type</label>
+          <select id="arrivalType" class="w-full border rounded-lg px-3 py-2">
+            <option value="FOREIGN">FOREIGN</option>
+            <option value="COASTWISE">COASTWISE</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">Net Tonnage (optional)</label>
+          <input id="netTonnage" type="number" step="0.01" class="w-full border rounded-lg px-3 py-2" placeholder="e.g., 99999" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium mb-1">YTD CBP User Fee Paid (optional)</label>
+          <input id="ytdCbpPaid" type="number" step="0.01" class="w-full border rounded-lg px-3 py-2" placeholder="0.00" />
+        </div>
+      </section>
+
+      <div class="flex gap-3">
+        <button id="btnEstimate" class="px-4 py-2 rounded-lg bg-indigo-600 text-white">Get Estimate</button>
+        <a id="healthLink" class="text-sm text-slate-500 underline" target="_blank" rel="noreferrer">/health</a>
+      </div>
+
+      <!-- Output -->
+      <section id="output" class="hidden">
+        <h2 class="text-lg font-semibold mb-2">Estimate</h2>
+        <div id="lineItems" class="overflow-x-auto rounded-lg border"></div>
+        <div class="mt-3 text-right">
+          <span class="text-sm text-slate-600">Total:</span>
+          <span id="total" class="text-xl font-bold"></span>
+        </div>
+        <p id="disclaimer" class="text-xs text-slate-500 mt-2"></p>
+      </section>
+
+      <div id="error" class="hidden text-sm text-red-600"></div>
+    </div>
+  </div>
+
+  <script>
+    const qs = (s) => document.querySelector(s);
+    const el = {
+      vesselQuery: qs("#vesselQuery"),
+      btnSearch: qs("#btnSearch"),
+      results: qs("#results"),
+      selectedVessel: qs("#selectedVessel"),
+      portSelect: qs("#portSelect"),
+      eta: qs("#eta"),
+      arrivalType: qs("#arrivalType"),
+      netTonnage: qs("#netTonnage"),
+      ytdCbpPaid: qs("#ytdCbpPaid"),
+      btnEstimate: qs("#btnEstimate"),
+      output: qs("#output"),
+      lineItems: qs("#lineItems"),
+      total: qs("#total"),
+      disclaimer: qs("#disclaimer"),
+      error: qs("#error"),
+      healthLink: qs("#healthLink"),
+    };
+
+    el.healthLink.href = API_BASE + "/health";
+
+    // Load ports into dropdown
+    async function loadPorts() {
+      try {
+        const r = await fetch(`${API_BASE}/ports`);
+        const ports = await r.json();
+        el.portSelect.innerHTML = ports.map(p => (
+          `<option value="${p.code}">${p.name}${p.state ? " ("+p.state+")" : ""}</option>`
+        )).join("");
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    // Render PSIX results
+    function renderResults(items) {
+      el.results.innerHTML = "";
+      if (!items || !items.Table || !items.Table.length) {
+        el.results.innerHTML = `<div class="text-sm text-slate-500">No matches.</div>`;
+        return;
+      }
+      items.Table.slice(0, 25).forEach(row => {
+        const name = row.VesselName || row.vesselname || "(unnamed)";
+        const callSign = row.CallSign || row.callsign || "";
+        const flag = row.Flag || row.flag || "";
+        const btn = document.createElement("button");
+        btn.className = "w-full text-left border rounded-lg px-3 py-2 hover:bg-slate-50";
+        btn.innerHTML = `<div class="font-medium">${name}</div>
+                         <div class="text-xs text-slate-500">Call sign: ${callSign || "—"} | Flag: ${flag || "—"}</div>`;
+        btn.onclick = () => { el.selectedVessel.value = name; };
+        el.results.appendChild(btn);
+      });
+    }
+
+    el.btnSearch.onclick = async () => {
+      el.error.classList.add("hidden");
+      el.results.innerHTML = `<div class="text-sm text-slate-500">Searching…</div>`;
+      try {
+        const r = await fetch(`${API_BASE}/vessels/search?name=${encodeURIComponent(el.vesselQuery.value)}`);
+        if (!r.ok) throw new Error(`PSIX search failed (${r.status})`);
+        const data = await r.json();
+        renderResults(data);
+      } catch (e) {
+        el.results.innerHTML = "";
+        el.error.textContent = e.message;
+        el.error.classList.remove("hidden");
+      }
+    };
+
+    el.btnEstimate.onclick = async () => {
+      el.error.classList.add("hidden");
+      el.output.classList.add("hidden");
+      const params = new URLSearchParams({
+        port_code: el.portSelect.value,
+        eta: el.eta.value,
+        arrival_type: el.arrivalType.value,
+      });
+      if (el.netTonnage.value) params.set("net_tonnage", el.netTonnage.value);
+      if (el.ytdCbpPaid.value) params.set("ytd_cbp_paid", el.ytdCbpPaid.value);
+
+      try {
+        const r = await fetch(`${API_BASE}/estimate?${params.toString()}`);
+        if (!r.ok) throw new Error(`estimate failed (${r.status})`);
+        const data = await r.json();
+
+        // Table
+        const rows = (data.line_items || []).map(li => `
+          <tr class="border-b last:border-0">
+            <td class="px-3 py-2 text-sm">${li.code}</td>
+            <td class="px-3 py-2 text-sm">${li.name}</td>
+            <td class="px-3 py-2 text-sm text-right">$${li.amount}</td>
+          </tr>
+        `).join("");
+
+        el.lineItems.innerHTML = `
+          <table class="min-w-full text-left">
+            <thead class="bg-slate-100">
+              <tr>
+                <th class="px-3 py-2 text-xs font-semibold">Code</th>
+                <th class="px-3 py-2 text-xs font-semibold">Name</th>
+                <th class="px-3 py-2 text-xs font-semibold text-right">Amount</th>
+              </tr>
+            </thead>
+            <tbody>${rows || `<tr><td colspan="3" class="px-3 py-4 text-sm text-slate-500">No line items.</td></tr>`}</tbody>
+          </table>
+        `;
+        el.total.textContent = `$${data.total || "0.00"}`;
+        el.disclaimer.textContent = data.disclaimer || "";
+        el.output.classList.remove("hidden");
+      } catch (e) {
+        el.error.textContent = e.message;
+        el.error.classList.remove("hidden");
+      }
+    };
+
+    // init
+    loadPorts();
+  </script>
+</body>
+</html>
