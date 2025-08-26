@@ -1,12 +1,22 @@
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Integer, BigInteger, Numeric, Date, DateTime, Boolean, Text, ForeignKey
+# src/maritime_mvp/models.py
+from __future__ import annotations
+
 from typing import Optional
+import datetime
+from decimal import Decimal
+
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
+from sqlalchemy import String, Boolean, Numeric, Date
+
 
 class Base(DeclarativeBase):
+    """SQLAlchemy 2.0 declarative base."""
     pass
+
 
 class Port(Base):
     __tablename__ = "ports"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     code: Mapped[str] = mapped_column(String(12), unique=True)
     name: Mapped[str] = mapped_column(String(120))
@@ -19,30 +29,50 @@ class Port(Base):
     mx_url: Mapped[Optional[str]] = mapped_column(String(512))
     tariff_url: Mapped[Optional[str]] = mapped_column(String(512))
 
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Port code={self.code!r} name={self.name!r}>"
+
+
 class Fee(Base):
     __tablename__ = "fees"
+
     id: Mapped[int] = mapped_column(primary_key=True)
-    code: Mapped[str] = mapped_column(String(64), unique=True)
+    # NOTE: not unique — we allow multiple rows per code across time/region
+    code: Mapped[str] = mapped_column(String(64))
     name: Mapped[str] = mapped_column(String(200))
-    scope: Mapped[str] = mapped_column(String(24))  # federal/state/port
-    unit: Mapped[str] = mapped_column(String(24))   # per_call/per_net_ton/per_passenger/flat
-    rate: Mapped[Numeric] = mapped_column(Numeric(12, 4))
+    scope: Mapped[str] = mapped_column(String(24))           # federal/state/port
+    unit: Mapped[str] = mapped_column(String(24))            # per_call/per_net_ton/...
+    rate: Mapped[Decimal] = mapped_column(Numeric(12, 4))
     currency: Mapped[str] = mapped_column(String(3), default="USD")
-    cap_amount: Mapped[Optional[Numeric]] = mapped_column(Numeric(12, 4))
+
+    cap_amount: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
     cap_period: Mapped[Optional[str]] = mapped_column(String(24))  # calendar_year/tonnage_year/none
+
     applies_state: Mapped[Optional[str]] = mapped_column(String(2))
     applies_port_code: Mapped[Optional[str]] = mapped_column(String(12))
     applies_cascadia: Mapped[Optional[bool]] = mapped_column(Boolean)
-    effective_start: Mapped[Date]
-    effective_end: Mapped[Optional[Date]]
+
+    effective_start: Mapped[datetime.date] = mapped_column(Date)
+    effective_end: Mapped[Optional[datetime.date]] = mapped_column(Date)
+
     source_url: Mapped[Optional[str]] = mapped_column(String(512))
     authority: Mapped[Optional[str]] = mapped_column(String(512))
 
+    def __repr__(self) -> str:  # pragma: no cover
+        return (
+            f"<Fee code={self.code!r} rate={self.rate} start={self.effective_start} "
+            f"end={self.effective_end}>"
+        )
+
+
 class Source(Base):
     __tablename__ = "sources"
+
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(200))
     url: Mapped[str] = mapped_column(String(512))
     type: Mapped[str] = mapped_column(String(24))  # pilotage/tariff/law/program/api
-    effective_date: Mapped[Optional[Date]]
+    effective_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
 
+    def __repr__(self) -> str:  # pragma: no cover
+        return f"<Source name={self.name!r} type={self.type!r}>"
