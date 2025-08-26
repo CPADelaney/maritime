@@ -1,7 +1,6 @@
-# src/maritime_mvp/clients/psix_client.py
+# src/maritime_mvp/clients/psix_client.py (Diagnostic version - temporary)
 """
-PSIX client using direct HTTP/SOAP requests without zeep dependency.
-Compatible with Python 3.13+
+PSIX client with diagnostic logging to debug empty responses.
 """
 from __future__ import annotations
 import os
@@ -12,17 +11,17 @@ from xml.etree import ElementTree as ET
 import re
 import warnings
 
-# Suppress SSL warnings since government sites often have cert issues
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.DEBUG)  # Force debug level
 
 PSIX_URL = os.getenv("PSIX_URL", "https://cgmix.uscg.mil/xml/PSIXData.asmx")
 VERIFY_SSL = os.getenv("PSIX_VERIFY_SSL", "false").lower() in ("1", "true", "yes", "y")
 TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 
 class PsixClient:
-    """PSIX SOAP client using direct HTTP requests (no zeep dependency)."""
+    """PSIX SOAP client with diagnostic logging."""
     
     def __init__(self, url: str | None = None, verify_ssl: bool | None = None, timeout: int | None = None):
         self.url = url or PSIX_URL
@@ -36,169 +35,10 @@ class PsixClient:
         })
         logger.info(f"PSIX client initialized with URL: {self.url}")
 
-    def _clean_xml(self, xml_text: str) -> str:
-        """Clean and prepare XML for parsing."""
-        # Remove BOM if present
-        if xml_text.startswith('\ufeff'):
-            xml_text = xml_text[1:]
-        
-        # Remove XML declaration if duplicated
-        xml_text = re.sub(r'<\?xml[^>]+\?>\s*<\?xml[^>]+\?>', '<?xml version="1.0"?>', xml_text)
-        
-        # Fix common namespace issues
-        # Add namespace declarations if missing
-        if 'xmlns:soap' not in xml_text and 'soap:' in xml_text:
-            xml_text = xml_text.replace(
-                '<soap:Envelope',
-                '<soap:Envelope xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/"'
-            )
-        
-        # Remove problematic namespace prefixes from content
-        xml_text = re.sub(r'<(\w+):', r'<', xml_text)
-        xml_text = re.sub(r'</(\w+):', r'</', xml_text)
-        
-        return xml_text
-
-    def _parse_soap_response(self, xml_text: str) -> Dict[str, Any]:
-        """Parse SOAP XML response into a dictionary."""
-        try:
-            # Clean the XML first
-            xml_text = self._clean_xml(xml_text)
-            
-            # Try standard parsing
-            root = ET.fromstring(xml_text)
-            
-            # Find the result element - look for anything with 'Result' in the tag
-            vessels = []
-            for elem in root.iter():
-                if 'getVesselSummaryResult' in elem.tag or elem.tag == 'getVesselSummaryResult':
-                    # Parse the nested XML result
-                    result_text = elem.text
-                    if result_text:
-                        # The result contains another XML document
-                        vessels = self._parse_vessel_data(result_text)
-                    break
-            
-            # If no result found, try looking for Table elements directly
-            if not vessels:
-                for table_elem in root.iter():
-                    if table_elem.tag == 'Table' or table_elem.tag.endswith('Table'):
-                        vessel = {}
-                        for field in table_elem:
-                            field_name = field.tag.split('}')[-1] if '}' in field.tag else field.tag
-                            vessel[field_name] = field.text
-                        if vessel:
-                            vessels.append(vessel)
-            
-            return {"Table": vessels}
-            
-        except ET.ParseError as e:
-            logger.error(f"Failed to parse SOAP response: {e}")
-            # Try regex fallback
-            vessels = self._fallback_parse(xml_text)
-            return {"Table": vessels}
-        except Exception as e:
-            logger.error(f"Unexpected error parsing SOAP response: {e}")
-            return {"Table": []}
-
-    def _parse_vessel_data(self, xml_string: str) -> List[Dict[str, Any]]:
-        """Parse the inner vessel data XML."""
-        vessels = []
-        try:
-            # Clean this XML too
-            xml_string = self._clean_xml(xml_string)
-            
-            # Parse the vessel data
-            vessel_root = ET.fromstring(xml_string)
-            
-            for table in vessel_root.findall('.//Table'):
-                vessel = {}
-                for field in table:
-                    field_name = field.tag.split('}')[-1] if '}' in field.tag else field.tag
-                    vessel[field_name] = field.text or ''
-                if vessel:
-                    vessels.append(vessel)
-        except Exception as e:
-            logger.warning(f"Failed to parse vessel data XML: {e}")
-            # Fall back to regex
-            vessels = self._regex_extract_vessels(xml_string)
-        
-        return vessels
-
-    def _regex_extract_vessels(self, text: str) -> List[Dict[str, Any]]:
-        """Extract vessel data using regex as last resort."""
-        vessels = []
-        
-        # Find all Table blocks
-        table_pattern = r'<Table[^>]*>(.*?)</Table>'
-        tables = re.findall(table_pattern, text, re.DOTALL | re.IGNORECASE)
-        
-        for table_content in tables:
-            vessel = {}
-            
-            # Common vessel fields to extract
-            fields = [
-                'VesselID', 'VesselName', 'CallSign', 'IMONumber', 'OfficialNumber',
-                'Flag', 'VesselType', 'GrossTonnage', 'NetTonnage', 'DeadWeight',
-                'YearBuilt', 'Builder', 'HullMaterial', 'PropulsionType',
-                'DocumentationExpirationDate', 'COIExpirationDate'
-            ]
-            
-            for field in fields:
-                pattern = f'<{field}[^>]*>(.*?)</{field}>'
-                match = re.search(pattern, table_content, re.IGNORECASE)
-                if match:
-                    value = match.group(1).strip()
-                    # Clean CDATA if present
-                    if value.startswith('<![CDATA['):
-                        value = value[9:-3]
-                    vessel[field] = value
-            
-            if vessel:
-                vessels.append(vessel)
-        
-        return vessels
-
-    def _fallback_parse(self, xml_text: str) -> List[Dict[str, Any]]:
-        """Ultimate fallback parser using aggressive regex."""
-        vessels = []
-        
-        # Try to find any vessel data
-        # Look for vessel names first
-        name_pattern = r'<VesselName[^>]*>(.*?)</VesselName>'
-        names = re.findall(name_pattern, xml_text, re.IGNORECASE)
-        
-        for name in names:
-            if name and not name.startswith('<'):
-                # Found a vessel name, try to find associated data
-                vessel = {'VesselName': name.strip()}
-                
-                # Try to find other fields near this vessel name
-                # This is crude but works as last resort
-                vessel_section = xml_text[max(0, xml_text.find(name) - 500):xml_text.find(name) + 500]
-                
-                # Extract other fields from this section
-                callsign_match = re.search(r'<CallSign[^>]*>(.*?)</CallSign>', vessel_section, re.IGNORECASE)
-                if callsign_match:
-                    vessel['CallSign'] = callsign_match.group(1).strip()
-                
-                flag_match = re.search(r'<Flag[^>]*>(.*?)</Flag>', vessel_section, re.IGNORECASE)
-                if flag_match:
-                    vessel['Flag'] = flag_match.group(1).strip()
-                
-                type_match = re.search(r'<VesselType[^>]*>(.*?)</VesselType>', vessel_section, re.IGNORECASE)
-                if type_match:
-                    vessel['VesselType'] = type_match.group(1).strip()
-                
-                vessels.append(vessel)
-        
-        logger.info(f"Fallback parser found {len(vessels)} vessels")
-        return vessels
-
     def get_vessel_summary(self, *, vessel_id: int | None = None, vessel_name: str = "",
                           call_sign: str = "", vin: str = "", hin: str = "", flag: str = "",
                           service: str = "", build_year: str = "") -> Dict[str, Any]:
-        """Get vessel summary from PSIX using SOAP request."""
+        """Get vessel summary from PSIX with full diagnostic output."""
         
         # Build SOAP envelope
         soap_body = f"""<?xml version="1.0" encoding="utf-8"?>
@@ -219,6 +59,9 @@ class PsixClient:
           </soap:Body>
         </soap:Envelope>"""
         
+        logger.info(f"SENDING SOAP REQUEST FOR: vessel_name='{vessel_name}'")
+        logger.debug(f"Full SOAP request:\n{soap_body}")
+        
         try:
             # Make SOAP request
             response = self.session.post(
@@ -227,15 +70,63 @@ class PsixClient:
                 headers={'SOAPAction': 'https://cgmix.uscg.mil/getVesselSummary'},
                 timeout=self.timeout
             )
-            response.raise_for_status()
             
-            # Log a sample of the response for debugging
-            logger.debug(f"PSIX response sample: {response.text[:500]}")
+            logger.info(f"PSIX Response Status: {response.status_code}")
+            logger.info(f"PSIX Response Headers: {dict(response.headers)}")
             
-            # Parse response
-            result = self._parse_soap_response(response.text)
-            logger.info(f"PSIX search for vessel_name='{vessel_name}' returned {len(result.get('Table', []))} results")
-            return result
+            # Log the full response for debugging
+            response_text = response.text
+            logger.info(f"PSIX Response Length: {len(response_text)} characters")
+            
+            # Log first 2000 characters of response
+            logger.info(f"PSIX Response Preview:\n{response_text[:2000]}")
+            
+            # Check if it's actually SOAP
+            if 'soap:Envelope' in response_text or 'Envelope' in response_text:
+                logger.info("Response appears to be SOAP")
+                
+                # Look for any vessel data patterns
+                if 'VesselName' in response_text:
+                    logger.info("Found VesselName in response!")
+                    # Extract all vessel names for debugging
+                    vessel_names = re.findall(r'<VesselName[^>]*>(.*?)</VesselName>', response_text, re.IGNORECASE)
+                    logger.info(f"Vessel names found: {vessel_names}")
+                    
+                if 'Table' in response_text:
+                    logger.info("Found Table elements in response")
+                    table_count = response_text.count('<Table')
+                    logger.info(f"Number of Table elements: {table_count}")
+                    
+                if 'getVesselSummaryResult' in response_text:
+                    logger.info("Found getVesselSummaryResult")
+                    # Extract the result content
+                    result_match = re.search(r'<getVesselSummaryResult[^>]*>(.*?)</getVesselSummaryResult>', 
+                                           response_text, re.DOTALL | re.IGNORECASE)
+                    if result_match:
+                        result_content = result_match.group(1)[:500]
+                        logger.info(f"Result content preview: {result_content}")
+                        
+                # Check for SOAP fault
+                if 'soap:Fault' in response_text or 'faultstring' in response_text:
+                    logger.error("SOAP FAULT detected!")
+                    fault_match = re.search(r'<faultstring[^>]*>(.*?)</faultstring>', response_text)
+                    if fault_match:
+                        logger.error(f"Fault message: {fault_match.group(1)}")
+                        
+            elif response_text.startswith('<!DOCTYPE'):
+                logger.warning("Response is HTML, not SOAP!")
+                # Extract title to see what page we got
+                title_match = re.search(r'<title>(.*?)</title>', response_text)
+                if title_match:
+                    logger.warning(f"HTML page title: {title_match.group(1)}")
+            else:
+                logger.warning(f"Unknown response format. First 100 chars: {response_text[:100]}")
+            
+            # Try to parse anyway and see what we get
+            vessels = self._attempt_parse(response_text)
+            logger.info(f"FINAL RESULT: Found {len(vessels)} vessels")
+            
+            return {"Table": vessels}
             
         except requests.exceptions.Timeout:
             logger.error(f"PSIX request timed out after {self.timeout} seconds")
@@ -245,18 +136,45 @@ class PsixClient:
             return {"Table": [], "error": str(e)}
         except Exception as e:
             logger.error(f"Unexpected error in PSIX request: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
             return {"Table": [], "error": str(e)}
+
+    def _attempt_parse(self, response_text: str) -> List[Dict[str, Any]]:
+        """Try multiple parsing strategies."""
+        vessels = []
+        
+        # Strategy 1: Look for Table XML blocks
+        table_pattern = r'<Table[^>]*>(.*?)</Table>'
+        tables = re.findall(table_pattern, response_text, re.DOTALL | re.IGNORECASE)
+        logger.info(f"Regex found {len(tables)} Table blocks")
+        
+        for i, table_content in enumerate(tables[:5]):  # First 5 tables
+            vessel = {}
+            # Extract fields
+            for field in ['VesselName', 'CallSign', 'Flag', 'VesselType', 'IMONumber']:
+                pattern = f'<{field}[^>]*>(.*?)</{field}>'
+                match = re.search(pattern, table_content, re.IGNORECASE)
+                if match:
+                    vessel[field] = match.group(1).strip()
+            
+            if vessel:
+                logger.info(f"Table {i} parsed: {vessel}")
+                vessels.append(vessel)
+        
+        # Strategy 2: If no tables found, look for vessel names directly
+        if not vessels:
+            name_pattern = r'<VesselName[^>]*>([^<]+)</VesselName>'
+            names = re.findall(name_pattern, response_text, re.IGNORECASE)
+            logger.info(f"Found {len(names)} vessel names directly")
+            
+            for name in names[:10]:  # First 10
+                if name and not name.startswith('<'):
+                    vessels.append({'VesselName': name.strip()})
+                    logger.info(f"Added vessel: {name.strip()}")
+        
+        return vessels
 
     def search_by_name(self, name: str) -> Dict[str, Any]:
         """Search for vessels by name."""
         return self.get_vessel_summary(vessel_name=name)
-
-    def list_cases(self, vessel_id: int) -> Dict[str, Any]:
-        """List cases for a vessel - stub for compatibility."""
-        logger.warning("list_cases not implemented in HTTP client")
-        return {"Cases": []}
-
-    def list_deficiencies(self, vessel_id: int, activity_number: str) -> Dict[str, Any]:
-        """List deficiencies for a vessel - stub for compatibility."""
-        logger.warning("list_deficiencies not implemented in HTTP client")
-        return {"Deficiencies": []}
