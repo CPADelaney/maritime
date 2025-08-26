@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pydantic>=2
+pydantic-settings
+sqlalchemy>=2
+psycopg2-binary
+alembic
+zeep
+httpx
+python-dateutil
+jinja2
