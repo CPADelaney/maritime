@@ -1,3 +1,4 @@
+# render.yaml (repo root)
 services:
   - type: web
     name: maritime-mvp-api
@@ -8,18 +9,25 @@ services:
     healthCheckPath: /health
     envVars:
       - key: DATABASE_URL
-        sync: false
+        sync: false                       # set in Render → Environment (include ?sslmode=require)
       - key: PSIX_WSDL
         value: https://cgmix.uscg.mil/xml/PSIXData.asmx?WSDL
       - key: PSIX_VERIFY_SSL
         value: "false"
+      - key: ALLOW_ORIGINS                 # optional: lock CORS to your static site domain
+        value: "*"
       - key: REDIS_URL
         fromService:
           type: keyvalue
           name: maritime-cache
           property: connectionString
+
   - type: keyvalue
     name: maritime-cache
     ipAllowList:
       - source: 0.0.0.0/0
         description: everywhere
+
+  - type: static
+    name: maritime-mvp-frontend
+    staticPublishPath: frontend
