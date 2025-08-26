@@ -27,7 +27,10 @@ app = FastAPI(title="Maritime MVP API", version="0.1.4")
 # Log which DSN we think we’re using
 try:
     u = make_url(settings.sqlalchemy_url)
-    logger.info("DB target → user=%s host=%s port=%s db=%s", u.username, u.host, u.port, u.database)
+    logger.info(
+        "DB target → user=%s host=%s port=%s db=%s",
+        u.username, u.host, u.port, u.database
+    )
     logger.info("DB config source → %s", "DATABASE_URL" if settings.database_url else "PGVARS")
 except Exception:
     logger.exception("Could not parse DB URL")
@@ -65,8 +68,7 @@ def health() -> Dict[str, Any]:
     return {"ok": True, "db_ok": info.get("connect_ok", False)}
 
 
-# ---------- DEBUG ENDPOINTS (remove later) ----------
-
+# ---------- DEBUG ENDPOINTS ----------
 @app.get("/debug/db/info")
 def db_info() -> Dict[str, Any]:
     """Show sanitized DSN details the app is using."""
@@ -80,7 +82,6 @@ def db_ping() -> Dict[str, Any]:
 
 
 # ---------- APP ENDPOINTS ----------
-
 @app.get("/ports")
 def list_ports() -> List[Dict[str, Optional[str] | bool]]:
     db: Session = SessionLocal()
