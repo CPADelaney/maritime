@@ -1,59 +1,34 @@
+# src/maritime_mvp/db.py
 from __future__ import annotations
-import logging
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.exc import OperationalError
 from .settings import settings
 
-# Make all functions available for import
-__all__ = ['SessionLocal', 'engine', 'init_db', 'test_connection']
+# Update the connection string for psycopg3
+# psycopg3 uses 'postgresql+psycopg' instead of 'postgresql+psycopg2'
+def get_sqlalchemy_url():
+    url = settings.sqlalchemy_url
+    # Convert psycopg2 URL to psycopg3 format
+    if 'postgresql+psycopg2' in url:
+        url = url.replace('postgresql+psycopg2', 'postgresql+psycopg')
+    elif url.startswith('postgresql://'):
+        # Default postgresql:// uses psycopg2, explicitly use psycopg
+        url = url.replace('postgresql://', 'postgresql+psycopg://')
+    return url
 
-logger = logging.getLogger("maritime-api")
-
-# Supabase can drop idle conns; pre_ping + recycle helps.
 engine = create_engine(
-    settings.sqlalchemy_url,
+    get_sqlalchemy_url(),
     pool_pre_ping=True,
     pool_recycle=300,
-    # Add these for better debugging
-    echo=False,  # Set to True for SQL query logging
+    # psycopg3 specific options
     connect_args={
-        "connect_timeout": 10,  # Connection timeout in seconds
+        "options": "-c statement_timeout=30000"  # 30 second timeout
     }
 )
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
 
-def test_connection() -> bool:
-    """Test database connection before creating tables"""
-    try:
-        with engine.connect() as conn:
-            result = conn.execute(text("SELECT 1"))
-            logger.info("Database connection test successful")
-            return True
-    except OperationalError as e:
-        logger.error(f"Database connection test failed: {e}")
-        return False
-
 def init_db() -> None:
-    """Initialize database tables with better error handling"""
-    try:
-        # First test the connection
-        if not test_connection():
-            logger.error("Skipping table creation due to connection failure")
-            logger.warning("Database initialization failed, but API will start. Some endpoints may not work.")
-            return
-        
-        # Safe if tables already exist
-        from .models import Base
-        Base.metadata.create_all(bind=engine)
-        logger.info("Database tables initialized successfully")
-        
-    except OperationalError as e:
-        logger.error(f"DB init failed (create_all): {e}")
-        logger.warning("Startup complete, but DB init failed (see logs).")
-        # Don't raise - let the app start even if DB is down
-        # Individual endpoints will fail with proper error messages
-    except Exception as e:
-        logger.error(f"Unexpected error during DB init: {e}")
-        logger.warning("Startup complete, but DB init failed (see logs).")
+    # Safe if tables already exist
+    from .models import Base
+    Base.metadata.create_all(bind=engine)
