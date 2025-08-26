@@ -477,29 +477,41 @@
             return null;
           };
         
+          // local helper (no `this`!)
+          const scanByKey = (obj, keyRegex, accept = (val) => String(val).trim() !== '') => {
+            for (const [k, val] of Object.entries(obj)) {
+              if (val == null) continue;
+              if (keyRegex.test(k)) {
+                const s = String(val).trim();
+                if (accept(s)) return s;
+              }
+            }
+            return null;
+          };
+        
           // Canonical id & name
           out.VesselID   = pick('VesselID','vesselid','ID','id');
           out.VesselName = pick('VesselName','vesselname','Name','name') ?? '(unnamed)';
         
-          // Call sign — try PSIX variants, then regex scan
+          // Call sign
           out.CallSign =
             pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign') ??
-            this.scanByKey(out, /(call.?sign|radio.?call)/i);
+            scanByKey(out, /(call.?sign|radio.?call)/i);
         
-          // Flag / country — try common label + regex
+          // Flag / country
           out.Flag =
             pick('CountryLookupName','Flag','FlagName','FlagOfRegistry','FlagState','FlagCountry','FlagCode','flag') ??
-            this.scanByKey(out, /(flag|country).*(name|lookup|state|country)?/i, v => isNaN(v));
+            scanByKey(out, /(flag|country).*(name|lookup|state|country)?/i, v => isNaN(v));
         
-          // Type / service — prefer human text, not IDs
+          // Type / service
           out.VesselType =
             pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype') ??
-            this.scanByKey(out, /(service|type)/i, v => isNaN(v) && String(v).length < 80);
+            scanByKey(out, /(service|type)/i, v => isNaN(v) && String(v).length < 80);
         
           // Gross tonnage
           out.GrossTonnage =
             pick('GrossTonnage','GT','Gross_Tonnage','grosstonnage','GrossTons','GrossTonnageText') ??
-            this.scanByKey(out, /(gross.*ton|^gt$)/i);
+            scanByKey(out, /(gross.*ton|^gt$)/i);
         
           // Nice-to-haves
           out.YearBuilt = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year');
