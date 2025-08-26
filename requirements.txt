@@ -9,3 +9,4 @@ zeep
 httpx
 python-dateutil
 jinja2
+gunicorn
