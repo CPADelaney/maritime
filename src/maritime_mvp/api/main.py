@@ -1,4 +1,4 @@
-# src/maritime_mvp/api/main.py
+# src/maritime_mvp/api/main.py (Updated - removed zeep imports)
 from __future__ import annotations
 import os
 import logging
@@ -13,7 +13,6 @@ from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select
 from sqlalchemy.orm import Session
-from zeep.helpers import serialize_object
 
 from ..db import SessionLocal, init_db
 from ..rules.fee_engine import FeeEngine, EstimateContext
@@ -32,9 +31,9 @@ logger = logging.getLogger("maritime-api")
 # Create FastAPI app
 app = FastAPI(
     title="Maritime MVP API", 
-    version="0.2.0",
+    version="0.2.1",
     description="Port call fee estimator with live data integration",
-    docs_url="/api/docs",  # Move docs to /api/docs to avoid conflicts
+    docs_url="/api/docs",
     redoc_url="/api/redoc"
 )
 
@@ -50,15 +49,14 @@ app.add_middleware(
 )
 
 # ----- Static File Serving -----
-# Find the frontend directory - try multiple possible locations
 def find_frontend_dir() -> Optional[Path]:
     """Find the frontend directory in various possible locations."""
     possible_paths = [
-        Path("frontend"),  # Running from project root
-        Path("../frontend"),  # Running from src
-        Path("../../frontend"),  # Running from src/maritime_mvp
-        Path("../../../frontend"),  # Running from src/maritime_mvp/api
-        Path(__file__).parent.parent.parent.parent / "frontend",  # Relative to this file
+        Path("frontend"),
+        Path("../frontend"),
+        Path("../../frontend"),
+        Path("../../../frontend"),
+        Path(__file__).parent.parent.parent.parent / "frontend",
     ]
     
     for path in possible_paths:
@@ -72,13 +70,11 @@ def find_frontend_dir() -> Optional[Path]:
 # Mount frontend if available
 frontend_dir = find_frontend_dir()
 if frontend_dir:
-    # Create the index.html if it doesn't exist (fallback)
     index_file = frontend_dir / "index.html"
     if not index_file.exists():
         logger.warning(f"index.html not found in {frontend_dir}, creating fallback")
         index_file.write_text(FALLBACK_FRONTEND_HTML)
     
-    # Mount the static files
     app.mount("/static", StaticFiles(directory=str(frontend_dir), html=True), name="static")
     logger.info(f"Frontend mounted at /static from {frontend_dir}")
 
@@ -98,10 +94,8 @@ def _startup():
 async def root():
     """Serve the main application or redirect to it."""
     if frontend_dir and (frontend_dir / "index.html").exists():
-        # Serve the actual frontend file
         return FileResponse(frontend_dir / "index.html")
     else:
-        # Return a helpful landing page
         return HTMLResponse(FALLBACK_LANDING_HTML)
 
 @app.get("/app", response_class=HTMLResponse, include_in_schema=False)
@@ -112,7 +106,6 @@ async def app_root():
     else:
         return HTMLResponse(FALLBACK_FRONTEND_HTML)
 
-# Catch-all route for frontend files
 @app.get("/app/{path:path}", include_in_schema=False)
 async def serve_frontend(path: str):
     """Serve frontend files."""
@@ -120,7 +113,6 @@ async def serve_frontend(path: str):
         file_path = frontend_dir / path
         if file_path.exists() and file_path.is_file():
             return FileResponse(file_path)
-        # Default to index.html for SPA routing
         return FileResponse(frontend_dir / "index.html")
     raise HTTPException(status_code=404, detail="Frontend not available")
 
@@ -130,7 +122,7 @@ def health() -> Dict[str, Any]:
     """Health check endpoint."""
     return {
         "ok": True,
-        "version": "0.2.0",
+        "version": "0.2.1",
         "cache_stats": get_cache_stats(),
         "frontend_available": frontend_dir is not None
     }
@@ -214,8 +206,9 @@ def search_vessels(
     
     client = PsixClient()
     try:
-        raw = client.search_by_name(name)
-        return serialize_object(raw, dict)
+        result = client.search_by_name(name)
+        # Result is already a dict with our new client
+        return result
     except Exception as e:
         logger.exception("PSIX search failed")
         raise HTTPException(status_code=502, detail=f"PSIX search failed: {e!s}")
@@ -225,8 +218,8 @@ def get_vessel_by_id(vessel_id: int) -> Any:
     """Get vessel information by PSIX vessel ID."""
     client = PsixClient()
     try:
-        raw = client.get_vessel_summary(vessel_id=vessel_id)
-        return serialize_object(raw, dict)
+        result = client.get_vessel_summary(vessel_id=vessel_id)
+        return result
     except Exception as e:
         logger.exception(f"PSIX lookup failed for ID {vessel_id}")
         raise HTTPException(status_code=502, detail=f"PSIX lookup failed: {e!s}")
