@@ -22,6 +22,14 @@ logger = logging.getLogger("maritime-api")
 
 app = FastAPI(title="Maritime MVP API", version="0.1.3")
 
+from sqlalchemy.engine.url import make_url
+from ..settings import settings
+try:
+    u = make_url(settings.sqlalchemy_url)
+    logger.info("DB target → user=%s host=%s port=%s db=%s", u.username, u.host, u.port, u.database)
+except Exception:
+    logger.exception("Could not parse DB URL")
+
 # ----- CORS -----
 _allow = os.getenv("ALLOW_ORIGINS")
 allow_origins: List[str] = [o.strip() for o in _allow.split(",")] if _allow else ["*"]
