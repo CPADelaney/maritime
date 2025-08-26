@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -241,32 +241,27 @@ def _startup() -> None:
         logger.info("Frontend available at /app")
 
 # ----- Root & Frontend -----
-@app.get("/", include_in_schema=False)
-def root() -> RedirectResponse | HTMLResponse:
-    # Prefer sending users to the app; if missing, show landing
+@app.get("/", include_in_schema=False, response_class=HTMLResponse, response_model=None)
+def root() -> Response:
     if frontend_dir and (frontend_dir / "index.html").exists():
         return RedirectResponse(url="/app")
     return HTMLResponse(FALLBACK_LANDING_HTML)
 
-@app.get("/app", include_in_schema=False)
-def app_root():
+@app.get("/app", include_in_schema=False, response_class=HTMLResponse, response_model=None)
+def app_root() -> Response:
+    if frontend_dir and (frontend_dir / "index.html").exists():
+        return FileResponse(frontend_dir / "index.html")
+    return HTMLResponse(FALLBACK_FRONTEND_HTML)
+
+@app.get("/app/{path:path}", include_in_schema=False, response_class=HTMLResponse, response_model=None)
+def app_static(path: str) -> Response:
     if frontend_dir:
+        file_path = frontend_dir / path
+        if file_path.exists() and file_path.is_file():
+            return FileResponse(file_path)
         index = frontend_dir / "index.html"
         if index.exists():
             return FileResponse(index)
-    return HTMLResponse(FALLBACK_FRONTEND_HTML)
-
-@app.get("/app/{path:path}", include_in_schema=False)
-def app_static(path: str):
-    if not frontend_dir:
-        return HTMLResponse(FALLBACK_FRONTEND_HTML)
-    file_path = frontend_dir / path
-    if file_path.exists() and file_path.is_file():
-        return FileResponse(file_path)
-    # Fallback to index.html for SPA routes
-    index = frontend_dir / "index.html"
-    if index.exists():
-        return FileResponse(index)
     return HTMLResponse(FALLBACK_FRONTEND_HTML)
 
 # ----- System -----
