@@ -8,6 +8,7 @@ import os
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from sqlalchemy.orm import Session
 from zeep.helpers import serialize_object
 
@@ -16,7 +17,7 @@ from ..rules.fee_engine import FeeEngine, EstimateContext
 from ..clients.psix_client import PsixClient
 from ..models import Port
 
-app = FastAPI(title="Maritime MVP API", version="0.1.1")
+app = FastAPI(title="Maritime MVP API", version="0.1.2")
 
 # ----- CORS -----
 _allow = os.getenv("ALLOW_ORIGINS")
@@ -28,6 +29,11 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Root → redirect to docs
+@app.get("/", include_in_schema=False)
+def root() -> RedirectResponse:
+    return RedirectResponse(url="/docs")
 
 @app.get("/health")
 def health() -> Dict[str, bool]:
