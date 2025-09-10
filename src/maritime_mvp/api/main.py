@@ -497,7 +497,53 @@ def estimate(
     finally:
         db.close()
 
-# ----- Fee Estimation v2 (Comprehensive / JSON POST) -----
+@app.get("/imo_ports/search", tags=["Ports"])
+def search_imo_ports(q: str = Query(..., min_length=2), limit: int = Query(20, ge=1, le=100)):
+    db: Session = SessionLocal()
+    try:
+        rows = db.execute(text("""
+            SELECT unlocode, port_name, country_code, country_name
+            FROM imo_ports
+            WHERE unlocode ILIKE :q OR port_name ILIKE :q
+            ORDER BY CASE WHEN unlocode ILIKE :starts THEN 0 ELSE 1 END, port_name
+            LIMIT :limit
+        """), {"q": f"%{q}%", "starts": f"{q}%", "limit": limit}).mappings().all()
+        return list(rows)
+    finally:
+        db.close()
+
+@app.get("/imo_ports/{unlocode}", tags=["Ports"])
+def get_imo_port(unlocode: str):
+    db: Session = SessionLocal()
+    try:
+        row = db.execute(text("""
+            SELECT unlocode, port_name, country_code, country_name
+            FROM imo_ports WHERE unlocode = :u
+        """), {"u": unlocode}).mappings().first()
+        if not row:
+            raise HTTPException(status_code=404, detail="UN/LOCODE not found")
+        return dict(row)
+    finally:
+        db.close()
+
+# Place this near the top of the module (module-level constant)
+UNLOCODE_TO_INTERNAL = {
+    # Bay Area
+    "USOAK": "SFBAY",
+    "USSFO": "SFBAY",
+    "USSTK": "STKN",
+    "USSAC": "STKN",
+    # Puget Sound
+    "USSEA": "PUGET",
+    "USTAC": "PUGET",
+    # Columbia River
+    "USPDX": "COLRIV",
+    "USAST": "COLRIV",  # Astoria
+    # Southern California (treat LA/LB as combined internal region)
+    "USLAX": "LALB",
+    "USLGB": "LALB",
+}
+
 @app.post("/v2/estimate", tags=["Estimates"])
 def estimate_v2(
     vessel_name: str = Body(..., embed=True),
@@ -519,15 +565,35 @@ def estimate_v2(
 ) -> Dict[str, Any]:
     """
     Comprehensive estimator using vessel specs + voyage context.
+    Supports arrival as UN/LOCODE and maps to internal `ports.code` when needed.
     POST JSON body with the fields above (flat body, embedded).
     """
     db: Session = SessionLocal()
     try:
-        # Validate arrival port exists (enriches also cascades to APHIS logic, MISP, etc.)
-        port = db.execute(select(Port).where(Port.code == arrival_port_code)).scalar_one_or_none()
-        if not port:
-            raise HTTPException(status_code=404, detail=f"Port {arrival_port_code} not found")
+        # ---- Resolve arrival port to an internal Port row ----
+        requested_unloc = (arrival_port_code or "").strip().upper()
+        resolved_code = requested_unloc  # assume caller used an internal code already
 
+        # Try direct match against internal ports table
+        port = db.execute(select(Port).where(Port.code == resolved_code)).scalar_one_or_none()
+
+        # If not found, try UN/LOCODE → internal mapping
+        used_mapping = False
+        if not port:
+            mapped = UNLOCODE_TO_INTERNAL.get(requested_unloc)
+            if mapped:
+                resolved_code = mapped
+                port = db.execute(select(Port).where(Port.code == resolved_code)).scalar_one_or_none()
+                used_mapping = port is not None
+
+        if not port:
+            # Final attempt: keep a helpful message
+            raise HTTPException(
+                status_code=404,
+                detail=f"Arrival port '{arrival_port_code}' not supported yet (add to ports table or mapping)."
+            )
+
+        # ---- Build engine and contexts ----
         engine = FeeEngine(db)
         engine.ytd_cbp_paid = ytd_cbp_paid
         engine.tonnage_year_paid = tonnage_year_paid
@@ -542,17 +608,17 @@ def estimate_v2(
             draft_meters=draft_meters,
         )
         voyage = VoyageContext(
-            previous_port_code=previous_port_code,
-            arrival_port_code=arrival_port_code,
-            next_port_code=next_port_code,
+            previous_port_code=(previous_port_code or "").strip().upper(),
+            arrival_port_code=requested_unloc,  # keep original UN/LOCODE in the voyage context
+            next_port_code=(next_port_code or None if next_port_code is None else next_port_code.strip().upper()),
             eta=eta or datetime.utcnow(),
             etd=etd,
-            days_alongside=days_alongside,
+            days_alongside=max(1, int(days_alongside or 1)),
         )
 
         result = engine.calculate_comprehensive(vessel, voyage)
 
-        # Derive quick totals for convenience
+        # ---- Quick totals convenience ----
         try:
             mand = Decimal(result["totals"]["mandatory"])
             low = Decimal(result["totals"]["optional_low"])
@@ -565,11 +631,20 @@ def estimate_v2(
             "with_optional_low": str(mand + low),
             "with_optional_high": str(mand + high),
         }
+
+        # Echo both what the caller sent and what we resolved to internally
         result["port"] = {
-            "code": port.code, "name": port.name, "state": port.state,
-            "is_california": port.is_california, "is_cascadia": port.is_cascadia,
+            "arrival_unlocode": requested_unloc,
+            "resolved_internal_code": port.code,
+            "used_mapping": used_mapping,
+            "name": port.name,
+            "state": port.state,
+            "country": port.country,
+            "is_california": port.is_california,
+            "is_cascadia": port.is_cascadia,
         }
         return result
+
     except HTTPException:
         raise
     except Exception:
@@ -577,6 +652,7 @@ def estimate_v2(
         raise HTTPException(status_code=500, detail="v2 estimate calculation failed")
     finally:
         db.close()
+
 
 # ----- Live Data Bundle -----
 @app.get("/live/portbundle", tags=["Live Data"])
