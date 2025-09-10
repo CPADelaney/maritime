@@ -888,7 +888,7 @@
           return arr;
         },
 
-        selectVessel(v) {
+        async selectVessel(v) {
           this.selectedVessel = this.augment(v);
         
           // reset badges
@@ -933,7 +933,7 @@
           if (sv.Draft_m      != null) this.draftMeters  = prefer(this.draftMeters,  sv.Draft_m,      'autoDraft', 2);
         
           // if any core value still missing, try to enrich from likely detail endpoints (best-effort)
-          this.enrichVesselDimensions();
+          await this.enrichVesselDimensions();
         
           if (this.selectedPort) this.loadLiveData();
         },
