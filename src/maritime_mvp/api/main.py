@@ -1,18 +1,27 @@
 # src/maritime_mvp/api/main.py
 from __future__ import annotations
+
 import os
 import logging
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple, Literal
+from typing import Any, Dict, List, Optional, Literal
 
 from fastapi import FastAPI, HTTPException, Query, Response, Body
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
+
+# Optional faster JSON (falls back gracefully if orjson isn't installed)
+try:
+    from fastapi.responses import ORJSONResponse as DefaultJSONResponse  # type: ignore
+    _USE_ORJSON = True
+except Exception:  # pragma: no cover
+    DefaultJSONResponse = JSONResponse  # type: ignore
+    _USE_ORJSON = False
 
 from ..db import SessionLocal, init_db
 from ..rules.fee_engine import (
@@ -204,17 +213,22 @@ app = FastAPI(
     description="Port call fee estimator with live data integration and v2 comprehensive calculations",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
+    # Uses ORJSONResponse if available; otherwise JSONResponse.
+    default_response_class=DefaultJSONResponse,  # type: ignore[arg-type]
 )
 
 # ----- CORS -----
 _allow = os.getenv("ALLOW_ORIGINS") or os.getenv("ALLOWED_ORIGINS", "*")
-allow_origins: List[str] = [o.strip() for o in _allow.split(",")] if _allow else ["*"]
+allow_origins: List[str] = [o.strip() for o in _allow.split(",") if o.strip()] if _allow else ["*"]
+allow_all = (len(allow_origins) == 1 and allow_origins[0] == "*")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials=True,
+    # Browsers disallow credentials with "*"; use regex echo when fully open.
+    allow_credentials=not allow_all,
     allow_methods=["*"],
     allow_headers=["*"],
+    allow_origin_regex=".*" if allow_all else None,
 )
 
 # ----- Frontend mounting -----
@@ -293,9 +307,16 @@ def app_static(path: str) -> Response:
 # ----- System -----
 @app.get("/health", tags=["System"])
 def health() -> Dict[str, Any]:
+    db_ok = True
+    try:
+        with SessionLocal() as db:
+            db.execute(text("SELECT 1")).scalar()
+    except Exception:
+        db_ok = False
     return {
         "ok": True,
         "version": API_VERSION,
+        "db_ok": db_ok,
         "cache_stats": get_cache_stats(),
         "frontend_available": frontend_dir is not None,
         "features": [
@@ -444,7 +465,7 @@ def get_vessel_by_id(vessel_id: int) -> Dict[str, Any]:
 def estimate(
     port_code: str = Query(..., description="Port code (e.g., LALB, USOAK, USSFO)"),
     eta: date = Query(..., description="Estimated time of arrival"),
-    arrival_type: str = Query("FOREIGN", pattern="^(FOREIGN|COASTWISE)$"),
+    arrival_type: Literal["FOREIGN", "COASTWISE"] = Query("FOREIGN"),
     net_tonnage: Optional[Decimal] = Query(None),
     ytd_cbp_paid: Decimal = Query(Decimal("0")),
     include_optional: bool = Query(False),
@@ -458,7 +479,7 @@ def estimate(
         ctx = EstimateContext(
             port_code=port_code,
             arrival_date=eta,
-            arrival_type=arrival_type,
+            arrival_type=str(arrival_type),
             net_tonnage=net_tonnage,
             ytd_cbp_paid=ytd_cbp_paid,
         )
@@ -478,7 +499,7 @@ def estimate(
             "port_code": port_code,
             "port_name": port.name,
             "eta": str(eta),
-            "arrival_type": arrival_type,
+            "arrival_type": str(arrival_type),
             "line_items": [
                 {"code": i.code, "name": i.name, "amount": str(i.amount), "details": i.details}
                 for i in items
@@ -526,7 +547,7 @@ def get_imo_port(unlocode: str):
     finally:
         db.close()
 
-# Place this near the top of the module (module-level constant)
+# UN/LOCODE -> internal region mapping
 UNLOCODE_TO_INTERNAL = {
     # Bay Area
     "USOAK": "SFBAY",
@@ -544,24 +565,25 @@ UNLOCODE_TO_INTERNAL = {
     "USLGB": "LALB",
 }
 
+# ----- Fee Estimation (v2 Comprehensive) -----
 @app.post("/v2/estimate", tags=["Estimates"])
 def estimate_v2(
     vessel_name: str = Body(..., embed=True),
     vessel_type: Literal[
         "container","tanker","bulk_carrier","cruise","roro","general_cargo","lng","vehicle_carrier"
     ] = Body("general_cargo", embed=True),
-    gross_tonnage: Decimal = Body(Decimal("0"), embed=True),
-    net_tonnage: Decimal = Body(Decimal("0"), embed=True),
-    loa_meters: Decimal = Body(Decimal("0"), embed=True),
-    draft_meters: Decimal = Body(Decimal("0"), embed=True),
+    gross_tonnage: Decimal = Body(Decimal("0"), ge=0, embed=True),
+    net_tonnage: Decimal = Body(Decimal("0"), ge=0, embed=True),
+    loa_meters: Decimal = Body(Decimal("0"), ge=0, embed=True),
+    draft_meters: Decimal = Body(Decimal("0"), ge=0, embed=True),
     previous_port_code: str = Body(..., embed=True, description="UN/LOCODE like CNSHA or USLAX"),
     arrival_port_code: str = Body(..., embed=True, description="UN/LOCODE like USOAK, USSEA, USPDX"),
     next_port_code: Optional[str] = Body(None, embed=True),
     eta: Optional[datetime] = Body(None, embed=True),
     etd: Optional[datetime] = Body(None, embed=True),
-    days_alongside: int = Body(2, embed=True),
-    ytd_cbp_paid: Decimal = Body(Decimal("0"), embed=True),
-    tonnage_year_paid: Decimal = Body(Decimal("0"), embed=True),
+    days_alongside: int = Body(2, ge=1, embed=True),
+    ytd_cbp_paid: Decimal = Body(Decimal("0"), ge=0, embed=True),
+    tonnage_year_paid: Decimal = Body(Decimal("0"), ge=0, embed=True),
 ) -> Dict[str, Any]:
     """
     Comprehensive estimator using vessel specs + voyage context.
@@ -607,10 +629,14 @@ def estimate_v2(
             loa_meters=loa_meters,
             draft_meters=draft_meters,
         )
+
+        prev_unloc = (previous_port_code or "").strip().upper()
+        next_unloc = ((next_port_code or "").strip().upper() or None)
+
         voyage = VoyageContext(
-            previous_port_code=(previous_port_code or "").strip().upper(),
+            previous_port_code=prev_unloc,
             arrival_port_code=requested_unloc,  # keep original UN/LOCODE in the voyage context
-            next_port_code=(next_port_code or None if next_port_code is None else next_port_code.strip().upper()),
+            next_port_code=next_unloc,          # normalized: empty -> None
             eta=eta or datetime.utcnow(),
             etd=etd,
             days_alongside=max(1, int(days_alongside or 1)),
@@ -652,7 +678,6 @@ def estimate_v2(
         raise HTTPException(status_code=500, detail="v2 estimate calculation failed")
     finally:
         db.close()
-
 
 # ----- Live Data Bundle -----
 @app.get("/live/portbundle", tags=["Live Data"])
@@ -791,6 +816,13 @@ def get_system_stats() -> Dict[str, Any]:
     db = SessionLocal()
     try:
         stats: Dict[str, Any] = {}
+
+        # Basic DB liveness for callers that want one call:
+        stats["db_ok"] = True
+        try:
+            _ = db.execute(text("SELECT 1")).scalar()
+        except Exception:
+            stats["db_ok"] = False
 
         # Port statistics (optional tables; guard with try)
         try:
