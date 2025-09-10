@@ -731,10 +731,10 @@
 
         // Normalize/augment vessel row so UI keys always exist + parse dims
         augment(v) {
-          // shallow copy so we don't mutate the original
-          const src = { ...v };
+          // Safe source clone
+          const src = (v && typeof v === 'object') ? { ...v } : {};
         
-          // deep scan helper (walks nested objects up to a safe depth)
+          // ---------- helpers (read-only over `src`) ----------
           const scanDeep = (obj, keyRegex, accept = (val) => String(val).trim() !== '', depth = 0) => {
             if (!obj || depth > 4) return null;
             for (const [k, val] of Object.entries(obj)) {
@@ -750,23 +750,7 @@
             }
             return null;
           };
-
-          const extractIMO = () => {
-            // direct fields first
-            const direct = pick('IMONumber','IMO','ImoNumber','IMO_Number','PrimaryVesselNumber','primary_vessel_number');
-            if (direct && /\d{6,7}/.test(String(direct))) return String(direct).match(/\d{6,7}/)[0];
-          
-            // look for any field that *mentions* IMO and contains digits
-            const valHit = scanDeep(src, /(imo|imo\s*no|imo\s*number)/i, v => /\d{6,7}/.test(String(v)));
-            if (valHit) return String(valHit).match(/\d{6,7}/)[0];
-          
-            // brute scan of serialized row (last resort)
-            const blob = JSON.stringify(src);
-            const m = blob.match(/imo[^0-9]{0,6}(\d{6,7})/i) || blob.match(/\b(\d{7})\b/);
-            return m ? m[1] : null;
-          };
-          
-          out.IMONumber = extractIMO();
+          const scan = (re, accept) => scanDeep(src, re, accept);
         
           const pick = (...cands) => {
             for (const c of cands) {
@@ -783,20 +767,43 @@
             const n = Number(String(val).replace(/[^0-9.+-]/g, ''));
             return Number.isFinite(n) ? n : null;
           };
+        
           const toMeters = (val) => {
             if (val == null) return null;
             const s = String(val).toLowerCase();
             const n = toNumber(s);
             if (n == null) return null;
             if (s.includes('ft') || s.includes('feet') || s.includes("'")) return n * 0.3048;
-            return n; // assume meters when no explicit unit
+            return n; // assume meters if unitless
           };
         
+          // Extract a 6–7 digit IMO number from common fields or anywhere in the object
+          const extractIMO = () => {
+            const getDigits = (v) => v ? String(v).match(/\b\d{6,7}\b/)?.[0] : null;
+            // direct/common fields first
+            const direct = pick(
+              'IMONumber','IMO','ImoNumber','IMO_Number','IMONo',
+              'PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No'
+            );
+            let val = getDigits(direct);
+            if (!val) {
+              // any key mentioning "imo" that contains digits
+              const hit = scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
+              val = getDigits(hit);
+            }
+            if (!val) {
+              // brute-force last resort
+              const blob = JSON.stringify(src);
+              const m = blob.match(/imo[^0-9]{0,6}(\d{6,7})/i) || blob.match(/\b(\d{7})\b/);
+              val = m ? m[1] : null;
+            }
+            return val;
+          };
+        
+          // ---------- build the normalized output ----------
           const out = { ...src };
         
-          // core identity fields (with deep fallbacks)
-          const scan = (re, accept) => scanDeep(src, re, accept);
-
+          // identity / descriptors
           out.VesselID   = pick('VesselID','vesselid','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
           out.VesselName = pick('VesselName','vesselname','Name','name') ?? scan(/vessel.*name|^name$/i);
           out.CallSign   = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign')
@@ -805,37 +812,29 @@
                            ?? scan(/(flag|country)(.*(name|lookup|state|country))?/i, v => isNaN(v));
           out.VesselType = pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype')
                            ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
-          
-          // NEW: useful IDs for enrichment
-          out.IMONumber = pick('IMONumber','IMO','IMONo','ImoNumber','IMO_Number','IMOShipNo',
-                               'PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No')
-                          ?? scan(/(^|[\W_])imo($|[\W_])/i, v => {
-                               const m = String(v).match(/\b\d{6,7}\b/);
-                               return m ? m[0] : null;
-                             });
-          
-          out.OfficialNumber = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber')
-                               ?? scan(/official.?number/i);
-          
-          out.YearBuilt = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
-                          ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i, v => {
-                               const n = Number(String(v).replace(/\D/g,''));
-                               return Number.isFinite(n) ? n : null;
-                             });
         
-          // tonnage (grab any convention fields too)
-          out.GrossTonnage = pick('GrossTonnage','GT','Gross_Tonnage','GrossTons','GrossTonnageText')
-                             ?? scan(/gross.*ton|(^|\b)gt\b/i);
-          out.NetTonnage   = pick('NetTonnage','NT','Net_Tonnage')
-                             ?? scan(/net.*ton|(^|\b)nt\b/i);
+          // IDs
+          out.IMONumber       = extractIMO();
+          out.OfficialNumber  = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber')
+                                ?? scan(/official.?number/i);
+          out.YearBuilt       = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
+                                ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i, v => {
+                                  const n = Number(String(v).replace(/\D/g,''));
+                                  return Number.isFinite(n) ? n : null;
+                                });
         
-          const gtN = toNumber(out.GrossTonnage);
-          const ntN = toNumber(out.NetTonnage);
-          if (gtN != null) out.GrossTonnage = gtN;
-          if (ntN != null) out.NetTonnage   = ntN;
+          // tonnage
+          let gross = pick('GrossTonnage','GT','Gross_Tonnage','GrossTons','GrossTonnageText')
+                      ?? scan(/gross.*ton|(^|\b)gt\b/i);
+          let net   = pick('NetTonnage','NT','Net_Tonnage')
+                      ?? scan(/net.*ton|(^|\b)nt\b/i);
         
-          // dimensions: handle common synonyms and units
-          // PSIX examples: "Length: 1103.30 ft", "Breadth: 140.90 ft", "Depth: 80.40 ft"
+          const gtN = toNumber(gross);
+          const ntN = toNumber(net);
+          out.GrossTonnage = (gtN != null) ? gtN : gross ?? null;
+          out.NetTonnage   = (ntN != null) ? ntN : net   ?? null;
+        
+          // dimensions
           const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','loa_m','loa','length_overall','Length (ft)')
                            ?? scan(/(length|loa)/i);
           const beamRaw  = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','beam_m','Breadth (ft)')
@@ -870,7 +869,11 @@
             if (!r.ok) throw new Error('Search failed');
             const data = await r.json();
 
-            const raw = Array.isArray(data.Table) ? data.Table : [];
+            const raw = Array.isArray(data?.Table) ? data.Table
+                      : Array.isArray(data?.rows)  ? data.rows
+                      : Array.isArray(data)        ? data
+                      : [];
+            
             const augmented = raw.map(this.augment.bind(this));
 
             this.vesselTotal = (typeof data.total === 'number') ? data.total : augmented.length;
