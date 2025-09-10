@@ -15,7 +15,7 @@ from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 # v2 router (enhanced endpoints)
-from .enhanced_routes import router as v2_router
+from .routes import router as v2_router
 
 # Optional faster JSON (falls back gracefully if orjson isn't installed)
 try:
