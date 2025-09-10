@@ -7,6 +7,8 @@
   <!-- Tailwind + Alpine -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <!-- Chart.js for historical trends -->
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     @keyframes slideUp { from { transform: translateY(8px); opacity:.0 } to { transform: translateY(0); opacity:1 } }
     .animate-slide-up { animation: slideUp .25s ease-out forwards }
@@ -279,6 +281,12 @@
                     <input x-model.number="draftMeters" type="number" step="0.1" class="w-full field" />
                   </div>
                 </div>
+
+                <!-- Beam (m) -->
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Beam (m)</label>
+                  <input x-model.number="beamMeters" type="number" step="0.1" class="w-full field" />
+                </div>
               </div>
             </div>
           </div>
@@ -419,6 +427,183 @@
           </div>
 
           <p class="text-xs text-gray-500 mt-4" x-text="estimateV2?.disclaimer"></p>
+        </div>
+
+        <!-- Historical Fee Trends -->
+        <div class="glass card p-6 animate-slide-up">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xl font-semibold">Historical Fee Trends</h3>
+            <span class="badge">beta</span>
+          </div>
+
+          <div class="grid sm:grid-cols-3 gap-3 mb-3">
+            <div>
+              <label class="block text-xs font-medium mb-1">Port (internal)</label>
+              <select x-model="trendsPort" class="w-full field">
+                <option value="">Select…</option>
+                <template x-for="p in ports" :key="p.code">
+                  <option :value="p.code" x-text="`${p.name} (${p.code})`"></option>
+                </template>
+              </select>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1">Months</label>
+              <input x-model.number="trendsMonths" type="number" min="3" max="60" class="w-full field" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1">Source</label>
+              <select x-model="trendsSource" class="w-full field">
+                <option value="fees">Fees table</option>
+                <option value="estimates">Estimates</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-2 mb-3">
+            <button @click="loadTrends" :disabled="!trendsPort" class="btn btn-soft px-3 py-1.5 disabled:opacity-50">Load</button>
+            <span class="text-xs text-slate-500">Plots CBP, APHIS, MX, Tonnage (if available)</span>
+          </div>
+
+          <div class="relative">
+            <canvas id="trendsChart" height="140"></canvas>
+          </div>
+        </div>
+
+        <!-- Multi-Port Voyage Planner -->
+        <div class="glass card p-6 animate-slide-up">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-xl font-semibold">Multi-Port Voyage Planner</h3>
+            <span class="badge">new</span>
+          </div>
+
+          <div class="grid sm:grid-cols-3 gap-3">
+            <div class="sm:col-span-3">
+              <label class="block text-sm font-medium text-gray-700 mb-1">Vessel Name</label>
+              <input x-model="mpVesselName" class="w-full field" placeholder="Defaults to selected vessel name if blank" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
+              <input x-model="mpStartDate" type="date" class="w-full field" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Days Between Ports</label>
+              <input x-model.number="mpDaysBetween" type="number" min="1" class="w-full field" />
+            </div>
+            <div>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Days in Port</label>
+              <input x-model.number="mpDaysInPort" type="number" min="1" class="w-full field" />
+            </div>
+          </div>
+
+          <div class="mt-3">
+            <label class="block text-sm font-medium text-gray-700 mb-1">Ports (UN/LOCODE sequence)</label>
+            <div class="flex gap-2">
+              <input x-model="mpPortInput" @input.debounce.250ms="searchUnloc('mp')" placeholder="Type UN/LOCODE or name…" class="w-full field" />
+              <button @click="addMpPort" class="btn btn-soft px-3 py-1.5">Add</button>
+            </div>
+
+            <div x-show="unlocMp.length" class="mt-1 border rounded-lg bg-white shadow-sm">
+              <template x-for="p in unlocMp" :key="p.locode">
+                <div @click="mpPortInput = p.locode; unlocMp = []" class="px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
+                  <span class="font-medium" x-text="p.port_name"></span>
+                  <span class="ml-2 chip bg-slate-100" x-text="p.locode"></span>
+                </div>
+              </template>
+            </div>
+
+            <div class="mt-2 flex flex-wrap gap-2">
+              <template x-for="(code, i) in mpPorts" :key="i">
+                <span class="chip bg-slate-100">
+                  <span x-text="code"></span>
+                  <button @click="removeMpPort(i)" class="ml-1 text-slate-500 hover:text-slate-700" aria-label="remove">×</button>
+                </span>
+              </template>
+            </div>
+          </div>
+
+          <div class="mt-3 grid sm:grid-cols-3 gap-3">
+            <div>
+              <label class="block text-xs font-medium mb-1">Vessel Type</label>
+              <select x-model="vesselType" class="w-full field">
+                <option value="general_cargo">General Cargo</option>
+                <option value="container">Container</option>
+                <option value="tanker">Tanker</option>
+                <option value="bulk_carrier">Bulk Carrier</option>
+                <option value="cruise">Cruise</option>
+                <option value="roro">Ro-Ro</option>
+                <option value="lng">LNG</option>
+                <option value="vehicle_carrier">Vehicle Carrier</option>
+              </select>
+            </div>
+            <div><label class="block text-xs font-medium mb-1">GT</label><input x-model.number="grossTonnage" type="number" step="1" class="w-full field"/></div>
+            <div><label class="block text-xs font-medium mb-1">NT</label><input x-model.number="netTonnage" type="number" step="1" class="w-full field"/></div>
+            <div><label class="block text-xs font-medium mb-1">LOA (m)</label><input x-model.number="loaMeters" type="number" step="0.1" class="w-full field"/></div>
+            <div><label class="block text-xs font-medium mb-1">Draft (m)</label><input x-model.number="draftMeters" type="number" step="0.1" class="w-full field"/></div>
+            <div><label class="block text-xs font-medium mb-1">Beam (m)</label><input x-model.number="beamMeters" type="number" step="0.1" class="w-full field"/></div>
+          </div>
+
+          <div class="mt-3 flex items-center gap-2">
+            <button @click="submitMultiPort" :disabled="mpPorts.length < 2" class="btn btn-primary px-3 py-1.5 disabled:opacity-50">Plan Voyage</button>
+            <span class="text-xs text-slate-500">Add at least two UN/LOCODEs</span>
+          </div>
+
+          <div x-show="mpResult" class="mt-4">
+            <div class="text-sm text-slate-600 mb-2">
+              <div>
+                <span class="font-medium">Legs:</span> <span x-text="mpResult?.voyage_summary?.total_legs"></span> ·
+                <span class="font-medium">Days:</span> <span x-text="mpResult?.voyage_summary?.total_days"></span>
+              </div>
+            </div>
+
+            <div class="overflow-x-auto">
+              <table class="min-w-full text-sm">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-3 py-2 text-left">Leg</th>
+                    <th class="px-3 py-2 text-left">From → To</th>
+                    <th class="px-3 py-2 text-left">ETA / ETD</th>
+                    <th class="px-3 py-2 text-right">Mandatory</th>
+                    <th class="px-3 py-2 text-right">With Optional</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <template x-for="leg in (mpResult?.legs || [])" :key="leg.leg">
+                    <tr>
+                      <td class="px-3 py-2" x-text="leg.leg"></td>
+                      <td class="px-3 py-2" x-text="`${leg.from_port} → ${leg.to_port}`"></td>
+                      <td class="px-3 py-2">
+                        <div x-text="leg.eta"></div>
+                        <div class="text-xs text-slate-500" x-text="leg.etd"></div>
+                      </td>
+                      <td class="px-3 py-2 text-right" x-text="`$${Number(leg.fees?.mandatory || 0).toLocaleString()}`"></td>
+                      <td class="px-3 py-2 text-right" x-text="`$${(Number(leg.fees?.mandatory||0)+Number(leg.fees?.optional_high||0)).toLocaleString()}`"></td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+
+            <div class="mt-3 border-t pt-3 flex items-center justify-between">
+              <div class="text-sm">
+                <div class="font-medium">
+                  Total Mandatory:
+                  <span class="font-mono" x-text="`$${Number(mpResult?.total_voyage_cost?.mandatory || 0).toLocaleString()}`"></span>
+                </div>
+                <div>
+                  Total with Optional:
+                  <span class="font-mono" x-text="`$${Number(mpResult?.total_voyage_cost?.with_optional || 0).toLocaleString()}`"></span>
+                </div>
+              </div>
+              <div class="text-sm max-w-md text-slate-600">
+                <div class="font-medium mb-1">Suggestions</div>
+                <ul class="list-disc list-inside">
+                  <template x-for="s in (mpResult?.optimization_suggestions || [])" :key="s">
+                    <li x-text="s"></li>
+                  </template>
+                </ul>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- Live Data Tabs -->
@@ -583,10 +768,12 @@
         grossTonnage: 0,
         loaMeters: 0,
         draftMeters: 0,
+        beamMeters: 0,
 
         // UN/LOCODE suggestions
         unlocPrev: [],
         unlocNext: [],
+        unlocMp: [],
 
         // results
         estimate: null,
@@ -594,6 +781,21 @@
         estimateLoading: false,
         liveData: null,
         activeTab: 'documents',
+
+        // Trends state
+        trendsChart: null,
+        trendsPort: '',
+        trendsMonths: 12,
+        trendsSource: 'fees',
+
+        // Multi-port state
+        mpVesselName: '',
+        mpStartDate: new Date().toISOString().split('T')[0],
+        mpDaysBetween: 14,
+        mpDaysInPort: 2,
+        mpPortInput: '',
+        mpPorts: [],
+        mpResult: null,
 
         async init() {
           await this.checkHealth();
@@ -772,6 +974,7 @@
             net_tonnage: String(this.netTonnage || 0),
             loa_meters: String(this.loaMeters || 0),
             draft_meters: String(this.draftMeters || 0),
+            beam_meters: String(this.beamMeters || 0),
             previous_port_code: this.previousPortCode.trim().toUpperCase(),  // UN/LOCODE
             arrival_port_code: this.selectedPort,                              // internal code from /ports
             next_port_code: this.nextPortCode ? this.nextPortCode.trim().toUpperCase() : null,
@@ -802,6 +1005,98 @@
           }
         },
 
+        // Historical trends
+        async loadTrends() {
+          if (!this.trendsPort) return;
+          try {
+            const url = `${API_BASE}/api/v2/fees/historical/${encodeURIComponent(this.trendsPort)}?months=${this.trendsMonths}&source=${this.trendsSource}`;
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(await r.text());
+            const data = await r.json();
+
+            const series = data.series || {};
+            const labels = (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"] || []).map(p => p.month);
+
+            const mk = (key, color) => {
+              const arr = (series[key] || []).map(p => p.value);
+              return { label: key, data: arr, borderColor: color, backgroundColor: color, tension: .25, spanGaps: true };
+            };
+
+            const datasets = [];
+            const palette = { cbp: '#ef4444', aphis: '#10b981', mx: '#6366f1', ton: '#f59e0b' };
+
+            if (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"]) {
+              datasets.push(mk("CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE", palette.cbp));
+              if (!series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] && series["CBP_USER_FEE"]) {
+                datasets.push(mk("CBP_USER_FEE", palette.cbp));
+              }
+            }
+            if (series["APHIS_COMMERCIAL_VESSEL"]) datasets.push(mk("APHIS_COMMERCIAL_VESSEL", palette.aphis));
+            if (series["MX_VTS_PER_CALL"])        datasets.push(mk("MX_VTS_PER_CALL", palette.mx));
+            if (series["TONNAGE_TAX_PER_TON"])    datasets.push(mk("TONNAGE_TAX_PER_TON", palette.ton));
+
+            const ctx = document.getElementById('trendsChart').getContext('2d');
+            if (this.trendsChart) this.trendsChart.destroy();
+            this.trendsChart = new Chart(ctx, {
+              type: 'line',
+              data: { labels, datasets },
+              options: {
+                plugins: { legend: { position: 'bottom' } },
+                scales: { y: { ticks: { callback: v => '$' + Number(v).toLocaleString() } } }
+              }
+            });
+          } catch (e) {
+            console.error('Trends failed:', e);
+            alert('Failed to load trends.');
+          }
+        },
+
+        // Multi-port methods
+        addMpPort() {
+          const code = (this.mpPortInput || '').trim().toUpperCase();
+          if (!code) return;
+          this.mpPorts.push(code);
+          this.mpPortInput = '';
+          this.unlocMp = [];
+        },
+        removeMpPort(i) { this.mpPorts.splice(i, 1); },
+
+        async submitMultiPort() {
+          if (this.mpPorts.length < 2) {
+            alert('Add at least two UN/LOCODE ports.');
+            return;
+          }
+          const vessel = {
+            name: this.mpVesselName || this.selectedVessel?.VesselName || 'Unknown Vessel',
+            imo_number: this.selectedVessel?.IMONumber || null,
+            vessel_type: this.vesselType,
+            gross_tonnage: String(this.grossTonnage || 0),
+            net_tonnage: String(this.netTonnage || 0),
+            loa_meters: String(this.loaMeters || 0),
+            beam_meters: String(this.beamMeters || 0),
+            draft_meters: String(this.draftMeters || 0),
+          };
+          const request = {
+            vessel_name: vessel.name,
+            ports: this.mpPorts.slice(),
+            start_date: this.mpStartDate,
+            days_between_ports: Number(this.mpDaysBetween) || 14,
+            days_in_port: Number(this.mpDaysInPort) || 2,
+          };
+          try {
+            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ request, vessel })
+            });
+            if (!r.ok) throw new Error(await r.text());
+            this.mpResult = await r.json();
+          } catch (e) {
+            console.error('Multi-port failed:', e);
+            alert('Failed to calculate multi-port voyage.');
+          }
+        },
+
         // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
@@ -822,20 +1117,24 @@
           }
         },
 
-        // UN/LOCODE typeahead for previous/next ports
+        // UN/LOCODE typeahead for previous/next/mp ports
         async searchUnloc(current = 'prev') {
-          const q = (current === 'prev' ? this.previousPortCode : this.nextPortCode).trim();
-          if (q.length < 2) {
+          const baseQ = (current === 'prev' ? this.previousPortCode : this.nextPortCode).trim();
+          const query = current === 'mp' ? (this.mpPortInput || '').trim() : baseQ;
+
+          if (query.length < 2) {
             if (current === 'prev') this.unlocPrev = [];
-            else this.unlocNext = [];
+            else if (current === 'next') this.unlocNext = [];
+            else this.unlocMp = [];
             return;
           }
           try {
-            const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(q)}&limit=8`);
+            const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(query)}&limit=8`);
             if (!r.ok) throw new Error('UN/LOCODE search failed');
             const rows = await r.json();
             if (current === 'prev') this.unlocPrev = rows;
-            else this.unlocNext = rows;
+            else if (current === 'next') this.unlocNext = rows;
+            else this.unlocMp = rows;
           } catch (e) {
             console.error('UN/LOCODE search error:', e);
           }
@@ -862,7 +1161,6 @@
                 (c.details || '').replace(/\n/g, ' ')
               ]);
             }
-            
             // Totals (if present)
             const t = this.estimateV2?.totals;
             if (t && Object.keys(t).length) {
@@ -870,7 +1168,6 @@
               rows.push(['', 'TOTAL LOW', t.total_low ?? '', '', '', '', '']);
               rows.push(['', 'TOTAL HIGH', t.total_high ?? '', '', '', '', '']);
             }
-            
             // Quick totals (if present)
             const q = this.estimateV2?.quick_totals;
             if (q && Object.keys(q).length) {
@@ -878,7 +1175,7 @@
               rows.push(['', 'QUICK WITH OPTIONAL LOW', q.with_optional_low ?? '', '', '', '', '']);
               rows.push(['', 'QUICK WITH OPTIONAL HIGH', q.with_optional_high ?? '', '', '', '', '']);
             }
-            
+
             const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const a = document.createElement('a');
@@ -886,7 +1183,6 @@
             a.download = `estimate_v2_${this.selectedPort}_${this.eta}.csv`;
             a.click();
             return;
-
           }
 
           // v1 export
