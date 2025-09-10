@@ -15,6 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
+from .routes import router as enhanced_router
+app.include_router(enhanced_router)
+
 # Optional faster JSON (falls back gracefully if orjson isn't installed)
 try:
     from fastapi.responses import ORJSONResponse as DefaultJSONResponse  # type: ignore
