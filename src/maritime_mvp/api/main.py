@@ -2,20 +2,26 @@
 from __future__ import annotations
 import os
 import logging
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Response
+from fastapi import FastAPI, HTTPException, Query, Response, Body
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal, init_db
-from ..rules.fee_engine import FeeEngine, EstimateContext
+from ..rules.fee_engine import (
+    FeeEngine,
+    EstimateContext,
+    VesselSpecs,
+    VoyageContext,
+    VesselType,
+)
 from ..clients.psix_client import PsixClient
 from ..connectors.live_sources import (
     build_live_bundle,
@@ -24,8 +30,14 @@ from ..connectors.live_sources import (
 )
 from ..models import Port, Fee, Source
 
-logging.basicConfig(level=logging.INFO)
+# ---------------- Logging ----------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 logger = logging.getLogger("maritime-api")
+
+API_VERSION = "2.0.0"
 
 # ---------- HTML fallbacks (declare BEFORE use) ----------
 FALLBACK_LANDING_HTML = """
@@ -109,12 +121,7 @@ FALLBACK_FRONTEND_HTML = """
       </div>
       <div class="mb-3">
         <label class="block text-sm font-medium mb-1">Port</label>
-        <select x-model="selectedPort" class="w-full p-2 border rounded">
-          <option value="">Select port...</option>
-          <template x-for="p in ports" :key="p.code">
-            <option :value="p.code" x-text="p.name + (p.state ? ' ('+p.state+')' : '')"></option>
-          </template>
-        </select>
+        <select x-model="selectedPort" class="w-full p-2 border rounded"></select>
       </div>
       <div class="mb-3">
         <label class="block text-sm font-medium mb-1">ETA</label>
@@ -174,7 +181,7 @@ function maritimeApp() {
         const r = await fetch(API_BASE + '/vessels/search?limit=25&name=' + encodeURIComponent(this.vesselName));
         const data = await r.json();
         this.vesselResults = Array.isArray(data.Table) ? data.Table : [];
-        this.totalCount = data._count ?? this.vesselResults.length;
+        this.totalCount = data.total ?? this.vesselResults.length;
       } catch (e) { console.error('Search failed:', e); alert('Vessel search failed.'); }
       finally { this.searching = false; }
     },
@@ -192,20 +199,20 @@ function maritimeApp() {
 
 # ---------- App ----------
 app = FastAPI(
-    title="Maritime MVP API",
-    version="0.2.2",
-    description="Port call fee estimator with live data integration",
+    title="Maritime Port Call Estimator",
+    version=API_VERSION,
+    description="Port call fee estimator with live data integration and v2 comprehensive calculations",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
 )
 
 # ----- CORS -----
-_allow = os.getenv("ALLOW_ORIGINS")
+_allow = os.getenv("ALLOW_ORIGINS") or os.getenv("ALLOWED_ORIGINS", "*")
 allow_origins: List[str] = [o.strip() for o in _allow.split(",")] if _allow else ["*"]
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials=False,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -232,13 +239,28 @@ if frontend_dir:
 # ----- Startup -----
 @app.on_event("startup")
 def _startup():
-    """Initialize database on startup."""
+    """Initialize database on startup (and optionally run Alembic)."""
     try:
-        init_db()  # ← removed safe=True to match current db.init_db signature
+        init_db()
         logger.info("Startup complete, DB initialized.")
     except Exception:
-        # Preserve the previous 'safe=True' behavior: log and keep booting.
         logger.exception("DB init failed during startup; continuing without blocking app.")
+
+    # Optional: run Alembic migrations if configured
+    if os.getenv("ALEMBIC_AUTO", "0") in ("1", "true", "TRUE", "yes", "YES"):
+        try:
+            from alembic import command
+            from alembic.config import Config
+            cfg_path = Path("alembic.ini")
+            if cfg_path.exists():
+                alembic_cfg = Config(str(cfg_path))
+                command.upgrade(alembic_cfg, "head")
+                logger.info("Alembic migrations completed.")
+            else:
+                logger.warning("ALEMBIC_AUTO=1 but alembic.ini not found; skipping migrations.")
+        except Exception:
+            logger.exception("Alembic migration failed; continuing without blocking app.")
+
     if frontend_dir:
         logger.info("Frontend available at /app")
     else:
@@ -273,9 +295,16 @@ def app_static(path: str) -> Response:
 def health() -> Dict[str, Any]:
     return {
         "ok": True,
-        "version": "0.2.2",
+        "version": API_VERSION,
         "cache_stats": get_cache_stats(),
         "frontend_available": frontend_dir is not None,
+        "features": [
+            "legacy_estimator",
+            "v2_comprehensive_estimator",
+            "psix_search",
+            "live_port_bundle",
+            "alembic_optional",
+        ],
     }
 
 # ----- Ports -----
@@ -337,23 +366,17 @@ def get_port(port_code: str) -> Dict[str, Any]:
 def search_vessels(
     name: str = Query(..., description="Vessel name to search for"),
     page: int = Query(1, ge=1, description="Page number (1-based)"),
-    limit: int = Query(25, ge=1, le=100, description="Rows per page (default 25)")
+    limit: int = Query(25, ge=1, le=100, description="Rows per page (default 25)"),
 ) -> Any:
     """
     Search PSIX by name and return a paginated, trimmed list.
 
-    Response shape:
+    Response:
     {
       "Table": [...],
-      "total": <int>,         # total matches
-      "count": <int>,         # number returned (<= limit)
-      "page": <int>,
-      "limit": <int>,
-      "pages": <int>,         # total pages
-      "has_prev": <bool>,
-      "has_next": <bool>,
-      "start": <int>,         # 1-based start index in overall results
-      "end": <int>            # 1-based end index in overall results
+      "total": <int>, "count": <int>, "page": <int>, "limit": <int>,
+      "pages": <int>, "has_prev": <bool>, "has_next": <bool>,
+      "start": <int>, "end": <int>
     }
     """
     client = PsixClient()
@@ -361,20 +384,18 @@ def search_vessels(
         raw = client.search_by_name(name)  # {"Table": [...]}
         rows = (raw or {}).get("Table") or []
 
-        # Optional: stable sort by VesselName then CallSign
         def _nm(r): return (r.get("VesselName") or r.get("vesselname") or "").upper()
         def _cs(r): return (r.get("CallSign") or r.get("callsign") or "").upper()
         rows.sort(key=lambda r: (_nm(r), _cs(r)))
 
         total = len(rows)
         pages = max((total + limit - 1) // limit, 1)
-        page = min(max(page, 1), pages)
-        start_idx = (page - 1) * limit
+        page_ = min(max(page, 1), pages)
+        start_idx = (page_ - 1) * limit
         end_idx = start_idx + limit
 
         page_rows = rows[start_idx:end_idx]
 
-        # Trim fields to what the UI needs
         def pick(r):
             return {
                 "VesselID": r.get("VesselID") or r.get("vesselid"),
@@ -397,11 +418,11 @@ def search_vessels(
             "Table": trimmed,
             "total": total,
             "count": len(trimmed),
-            "page": page,
+            "page": page_,
             "limit": limit,
             "pages": pages,
-            "has_prev": page > 1,
-            "has_next": page < pages,
+            "has_prev": page_ > 1,
+            "has_next": page_ < pages,
             "start": start_human,
             "end": end_human,
         }
@@ -418,10 +439,10 @@ def get_vessel_by_id(vessel_id: int) -> Dict[str, Any]:
         logger.exception("PSIX lookup failed for ID %s", vessel_id)
         raise HTTPException(status_code=502, detail=f"PSIX lookup failed: {e!s}")
 
-# ----- Fee Estimation -----
+# ----- Fee Estimation (Legacy/simple) -----
 @app.get("/estimate", tags=["Estimates"])
 def estimate(
-    port_code: str = Query(..., description="Port code (e.g., LALB, SFBAY)"),
+    port_code: str = Query(..., description="Port code (e.g., LALB, USOAK, USSFO)"),
     eta: date = Query(..., description="Estimated time of arrival"),
     arrival_type: str = Query("FOREIGN", pattern="^(FOREIGN|COASTWISE)$"),
     net_tonnage: Optional[Decimal] = Query(None),
@@ -473,6 +494,87 @@ def estimate(
     except Exception:
         logger.exception("Estimate failed")
         raise HTTPException(status_code=500, detail="estimate calculation failed")
+    finally:
+        db.close()
+
+# ----- Fee Estimation v2 (Comprehensive / JSON POST) -----
+@app.post("/v2/estimate", tags=["Estimates"])
+def estimate_v2(
+    vessel_name: str = Body(..., embed=True),
+    vessel_type: Literal[
+        "container","tanker","bulk_carrier","cruise","roro","general_cargo","lng","vehicle_carrier"
+    ] = Body("general_cargo", embed=True),
+    gross_tonnage: Decimal = Body(Decimal("0"), embed=True),
+    net_tonnage: Decimal = Body(Decimal("0"), embed=True),
+    loa_meters: Decimal = Body(Decimal("0"), embed=True),
+    draft_meters: Decimal = Body(Decimal("0"), embed=True),
+    previous_port_code: str = Body(..., embed=True, description="UN/LOCODE like CNSHA or USLAX"),
+    arrival_port_code: str = Body(..., embed=True, description="UN/LOCODE like USOAK, USSEA, USPDX"),
+    next_port_code: Optional[str] = Body(None, embed=True),
+    eta: Optional[datetime] = Body(None, embed=True),
+    etd: Optional[datetime] = Body(None, embed=True),
+    days_alongside: int = Body(2, embed=True),
+    ytd_cbp_paid: Decimal = Body(Decimal("0"), embed=True),
+    tonnage_year_paid: Decimal = Body(Decimal("0"), embed=True),
+) -> Dict[str, Any]:
+    """
+    Comprehensive estimator using vessel specs + voyage context.
+    POST JSON body with the fields above (flat body, embedded).
+    """
+    db: Session = SessionLocal()
+    try:
+        # Validate arrival port exists (enriches also cascades to APHIS logic, MISP, etc.)
+        port = db.execute(select(Port).where(Port.code == arrival_port_code)).scalar_one_or_none()
+        if not port:
+            raise HTTPException(status_code=404, detail=f"Port {arrival_port_code} not found")
+
+        engine = FeeEngine(db)
+        engine.ytd_cbp_paid = ytd_cbp_paid
+        engine.tonnage_year_paid = tonnage_year_paid
+
+        vtype = VesselType(vessel_type)
+        vessel = VesselSpecs(
+            name=vessel_name,
+            vessel_type=vtype,
+            gross_tonnage=gross_tonnage,
+            net_tonnage=net_tonnage,
+            loa_meters=loa_meters,
+            draft_meters=draft_meters,
+        )
+        voyage = VoyageContext(
+            previous_port_code=previous_port_code,
+            arrival_port_code=arrival_port_code,
+            next_port_code=next_port_code,
+            eta=eta or datetime.utcnow(),
+            etd=etd,
+            days_alongside=days_alongside,
+        )
+
+        result = engine.calculate_comprehensive(vessel, voyage)
+
+        # Derive quick totals for convenience
+        try:
+            mand = Decimal(result["totals"]["mandatory"])
+            low = Decimal(result["totals"]["optional_low"])
+            high = Decimal(result["totals"]["optional_high"])
+        except Exception:
+            mand = Decimal("0"); low = Decimal("0"); high = Decimal("0")
+
+        result["quick_totals"] = {
+            "mandatory": str(mand),
+            "with_optional_low": str(mand + low),
+            "with_optional_high": str(mand + high),
+        }
+        result["port"] = {
+            "code": port.code, "name": port.name, "state": port.state,
+            "is_california": port.is_california, "is_cascadia": port.is_cascadia,
+        }
+        return result
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Comprehensive estimate failed")
+        raise HTTPException(status_code=500, detail="v2 estimate calculation failed")
     finally:
         db.close()
 
@@ -606,3 +708,79 @@ def clear_data_cache() -> Dict[str, str]:
 @app.get("/admin/cache/stats", tags=["Admin"])
 def cache_statistics() -> Dict[str, Any]:
     return get_cache_stats()
+
+# ----- System Stats & Feedback (optional, nice to have) -----
+@app.get("/api/stats", tags=["System"])
+def get_system_stats() -> Dict[str, Any]:
+    db = SessionLocal()
+    try:
+        stats: Dict[str, Any] = {}
+
+        # Port statistics (optional tables; guard with try)
+        try:
+            port_stats = db.execute(text("""
+                SELECT 
+                    COUNT(*) as total_ports,
+                    COUNT(DISTINCT country) as countries,
+                    COUNT(CASE WHEN country = 'US' THEN 1 END) as us_ports
+                FROM ports
+            """)).fetchone()
+            stats["ports"] = {
+                "total": int(port_stats[0]) if port_stats else 0,
+                "countries": int(port_stats[1]) if port_stats else 0,
+                "us_ports": int(port_stats[2]) if port_stats else 0,
+            }
+        except Exception:
+            stats["ports"] = {"total": 0, "countries": 0, "us_ports": 0}
+
+        # Fee statistics
+        try:
+            fee_stats = db.execute(text("""
+                SELECT 
+                    COUNT(DISTINCT code) as unique_fees,
+                    COUNT(*) as total_fee_versions
+                FROM fees
+            """)).fetchone()
+            stats["fees"] = {
+                "unique_types": int(fee_stats[0]) if fee_stats else 0,
+                "total_versions": int(fee_stats[1]) if fee_stats else 0,
+            }
+        except Exception:
+            stats["fees"] = {"unique_types": 0, "total_versions": 0}
+
+        return stats
+    finally:
+        db.close()
+
+@app.post("/api/feedback", tags=["System"])
+def submit_feedback(
+    estimate_id: str = Body(...),
+    actual_fees: Dict[str, Any] = Body(...),
+    notes: Optional[str] = Body(None),
+) -> Dict[str, Any]:
+    """Stub feedback endpoint (store if table exists)."""
+    db = SessionLocal()
+    try:
+        try:
+            db.execute(text("""
+                INSERT INTO estimate_feedback (
+                    voyage_estimate_id, actual_mandatory_fees, actual_optional_fees, notes, created_at
+                ) VALUES (:estimate_id, :mandatory, :optional, :notes, NOW())
+            """), {
+                "estimate_id": estimate_id,
+                "mandatory": actual_fees.get("mandatory", 0),
+                "optional": actual_fees.get("optional", 0),
+                "notes": notes,
+            })
+            db.commit()
+        except Exception:
+            logger.warning("estimate_feedback table missing; feedback not stored.")
+        return {"status": "ok"}
+    finally:
+        db.close()
+
+# ----- Dev entrypoint -----
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port, reload=True)
