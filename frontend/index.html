@@ -731,27 +731,36 @@
 
         // Normalize/augment vessel row so UI keys always exist + parse dims
         augment(v) {
-          const out = { ...v };
-
-          const pick = (...cands) => {
-            for (const c of cands) {
-              if (c in out && out[c] != null) {
-                const s = String(out[c]).trim();
-                if (s && s.toLowerCase() !== 'none') return s;
-              }
-            }
-            return null;
-          };
-          const scanByKey = (obj, keyRegex, accept = (val) => String(val).trim() !== '') => {
+          // shallow copy so we don't mutate the original
+          const src = { ...v };
+        
+          // deep scan helper (walks nested objects up to a safe depth)
+          const scanDeep = (obj, keyRegex, accept = (val) => String(val).trim() !== '', depth = 0) => {
+            if (!obj || depth > 4) return null;
             for (const [k, val] of Object.entries(obj)) {
               if (val == null) continue;
               if (keyRegex.test(k)) {
                 const s = String(val).trim();
                 if (accept(s)) return s;
               }
+              if (val && typeof val === 'object' && !Array.isArray(val)) {
+                const found = scanDeep(val, keyRegex, accept, depth + 1);
+                if (found != null) return found;
+              }
             }
             return null;
           };
+        
+          const pick = (...cands) => {
+            for (const c of cands) {
+              if (c in src && src[c] != null) {
+                const s = String(src[c]).trim();
+                if (s && s.toLowerCase() !== 'none') return s;
+              }
+            }
+            return null;
+          };
+        
           const toNumber = (val) => {
             if (val == null) return null;
             const n = Number(String(val).replace(/[^0-9.+-]/g, ''));
@@ -763,44 +772,64 @@
             const n = toNumber(s);
             if (n == null) return null;
             if (s.includes('ft') || s.includes('feet') || s.includes("'")) return n * 0.3048;
-            return n; // assume meters
+            return n; // assume meters when no explicit unit
           };
+        
+          const out = { ...src };
+        
+          // core identity fields (with deep fallbacks)
+          const scan = (re, accept) => scanDeep(src, re, accept);
 
-          out.VesselID   = pick('VesselID','vesselid','ID','id');
-          out.VesselName = pick('VesselName','vesselname','Name','name') ?? '(unnamed)';
+          out.VesselID   = pick('VesselID','vesselid','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
+          out.VesselName = pick('VesselName','vesselname','Name','name') ?? scan(/vessel.*name|^name$/i);
           out.CallSign   = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign')
-                           ?? scanByKey(out, /(call.?sign|radio.?call)/i);
+                           ?? scan(/call.?sign|radio.?call/i);
           out.Flag       = pick('CountryLookupName','Flag','FlagName','FlagOfRegistry','FlagState','FlagCountry','FlagCode','flag')
-                           ?? scanByKey(out, /(flag|country).*(name|lookup|state|country)?/i, v => isNaN(v));
+                           ?? scan(/(flag|country)(.*(name|lookup|state|country))?/i, v => isNaN(v));
           out.VesselType = pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype')
-                           ?? scanByKey(out, /(service|type)/i, v => isNaN(v) && String(v).length < 80);
-          out.GrossTonnage = pick('GrossTonnage','GT','Gross_Tonnage','grosstonnage','GrossTons','GrossTonnageText')
-                             ?? scanByKey(out, /(gross.*ton|^gt$)/i);
-          out.NetTonnage   = pick('NetTonnage','nettonnage','NT','Net_Tonnage')
-                             ?? scanByKey(out, /(net.*ton|^nt$)/i);
-          out.YearBuilt    = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year');
-          out.Status       = pick('StatusLookupName','Status','VesselStatus');
-          out.PrimaryIdentification = pick('PrimaryIdentification','Identification','primary_identification');
-          out.OfficialNumber        = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber');
-          out.IMONumber             = pick('IMONumber','IMO','IMONo','ImoNumber','IMO_Number');
-
-          // Length / Beam / Draft
-          const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','loa_m','loa','length_overall')
-                           ?? scanByKey(out, /(length|loa)/i);
-          const beamRaw  = pick('Beam','Breadth','Width','beam_m')
-                           ?? scanByKey(out, /(beam|breadth|width)/i);
-          const draftRaw = pick('Draft','SummerDraft','draft_m')
-                           ?? scanByKey(out, /(draft)/i) ?? scanByKey(out, /(depth)/i);
-
-          out.LOA_m   = toMeters(lenRaw);
-          out.Beam_m  = toMeters(beamRaw);
-          out.Draft_m = toMeters(draftRaw);
-
+                           ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
+          
+          // NEW: useful IDs for enrichment
+          out.IMONumber = pick('IMONumber','IMO','IMONo','ImoNumber','IMO_Number','IMOShipNo',
+                               'PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No')
+                          ?? scan(/(^|[\W_])imo($|[\W_])/i, v => {
+                               const m = String(v).match(/\b\d{6,7}\b/);
+                               return m ? m[0] : null;
+                             });
+          
+          out.OfficialNumber = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber')
+                               ?? scan(/official.?number/i);
+          
+          out.YearBuilt = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
+                          ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i, v => {
+                               const n = Number(String(v).replace(/\D/g,''));
+                               return Number.isFinite(n) ? n : null;
+                             });
+        
+          // tonnage (grab any convention fields too)
+          out.GrossTonnage = pick('GrossTonnage','GT','Gross_Tonnage','GrossTons','GrossTonnageText')
+                             ?? scan(/gross.*ton|(^|\b)gt\b/i);
+          out.NetTonnage   = pick('NetTonnage','NT','Net_Tonnage')
+                             ?? scan(/net.*ton|(^|\b)nt\b/i);
+        
           const gtN = toNumber(out.GrossTonnage);
           const ntN = toNumber(out.NetTonnage);
           if (gtN != null) out.GrossTonnage = gtN;
-          if (ntN != null) out.NetTonnage = ntN;
-
+          if (ntN != null) out.NetTonnage   = ntN;
+        
+          // dimensions: handle common synonyms and units
+          // PSIX examples: "Length: 1103.30 ft", "Breadth: 140.90 ft", "Depth: 80.40 ft"
+          const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','loa_m','loa','length_overall','Length (ft)')
+                           ?? scan(/(length|loa)/i);
+          const beamRaw  = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','beam_m','Breadth (ft)')
+                           ?? scan(/(beam|breadth|width)/i);
+          const draftRaw = pick('Draft','SummerDraft','draft_m','Depth','Depth (ft)')
+                           ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b|(^|\b)depth\b/i);
+        
+          out.LOA_m   = toMeters(lenRaw);
+          out.Beam_m  = toMeters(beamRaw);
+          out.Draft_m = toMeters(draftRaw);
+        
           return out;
         },
 
@@ -861,27 +890,51 @@
 
         selectVessel(v) {
           this.selectedVessel = this.augment(v);
-
+        
           // reset badges
           this.autoGT = this.autoNT = this.autoLOA = this.autoBeam = this.autoDraft = false;
-
+        
+          // quick vessel-type guess from text like "Freight Ship", "Container Ship", etc.
+          const guessType = (t) => {
+            const s = (t || '').toLowerCase();
+            if (s.includes('container')) return 'container';
+            if (s.includes('tanker')) return 'tanker';
+            if (s.includes('bulk')) return 'bulk_carrier';
+            if (s.includes('cruise') || s.includes('passenger')) return 'cruise';
+            if (s.includes('roro') || s.includes('ro-ro')) return 'roro';
+            if (s.includes('lng')) return 'lng';
+            if (s.includes('vehicle') || s.includes('car carrier')) return 'vehicle_carrier';
+            return 'general_cargo';
+          };
+          
+          // If the user hasn't picked anything (still default), adopt the inferred type.
+          const inferred = guessType(this.selectedVessel?.VesselType || '');
+          if (this.vesselType === 'general_cargo' && inferred !== 'general_cargo') {
+            this.vesselType = inferred;
+          }
+        
           const sv = this.selectedVessel || {};
-          const prefer = (curr, next, flagName) => {
+          const prefer = (curr, next, flagName, decimals = 2) => {
             if (Number(curr) > 0) return curr;
             const n = Number(next);
             if (Number.isFinite(n) && n > 0) {
               this[flagName] = true;
-              return n.toFixed(flagName === 'autoGT' || flagName === 'autoNT' ? 0 : 2);
+              // integers for tonnages, 2dp for dimensions
+              return decimals === 0 ? n : Number(n.toFixed(decimals));
             }
             return curr;
           };
-
-          if (sv.GrossTonnage != null) this.grossTonnage = Number(prefer(this.grossTonnage, sv.GrossTonnage, 'autoGT'));
-          if (sv.NetTonnage   != null) this.netTonnage   = Number(prefer(this.netTonnage,   sv.NetTonnage,   'autoNT'));
-          if (sv.LOA_m        != null) this.loaMeters    = Number(prefer(this.loaMeters,    sv.LOA_m,        'autoLOA'));
-          if (sv.Beam_m       != null) this.beamMeters   = Number(prefer(this.beamMeters,   sv.Beam_m,       'autoBeam'));
-          if (sv.Draft_m      != null) this.draftMeters  = Number(prefer(this.draftMeters,  sv.Draft_m,      'autoDraft'));
-
+        
+          // prefill from whatever we already have in the search row
+          if (sv.GrossTonnage != null) this.grossTonnage = prefer(this.grossTonnage, sv.GrossTonnage, 'autoGT', 0);
+          if (sv.NetTonnage   != null) this.netTonnage   = prefer(this.netTonnage,   sv.NetTonnage,   'autoNT', 0);
+          if (sv.LOA_m        != null) this.loaMeters    = prefer(this.loaMeters,    sv.LOA_m,        'autoLOA', 2);
+          if (sv.Beam_m       != null) this.beamMeters   = prefer(this.beamMeters,   sv.Beam_m,       'autoBeam', 2);
+          if (sv.Draft_m      != null) this.draftMeters  = prefer(this.draftMeters,  sv.Draft_m,      'autoDraft', 2);
+        
+          // if any core value still missing, try to enrich from likely detail endpoints (best-effort)
+          this.enrichVesselDimensions();
+        
           if (this.selectedPort) this.loadLiveData();
         },
 
@@ -959,6 +1012,49 @@
             alert('Failed to calculate v2 estimate.');
           } finally {
             this.estimateLoading = false;
+          }
+        },
+
+        async enrichVesselDimensions() {
+          const stillNeedDims = !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !(Number(this.draftMeters) > 0);
+          const stillNeedTons = !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0);
+          if (!stillNeedDims && !stillNeedTons) return;
+        
+          const params = new URLSearchParams();
+          if (this.selectedVessel?.IMONumber) params.set('imo', this.selectedVessel.IMONumber);
+          if (this.selectedVessel?.VesselName) params.set('name', this.selectedVessel.VesselName);
+          if (this.selectedVessel?.CallSign) params.set('callsign', this.selectedVessel.CallSign);
+        
+          // Try a few plausible endpoints; ignore failures (CORS/404/etc.)
+          const candidates = [
+            '/vessels/details',
+            '/vessels/summary',
+            '/api/v2/vessels/details',
+            '/psix/summary'
+          ];
+        
+          for (const path of candidates) {
+            try {
+              const r = await fetch(`${API_BASE}${path}?${params}`);
+              if (!r.ok) continue;
+              const details = await r.json();
+              const aug = this.augment(details);
+        
+              // fill what’s missing, with badges
+              if (stillNeedTons) {
+                if (!Number(this.grossTonnage) && aug.GrossTonnage) { this.grossTonnage = Number(aug.GrossTonnage); this.autoGT = true; }
+                if (!Number(this.netTonnage)   && aug.NetTonnage)   { this.netTonnage   = Number(aug.NetTonnage);   this.autoNT = true; }
+              }
+              if (stillNeedDims) {
+                if (!Number(this.loaMeters)   && aug.LOA_m != null)   { this.loaMeters   = Number(aug.LOA_m.toFixed(2)); this.autoLOA = true; }
+                if (!Number(this.beamMeters)  && aug.Beam_m != null)  { this.beamMeters  = Number(aug.Beam_m.toFixed(2)); this.autoBeam = true; }
+                if (!Number(this.draftMeters) && aug.Draft_m != null) { this.draftMeters = Number(aug.Draft_m.toFixed(2)); this.autoDraft = true; }
+              }
+              // stop after the first successful enrichment
+              break;
+            } catch (e) {
+              // silently ignore and try next
+            }
           }
         },
 
