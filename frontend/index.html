@@ -4,17 +4,19 @@
   <meta charset="utf-8" />
   <title>Maritime MVP — Port Call Intelligence Platform</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <!-- Tailwind + Alpine -->
+
+  <!-- Tailwind + Alpine (ok for dev; use a proper build for production) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <!-- Chart.js for historical trends -->
+  <!-- Charts -->
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+
   <style>
     @keyframes slideUp { from { transform: translateY(8px); opacity:.0 } to { transform: translateY(0); opacity:1 } }
     .animate-slide-up { animation: slideUp .25s ease-out forwards }
     .glass { background: rgba(255,255,255,.9); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px) }
     .card { border-radius: 16px; box-shadow: 0 10px 24px rgba(0,0,0,.06) }
-    .chip { border-radius: 999px; padding: .125rem .5rem; font-size: .75rem }
+    .chip { border-radius: 999px; padding: .125rem .5rem; font-size: .75rem; white-space: nowrap }
     .btn { border-radius: .5rem; font-weight: 600; }
     .btn-primary { background:#4f46e5; color:#fff }
     .btn-primary:hover { background:#4338ca }
@@ -27,7 +29,6 @@
     .field { border:1px solid #e5e7eb; border-radius:.5rem; padding:.5rem .75rem }
     .field:focus { outline:none; border-color:#6366f1; box-shadow:0 0 0 3px rgba(99,102,241,.15) }
     .list-scroll { max-height: 240px; overflow-y:auto }
-    /* Tailwind line-clamp equivalent without plugin */
     .line-clamp-3 { display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden }
   </style>
 </head>
@@ -138,13 +139,16 @@
         <div x-show="selectedVessel" class="glass card p-5 animate-slide-up">
           <h3 class="text-lg font-semibold mb-3">Selected Vessel</h3>
           <div class="space-y-2 text-sm">
-            <div><span class="text-gray-500">Name:</span> <span class="font-medium" x-text="selectedVessel?.VesselName"></span></div>
-            <div><span class="text-gray-500">Call Sign:</span> <span x-text="selectedVessel?.CallSign || '—'"></span></div>
-            <div><span class="text-gray-500">Flag:</span> <span x-text="selectedVessel?.Flag || '—'"></span></div>
-            <div><span class="text-gray-500">Type:</span> <span x-text="selectedVessel?.VesselType || '—'"></span></div>
-            <div x-show="selectedVessel?.YearBuilt"><span class="text-gray-500">Year Built:</span> <span x-text="selectedVessel?.YearBuilt"></span></div>
-            <div x-show="selectedVessel?.PrimaryIdentification"><span class="text-gray-500">Identification:</span> <span x-text="selectedVessel?.PrimaryIdentification"></span></div>
-            <div x-show="selectedVessel?.GrossTonnage"><span class="text-gray-500">Gross Tonnage:</span> <span x-text="selectedVessel?.GrossTonnage"></span></div>
+            <div><span class="text-gray-500">Name:</span> <span class="font-medium" x-text="selectedVessel ? (selectedVessel.VesselName || '—') : '—'"></span></div>
+            <div><span class="text-gray-500">Call Sign:</span> <span x-text="selectedVessel ? (selectedVessel.CallSign || '—') : '—'"></span></div>
+            <div><span class="text-gray-500">Flag:</span> <span x-text="selectedVessel ? (selectedVessel.Flag || '—') : '—'"></span></div>
+            <div><span class="text-gray-500">Type:</span> <span x-text="selectedVessel ? (selectedVessel.VesselType || '—') : '—'"></span></div>
+            <div x-show="selectedVessel && selectedVessel.YearBuilt"><span class="text-gray-500">Year Built:</span> <span x-text="selectedVessel ? (selectedVessel.YearBuilt || '') : ''"></span></div>
+            <div x-show="selectedVessel && selectedVessel.PrimaryIdentification"><span class="text-gray-500">Identification:</span> <span x-text="selectedVessel ? (selectedVessel.PrimaryIdentification || '') : ''"></span></div>
+            <div x-show="selectedVessel && selectedVessel.GrossTonnage"><span class="text-gray-500">Gross Tonnage:</span> <span x-text="selectedVessel ? (selectedVessel.GrossTonnage || '') : ''"></span></div>
+            <div x-show="selectedVessel && selectedVessel.LOA_m"><span class="text-gray-500">LOA:</span> <span x-text="selectedVessel ? (Number(selectedVessel.LOA_m || 0).toFixed(2) + ' m') : ''"></span></div>
+            <div x-show="selectedVessel && selectedVessel.Beam_m"><span class="text-gray-500">Beam:</span> <span x-text="selectedVessel ? (Number(selectedVessel.Beam_m || 0).toFixed(2) + ' m') : ''"></span></div>
+            <div x-show="selectedVessel && selectedVessel.Draft_m"><span class="text-gray-500">Draft:</span> <span x-text="selectedVessel ? (Number(selectedVessel.Draft_m || 0).toFixed(2) + ' m') : ''"></span></div>
           </div>
         </div>
 
@@ -161,17 +165,17 @@
                 </template>
               </select>
               <div class="text-xs text-slate-500 mt-1">Tip: LALB, SFBAY, PUGET, COLRIV, STKN</div>
-              
-              <!-- Show resolved internal code to reassure the user -->
+
               <div x-show="selectedPort" class="mt-1">
                 <span class="chip bg-slate-100">Internal: <span x-text="selectedPort"></span></span>
               </div>
-
             </div>
+
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">ETA</label>
               <input x-model="eta" type="date" class="w-full field" />
             </div>
+
             <div class="grid grid-cols-2 gap-3">
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Arrival Type (v1)</label>
@@ -182,9 +186,11 @@
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Net Tonnage (v1)</label>
-                <input x-model="netTonnage" type="number" class="w-full field" placeholder="Optional" />
+                <input x-model="netTonnage" type="number" class="w-full field" placeholder="Optional" @input="autoNT=false" />
+                <span x-show="autoNT" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
               </div>
             </div>
+
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">YTD CBP Paid</label>
               <input x-model="ytdCbpPaid" type="number" step="0.01" class="w-full field" placeholder="0.00" />
@@ -202,7 +208,6 @@
                   <label class="block text-sm font-medium text-gray-700 mb-1">Previous Port (UN/LOCODE)</label>
                   <div class="relative">
                     <input x-model="previousPortCode" @input.debounce.250ms="searchUnloc('prev')" placeholder="e.g., USLAX or CNSHA" class="w-full field">
-                    <!-- Clear previous UN/LOCODE -->
                     <button x-show="previousPortCode" @click="previousPortCode=''; unlocPrev=[]" type="button"
                             class="absolute right-2 top-2 text-gray-400 hover:text-gray-600" aria-label="Clear previous port">×</button>
                     <div x-show="unlocPrev.length" class="absolute z-10 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg w-full">
@@ -216,11 +221,11 @@
                     </div>
                   </div>
                 </div>
+
                 <div>
                   <label class="block text-sm font-medium text-gray-700 mb-1">Next Port (UN/LOCODE)</label>
                   <div class="relative">
                     <input x-model="nextPortCode" @input.debounce.250ms="searchUnloc('next')" placeholder="Optional" class="w-full field">
-                    <!-- Clear next UN/LOCODE -->
                     <button x-show="nextPortCode" @click="nextPortCode=''; unlocNext=[]" type="button"
                             class="absolute right-2 top-2 text-gray-400 hover:text-gray-600" aria-label="Clear next port">×</button>
                     <div x-show="unlocNext.length" class="absolute z-10 mt-1 bg-white border border-gray-200 rounded-lg shadow-lg w-full">
@@ -263,29 +268,33 @@
                 <div class="grid grid-cols-2 gap-3">
                   <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Gross Tonnage</label>
-                    <input x-model.number="grossTonnage" type="number" step="1" class="w-full field" />
+                    <input x-model.number="grossTonnage" type="number" step="1" class="w-full field" @input="autoGT=false" />
+                    <span x-show="autoGT" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                   </div>
                   <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Net Tonnage</label>
-                    <input x-model.number="netTonnage" type="number" step="1" class="w-full field" />
+                    <input x-model.number="netTonnage" type="number" step="1" class="w-full field" @input="autoNT=false" />
+                    <span x-show="autoNT" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                   </div>
                 </div>
 
                 <div class="grid grid-cols-2 gap-3">
                   <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">LOA (m)</label>
-                    <input x-model.number="loaMeters" type="number" step="0.1" class="w-full field" />
+                    <input x-model.number="loaMeters" type="number" step="0.1" class="w-full field" @input="autoLOA=false" />
+                    <span x-show="autoLOA" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                   </div>
                   <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Draft (m)</label>
-                    <input x-model.number="draftMeters" type="number" step="0.1" class="w-full field" />
+                    <input x-model.number="draftMeters" type="number" step="0.1" class="w-full field" @input="autoDraft=false" />
+                    <span x-show="autoDraft" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                   </div>
                 </div>
 
-                <!-- Beam (m) -->
                 <div>
                   <label class="block text-sm font-medium text-gray-700 mb-1">Beam (m)</label>
-                  <input x-model.number="beamMeters" type="number" step="0.1" class="w-full field" />
+                  <input x-model.number="beamMeters" type="number" step="0.1" class="w-full field" @input="autoBeam=false" />
+                  <span x-show="autoBeam" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                 </div>
               </div>
             </div>
@@ -305,129 +314,133 @@
       <div class="lg:col-span-2 space-y-4">
 
         <!-- Alerts -->
-        <div x-show="liveData?.alerts?.length" class="bg-amber-50 border-l-4 border-amber-400 rounded-lg p-4 animate-slide-up">
+        <div x-show="liveData && liveData.alerts && liveData.alerts.length" class="bg-amber-50 border-l-4 border-amber-400 rounded-lg p-4 animate-slide-up">
           <div class="flex items-center justify-between">
             <h4 class="font-semibold text-amber-800">Compliance Alerts</h4>
             <span class="badge">live</span>
           </div>
           <ul class="text-sm text-amber-800 space-y-1 mt-1">
-            <template x-for="a in (liveData?.alerts || [])" :key="a"><li x-text="a"></li></template>
+            <template x-for="a in (liveData && liveData.alerts ? liveData.alerts : [])" :key="a"><li x-text="a"></li></template>
           </ul>
         </div>
 
         <!-- Estimate v1 -->
-        <div x-show="estimate && !estimateV2" class="glass card p-6 animate-slide-up">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-xl font-semibold">Fee Estimate (v1)</h3>
-            <div class="flex gap-2">
-              <button @click="clientExport('csv')" class="text-sm btn btn-outline px-3 py-1.5">Export CSV</button>
-              <button @click="clientExport('json')" class="text-sm btn btn-outline px-3 py-1.5">Export JSON</button>
+        <template x-if="estimate && !estimateV2">
+          <div class="glass card p-6 animate-slide-up">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-xl font-semibold">Fee Estimate (v1)</h3>
+              <div class="flex gap-2">
+                <button @click="clientExport('csv')" class="text-sm btn btn-outline px-3 py-1.5">Export CSV</button>
+                <button @click="clientExport('json')" class="text-sm btn btn-outline px-3 py-1.5">Export JSON</button>
+              </div>
             </div>
-          </div>
 
-          <div class="overflow-x-auto">
-            <table class="min-w-full">
-              <thead class="bg-gray-50">
-                <tr>
-                  <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Fee</th>
-                  <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase">Amount</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-gray-200">
-                <template x-for="item in (estimate?.line_items || [])" :key="item.code">
+            <div class="overflow-x-auto">
+              <table class="min-w-full">
+                <thead class="bg-gray-50">
                   <tr>
-                    <td class="px-4 py-2">
-                      <div class="font-medium" x-text="item.name"></div>
-                      <div class="text-xs text-gray-500" x-text="item.code"></div>
-                    </td>
-                    <td class="px-4 py-2 text-right font-mono" x-text="'$' + (item?.amount ?? '0.00')"></td>
+                    <th class="px-4 py-2 text-left text-xs font-semibold text-gray-600 uppercase">Fee</th>
+                    <th class="px-4 py-2 text-right text-xs font-semibold text-gray-600 uppercase">Amount</th>
                   </tr>
-                </template>
-              </tbody>
-              <tfoot class="border-t-2 border-gray-300">
-                <tr>
-                  <td class="px-4 py-2 font-semibold">Total Mandatory</td>
-                  <td class="px-4 py-2 text-right font-bold text-lg" x-text="'$' + (estimate?.total ?? '0.00')"></td>
-                </tr>
-              </tfoot>
-            </table>
-          </div>
+                </thead>
+                <tbody class="divide-y divide-gray-200">
+                  <template x-for="item in (estimate && estimate.line_items ? estimate.line_items : [])" :key="item.code">
+                    <tr>
+                      <td class="px-4 py-2">
+                        <div class="font-medium" x-text="item.name"></div>
+                        <div class="text-xs text-gray-500" x-text="item.code"></div>
+                      </td>
+                      <td class="px-4 py-2 text-right font-mono" x-text="`$${item.amount}`"></td>
+                    </tr>
+                  </template>
+                </tbody>
+                <tfoot class="border-t-2 border-gray-300">
+                  <tr>
+                    <td class="px-4 py-2 font-semibold">Total Mandatory</td>
+                    <td class="px-4 py-2 text-right font-bold text-lg" x-text="estimate ? (`$${estimate.total}`) : ''"></td>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
 
-          <div x-show="estimate?.optional_services?.length" class="mt-4 pt-4 border-t">
-            <h4 class="font-semibold mb-2">Optional Services (Estimates)</h4>
-            <div class="space-y-2">
-              <template x-for="s in (estimate?.optional_services || [])" :key="s.service">
-                <div class="flex justify-between text-sm">
-                  <span>
-                    <span x-text="s.service"></span>
-                    <span class="text-xs text-gray-500" x-text="`(${s.note})`"></span>
-                  </span>
-                  <span class="font-mono" x-text="`$${Number(s.estimated_low).toLocaleString()} - $${Number(s.estimated_high).toLocaleString()}`"></span>
+            <div x-show="estimate && estimate.optional_services && estimate.optional_services.length" class="mt-4 pt-4 border-t">
+              <h4 class="font-semibold mb-2">Optional Services (Estimates)</h4>
+              <div class="space-y-2">
+                <template x-for="s in (estimate && estimate.optional_services ? estimate.optional_services : [])" :key="s.service">
+                  <div class="flex justify-between text-sm">
+                    <span>
+                      <span x-text="s.service"></span>
+                      <span class="text-xs text-gray-500" x-text="`(${s.note})`"></span>
+                    </span>
+                    <span class="font-mono" x-text="`$${Number(s.estimated_low).toLocaleString()} - $${Number(s.estimated_high).toLocaleString()}`"></span>
+                  </div>
+                </template>
+              </div>
+              <div class="mt-3 pt-3 border-t flex justify-between font-semibold" x-show="estimate">
+                <span>Total with Optional</span>
+                <span x-text="estimate ? (`$${estimate.total_with_optional_low} - $${estimate.total_with_optional_high}`) : ''"></span>
+              </div>
+            </div>
+
+            <p class="text-xs text-gray-500 mt-4" x-text="estimate ? (estimate.disclaimer || '') : ''"></p>
+          </div>
+        </template>
+
+        <!-- Estimate v2 -->
+        <template x-if="!!estimateV2">
+          <div class="glass card p-6 animate-slide-up">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="text-xl font-semibold">Fee Estimate (v2)</h3>
+              <div class="text-xs text-slate-500">
+                conf ~ <span x-text="estimateV2?.confidence"></span>
+              </div>
+            </div>
+
+            <div class="text-sm text-gray-600 mb-3 grid sm:grid-cols-2 gap-x-6">
+              <div>
+                <div><span class="font-medium">Arrival:</span> <span x-text="estimateV2?.port?.name"></span> (<span x-text="estimateV2?.port?.resolved_internal_code"></span>)</div>
+                <div><span class="font-medium">LOCODE:</span> <span x-text="estimateV2?.port?.arrival_unlocode || 'internal only'"></span></div>
+              </div>
+              <div>
+                <div><span class="font-medium">Prev → Arr → Next:</span>
+                  <span x-text="estimateV2?.voyage?.previous_port"></span> →
+                  <span x-text="estimateV2?.voyage?.arrival_port"></span> →
+                  <span x-text="estimateV2?.voyage?.next_port || '—'"></span>
+                </div>
+                <div><span class="font-medium">ETA:</span> <span x-text="estimateV2?.voyage?.eta"></span></div>
+              </div>
+            </div>
+
+            <div class="divide-y">
+              <template x-for="c in (estimateV2?.calculations || [])" :key="c.code">
+                <div class="py-2 flex items-start justify-between">
+                  <div class="pr-4">
+                    <div class="font-medium" x-text="c.name"></div>
+                    <div class="text-xs text-gray-500" x-text="c.details"></div>
+                  </div>
+                  <div class="text-right">
+                    <div class="font-mono" x-text="'$' + c.final_amount"></div>
+                    <div class="text-xs text-gray-500">conf: <span x-text="c.confidence"></span></div>
+                  </div>
                 </div>
               </template>
             </div>
-            <div class="mt-3 pt-3 border-t flex justify-between font-semibold">
-              <span>Total with Optional</span>
-              <span x-text="'$' + (estimate?.total_with_optional_low ?? '0.00') + ' - $' + (estimate?.total_with_optional_high ?? '0.00')"></span>
-            </div>
-          </div>
 
-          <p class="text-xs text-gray-500 mt-4" x-text="estimate.disclaimer"
-        </div>
-
-        <!-- Estimate v2 -->
-        <div x-show="estimateV2" class="glass card p-6 animate-slide-up">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-xl font-semibold">Fee Estimate (v2)</h3>
-            <div class="text-xs text-slate-500">
-              conf ~ <span x-text="estimateV2?.confidence"></span>
-            </div>
-          </div>
-
-          <div class="text-sm text-gray-600 mb-3 grid sm:grid-cols-2 gap-x-6">
-            <div>
-              <div><span class="font-medium">Arrival:</span> <span x-text="estimateV2?.port?.name"></span> (<span x-text="estimateV2?.port?.resolved_internal_code"></span>)</div>
-              <div><span class="font-medium">LOCODE:</span> <span x-text="estimateV2?.port?.arrival_unlocode || 'internal only'"></span></div>
-            </div>
-            <div>
-              <div><span class="font-medium">Prev → Arr → Next:</span>
-                <span x-text="estimateV2?.voyage?.previous_port"></span> →
-                <span x-text="estimateV2?.voyage?.arrival_port"></span> →
-                <span x-text="estimateV2?.voyage?.next_port || '—'"></span>
+            <div class="mt-3 border-t pt-3 space-y-1">
+              <div class="flex justify-between"><span>Mandatory</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.mandatory || '0.00')"></span></div>
+              <div class="flex justify-between"><span>Optional (low)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.optional_low || '0.00')"></span></div>
+              <div class="flex justify-between"><span>Optional (high)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.optional_high || '0.00')"></span></div>
+              <div class="flex justify-between font-bold border-t pt-2">
+                <span>Total (low)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.total_low || '0.00')"></span>
               </div>
-              <div><span class="font-medium">ETA:</span> <span x-text="estimateV2?.voyage?.eta"></span></div>
-            </div>
-          </div>
-
-          <div class="divide-y">
-            <template x-for="c in (estimateV2?.calculations || [])" :key="c.code">
-              <div class="py-2 flex items-start justify-between">
-                <div class="pr-4">
-                  <div class="font-medium" x-text="c.name"></div>
-                  <div class="text-xs text-gray-500" x-text="c.details"></div>
-                </div>
-                <div class="text-right">
-                  <div class="font-mono" x-text="'$' + c.final_amount"></div>
-                  <div class="text-xs text-gray-500">conf: <span x-text="c.confidence"></span></div>
-                </div>
+              <div class="flex justify-between font-bold">
+                <span>Total (high)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.total_high || '0.00')"></span>
               </div>
-            </template>
-          </div>
-
-          <div class="mt-3 border-t pt-3 space-y-1">
-            <div class="flex justify-between"><span>Mandatory</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.mandatory || '0.00')"></span></div>
-            <div class="flex justify-between"><span>Optional (low)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.optional_low || '0.00')"></span></div>
-            <div class="flex justify-between"><span>Optional (high)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.optional_high || '0.00')"></span></div>
-            <div class="flex justify-between font-bold border-t pt-2">
-              <span>Total (low)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.total_low || '0.00')"></span>
             </div>
-            <div class="flex justify-between font-bold">
-              <span>Total (high)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.total_high || '0.00')"></span>
-            </div>
-          </div>
 
-          <p class="text-xs text-gray-500 mt-4" x-text="estimateV2?.disclaimer"></p>
-        </div>
+            <p class="text-xs text-gray-500 mt-4" x-text="estimateV2?.disclaimer"></p>
+          </div>
+        </template>
 
         <!-- Historical Fee Trends -->
         <div class="glass card p-6 animate-slide-up">
@@ -481,6 +494,7 @@
               <label class="block text-sm font-medium text-gray-700 mb-1">Vessel Name</label>
               <input x-model="mpVesselName" class="w-full field" placeholder="Defaults to selected vessel name if blank" />
             </div>
+
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
               <input x-model="mpStartDate" type="date" class="w-full field" />
@@ -535,11 +549,12 @@
                 <option value="vehicle_carrier">Vehicle Carrier</option>
               </select>
             </div>
-            <div><label class="block text-xs font-medium mb-1">GT</label><input x-model.number="grossTonnage" type="number" step="1" class="w-full field"/></div>
-            <div><label class="block text-xs font-medium mb-1">NT</label><input x-model.number="netTonnage" type="number" step="1" class="w-full field"/></div>
-            <div><label class="block text-xs font-medium mb-1">LOA (m)</label><input x-model.number="loaMeters" type="number" step="0.1" class="w-full field"/></div>
-            <div><label class="block text-xs font-medium mb-1">Draft (m)</label><input x-model.number="draftMeters" type="number" step="0.1" class="w-full field"/></div>
-            <div><label class="block text-xs font-medium mb-1">Beam (m)</label><input x-model.number="beamMeters" type="number" step="0.1" class="w-full field"/></div>
+
+            <div><label class="block text-xs font-medium mb-1">GT</label><input x-model.number="grossTonnage" type="number" step="1" class="w-full field" @input="autoGT=false"/></div>
+            <div><label class="block text-xs font-medium mb-1">NT</label><input x-model.number="netTonnage" type="number" step="1" class="w-full field" @input="autoNT=false"/></div>
+            <div><label class="block text-xs font-medium mb-1">LOA (m)</label><input x-model.number="loaMeters" type="number" step="0.1" class="w-full field" @input="autoLOA=false"/></div>
+            <div><label class="block text-xs font-medium mb-1">Draft (m)</label><input x-model.number="draftMeters" type="number" step="0.1" class="w-full field" @input="autoDraft=false"/></div>
+            <div><label class="block text-xs font-medium mb-1">Beam (m)</label><input x-model.number="beamMeters" type="number" step="0.1" class="w-full field" @input="autoBeam=false"/></div>
           </div>
 
           <div class="mt-3 flex items-center gap-2">
@@ -549,32 +564,25 @@
 
           <div x-show="mpResult" class="mt-4">
             <div class="text-sm text-slate-600 mb-2">
-              <div>
-                <span class="font-medium">Legs:</span> <span x-text="mpResult?.voyage_summary?.total_legs"></span> ·
-                <span class="font-medium">Days:</span> <span x-text="mpResult?.voyage_summary?.total_days"></span>
-              </div>
+              <div><span class="font-medium">Legs:</span> <span x-text="mpResult?.voyage_summary?.total_legs"></span> ·
+                   <span class="font-medium">Days:</span> <span x-text="mpResult?.voyage_summary?.total_days"></span></div>
             </div>
 
             <div class="overflow-x-auto">
               <table class="min-w-full text-sm">
-                <thead class="bg-gray-50">
-                  <tr>
-                    <th class="px-3 py-2 text-left">Leg</th>
-                    <th class="px-3 py-2 text-left">From → To</th>
-                    <th class="px-3 py-2 text-left">ETA / ETD</th>
-                    <th class="px-3 py-2 text-right">Mandatory</th>
-                    <th class="px-3 py-2 text-right">With Optional</th>
-                  </tr>
-                </thead>
+                <thead class="bg-gray-50"><tr>
+                  <th class="px-3 py-2 text-left">Leg</th>
+                  <th class="px-3 py-2 text-left">From → To</th>
+                  <th class="px-3 py-2 text-left">ETA / ETD</th>
+                  <th class="px-3 py-2 text-right">Mandatory</th>
+                  <th class="px-3 py-2 text-right">With Optional</th>
+                </tr></thead>
                 <tbody class="divide-y divide-gray-200">
                   <template x-for="leg in (mpResult?.legs || [])" :key="leg.leg">
                     <tr>
                       <td class="px-3 py-2" x-text="leg.leg"></td>
                       <td class="px-3 py-2" x-text="`${leg.from_port} → ${leg.to_port}`"></td>
-                      <td class="px-3 py-2">
-                        <div x-text="leg.eta"></div>
-                        <div class="text-xs text-slate-500" x-text="leg.etd"></div>
-                      </td>
+                      <td class="px-3 py-2"><div x-text="leg.eta"></div><div class="text-xs text-slate-500" x-text="leg.etd"></div></td>
                       <td class="px-3 py-2 text-right" x-text="`$${Number(leg.fees?.mandatory || 0).toLocaleString()}`"></td>
                       <td class="px-3 py-2 text-right" x-text="`$${(Number(leg.fees?.mandatory||0)+Number(leg.fees?.optional_high||0)).toLocaleString()}`"></td>
                     </tr>
@@ -585,15 +593,14 @@
 
             <div class="mt-3 border-t pt-3 flex items-center justify-between">
               <div class="text-sm">
-                <div class="font-medium">
-                  Total Mandatory:
+                <div class="font-medium">Total Mandatory:
                   <span class="font-mono" x-text="`$${Number(mpResult?.total_voyage_cost?.mandatory || 0).toLocaleString()}`"></span>
                 </div>
-                <div>
-                  Total with Optional:
+                <div>Total with Optional:
                   <span class="font-mono" x-text="`$${Number(mpResult?.total_voyage_cost?.with_optional || 0).toLocaleString()}`"></span>
                 </div>
               </div>
+
               <div class="text-sm max-w-md text-slate-600">
                 <div class="font-medium mb-1">Suggestions</div>
                 <ul class="list-disc list-inside">
@@ -603,114 +610,7 @@
                 </ul>
               </div>
             </div>
-          </div>
-        </div>
 
-        <!-- Live Data Tabs -->
-        <div x-show="liveData" class="glass card p-6 animate-slide-up">
-          <h3 class="text-xl font-semibold mb-4">Live Verification & References</h3>
-
-          <div class="border-b border-gray-200">
-            <nav class="flex space-x-6">
-              <button @click="activeTab='documents'" :class="activeTab==='documents' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">Documents</button>
-              <button @click="activeTab='pilotage'"  :class="activeTab==='pilotage'  ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">Pilotage</button>
-              <button @click="activeTab='marine_exchange'" :class="activeTab==='marine_exchange' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">Marine Exchange</button>
-              <button @click="activeTab='cofr'" :class="activeTab==='cofr' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">COFR</button>
-              <button x-show="Object.keys(liveData?.misp || {}).length" @click="activeTab='misp'"
-                 :class="activeTab==='misp' ? 'border-b-2 border-indigo-600 text-indigo-600' : 'text-gray-600 hover:text-gray-800'" class="pb-2 font-medium text-sm">CA MISP</button>
-            </nav>
-          </div>
-
-          <div class="mt-4">
-            <!-- Documents -->
-            <div x-show="activeTab==='documents'" class="space-y-3">
-              <template x-for="d in (liveData?.documents || [])" :key="d.name">
-                <div class="border-l-4 border-blue-400 pl-3 py-2">
-                  <div class="font-medium" x-text="d.name"></div>
-                  <div class="text-sm text-gray-600">
-                    <span x-show="d.expires_on">Expires: <span x-text="d.expires_on"></span></span>
-                    <span x-show="d.status" class="ml-3">Status: <span x-text="d.status"></span></span>
-                    <span class="ml-3 text-xs">Source: <span x-text="d.source"></span></span>
-                  </div>
-                </div>
-              </template>
-              <div x-show="!(liveData?.documents?.length)" class="text-gray-500">No documents found in PSIX</div>
-            </div>
-
-            <!-- Pilotage -->
-            <div x-show="activeTab==='pilotage'" class="space-y-3">
-              <template x-for="(pilot, key) in (liveData?.pilotage || {})" :key="key">
-                <div class="border rounded-lg p-3">
-                  <div class="font-medium" x-text="pilot.provider || pilot.title"></div>
-                  <a :href="pilot.url" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline" x-text="pilot.url"></a>
-                  <div class="text-sm text-gray-600 mt-2">
-                    <span x-show="pilot.vhf_channel">VHF: Ch <span x-text="pilot.vhf_channel"></span></span>
-                    <span x-show="pilot.boarding_grounds" class="ml-3">Boarding: <span x-text="pilot.boarding_grounds"></span></span>
-                    <span x-show="pilot.max_draft" class="ml-3">Max Draft: <span x-text="pilot.max_draft"></span></span>
-                  </div>
-                  <div x-show="pilot.pdf_links?.length" class="mt-2">
-                    <span class="text-xs text-gray-500">PDFs:</span>
-                    <template x-for="pdf in pilot.pdf_links" :key="pdf">
-                      <a :href="pdf" target="_blank" class="text-xs text-indigo-600 hover:text-indigo-800 underline ml-2" x-text="pdf.split('/').pop()"></a>
-                    </template>
-                  </div>
-                </div>
-              </template>
-            </div>
-
-            <!-- Marine Exchange -->
-            <div x-show="activeTab==='marine_exchange'" class="space-y-3">
-              <template x-for="(mx, key) in (liveData?.marine_exchange || {})" :key="key">
-                <div class="border rounded-lg p-3">
-                  <div class="font-medium" x-text="mx.provider || mx.title"></div>
-                  <a :href="mx.url" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline" x-text="mx.url"></a>
-                  <div x-show="mx.text_sample" class="text-sm text-gray-600 mt-2 line-clamp-3" x-text="mx.text_sample"></div>
-                </div>
-              </template>
-            </div>
-
-            <!-- COFR -->
-            <div x-show="activeTab==='cofr'" class="space-y-3">
-              <div class="border rounded-lg p-3">
-                <div class="font-medium">Certificate of Financial Responsibility</div>
-                <a :href="liveData?.cofr?.entrypoint || null" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline">COFR Vessel Search</a>
-                <div x-show="liveData?.cofr?.search_guidance?.length" class="mt-2 text-sm text-gray-600">
-                  <div class="font-medium">Search Guidance:</div>
-                  <ul class="list-disc list-inside">
-                    <template x-for="g in (liveData?.cofr?.search_guidance || [])" :key="g"><li x-text="g"></li></template>
-                  </ul>
-                </div>
-                <div class="mt-2 text-sm text-gray-600">
-                  <div class="font-medium">Requirements:</div>
-                  <ul class="list-disc list-inside">
-                    <li>Tankers over 300 GT: Required</li>
-                    <li>All vessels over 400 GT: Required</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-
-            <!-- MISP -->
-            <div x-show="activeTab==='misp'" class="space-y-3">
-              <div class="border rounded-lg p-3">
-                <div class="font-medium" x-text="liveData?.misp?.program || ''"></div>
-                <div class="text-sm text-gray-600 mt-2">
-                  <div>Current Fee: <span class="font-mono" x-text="liveData?.misp?.current_fee || ''"></span></div>
-                  <div x-show="liveData?.misp?.exemptions?.length" class="mt-2">
-                    Exemptions:
-                    <ul class="list-disc list-inside">
-                      <template x-for="ex in (liveData?.misp?.exemptions || [])" :key="ex"><li x-text="ex"></li></template>
-                    </ul>
-                  </div>
-                </div>
-                <div x-show="liveData?.misp?.pages?.length" class="mt-3">
-                  <div class="text-xs text-gray-500">Resources:</div>
-                  <template x-for="pg in (liveData?.misp?.pages || [])" :key="pg.url">
-                    <a :href="pg.url" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-800 underline block" x-text="pg.title || pg.url"></a>
-                  </template>
-                </div>
-              </div>
-            </div>
           </div>
         </div>
 
@@ -770,25 +670,24 @@
         draftMeters: 0,
         beamMeters: 0,
 
+        // autofill flags (for badges)
+        autoGT: false,
+        autoNT: false,
+        autoLOA: false,
+        autoBeam: false,
+        autoDraft: false,
+
         // UN/LOCODE suggestions
         unlocPrev: [],
         unlocNext: [],
         unlocMp: [],
 
-        // results
-        estimate: null,
-        estimateV2: null,
-        estimateLoading: false,
-        liveData: null,
-        activeTab: 'documents',
-
-        // Trends state
+        // trends & multi-port
         trendsChart: null,
         trendsPort: '',
         trendsMonths: 12,
         trendsSource: 'fees',
 
-        // Multi-port state
         mpVesselName: '',
         mpStartDate: new Date().toISOString().split('T')[0],
         mpDaysBetween: 14,
@@ -796,6 +695,13 @@
         mpPortInput: '',
         mpPorts: [],
         mpResult: null,
+
+        // results
+        estimate: null,
+        estimateV2: null,
+        estimateLoading: false,
+        liveData: null,
+        activeTab: 'documents',
 
         async init() {
           await this.checkHealth();
@@ -823,9 +729,10 @@
           }
         },
 
-        // Normalize/augment vessel row so UI keys always exist
+        // Normalize/augment vessel row so UI keys always exist + parse dims
         augment(v) {
           const out = { ...v };
+
           const pick = (...cands) => {
             for (const c of cands) {
               if (c in out && out[c] != null) {
@@ -845,6 +752,19 @@
             }
             return null;
           };
+          const toNumber = (val) => {
+            if (val == null) return null;
+            const n = Number(String(val).replace(/[^0-9.+-]/g, ''));
+            return Number.isFinite(n) ? n : null;
+          };
+          const toMeters = (val) => {
+            if (val == null) return null;
+            const s = String(val).toLowerCase();
+            const n = toNumber(s);
+            if (n == null) return null;
+            if (s.includes('ft') || s.includes('feet') || s.includes("'")) return n * 0.3048;
+            return n; // assume meters
+          };
 
           out.VesselID   = pick('VesselID','vesselid','ID','id');
           out.VesselName = pick('VesselName','vesselname','Name','name') ?? '(unnamed)';
@@ -863,6 +783,24 @@
           out.PrimaryIdentification = pick('PrimaryIdentification','Identification','primary_identification');
           out.OfficialNumber        = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber');
           out.IMONumber             = pick('IMONumber','IMO','IMONo','ImoNumber','IMO_Number');
+
+          // Length / Beam / Draft
+          const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','loa_m','loa','length_overall')
+                           ?? scanByKey(out, /(length|loa)/i);
+          const beamRaw  = pick('Beam','Breadth','Width','beam_m')
+                           ?? scanByKey(out, /(beam|breadth|width)/i);
+          const draftRaw = pick('Draft','SummerDraft','draft_m')
+                           ?? scanByKey(out, /(draft)/i) ?? scanByKey(out, /(depth)/i);
+
+          out.LOA_m   = toMeters(lenRaw);
+          out.Beam_m  = toMeters(beamRaw);
+          out.Draft_m = toMeters(draftRaw);
+
+          const gtN = toNumber(out.GrossTonnage);
+          const ntN = toNumber(out.NetTonnage);
+          if (gtN != null) out.GrossTonnage = gtN;
+          if (ntN != null) out.NetTonnage = ntN;
+
           return out;
         },
 
@@ -894,10 +832,8 @@
               ? data.pages
               : Math.max(Math.ceil(this.vesselTotal / this.vesselLimit), 1);
 
-            // API returns already paginated rows; just assign
             this.vesselResults = augmented;
 
-            // Human bounds
             const startIdx = (this.vesselPage - 1) * this.vesselLimit;
             this.vesselStart = this.vesselTotal ? (data.start ?? startIdx + 1) : 0;
             this.vesselEnd = data.end ?? Math.min(startIdx + this.vesselResults.length, this.vesselTotal);
@@ -925,6 +861,27 @@
 
         selectVessel(v) {
           this.selectedVessel = this.augment(v);
+
+          // reset badges
+          this.autoGT = this.autoNT = this.autoLOA = this.autoBeam = this.autoDraft = false;
+
+          const sv = this.selectedVessel || {};
+          const prefer = (curr, next, flagName) => {
+            if (Number(curr) > 0) return curr;
+            const n = Number(next);
+            if (Number.isFinite(n) && n > 0) {
+              this[flagName] = true;
+              return n.toFixed(flagName === 'autoGT' || flagName === 'autoNT' ? 0 : 2);
+            }
+            return curr;
+          };
+
+          if (sv.GrossTonnage != null) this.grossTonnage = Number(prefer(this.grossTonnage, sv.GrossTonnage, 'autoGT'));
+          if (sv.NetTonnage   != null) this.netTonnage   = Number(prefer(this.netTonnage,   sv.NetTonnage,   'autoNT'));
+          if (sv.LOA_m        != null) this.loaMeters    = Number(prefer(this.loaMeters,    sv.LOA_m,        'autoLOA'));
+          if (sv.Beam_m       != null) this.beamMeters   = Number(prefer(this.beamMeters,   sv.Beam_m,       'autoBeam'));
+          if (sv.Draft_m      != null) this.draftMeters  = Number(prefer(this.draftMeters,  sv.Draft_m,      'autoDraft'));
+
           if (this.selectedPort) this.loadLiveData();
         },
 
@@ -976,7 +933,7 @@
             draft_meters: String(this.draftMeters || 0),
             beam_meters: String(this.beamMeters || 0),
             previous_port_code: this.previousPortCode.trim().toUpperCase(),  // UN/LOCODE
-            arrival_port_code: this.selectedPort,                              // internal code from /ports
+            arrival_port_code: this.selectedPort,                             // internal code from /ports
             next_port_code: this.nextPortCode ? this.nextPortCode.trim().toUpperCase() : null,
             eta: this.eta ? new Date(this.eta).toISOString() : null,
             etd: this.etd ? new Date(this.etd).toISOString() : null,
@@ -1005,98 +962,6 @@
           }
         },
 
-        // Historical trends
-        async loadTrends() {
-          if (!this.trendsPort) return;
-          try {
-            const url = `${API_BASE}/api/v2/fees/historical/${encodeURIComponent(this.trendsPort)}?months=${this.trendsMonths}&source=${this.trendsSource}`;
-            const r = await fetch(url);
-            if (!r.ok) throw new Error(await r.text());
-            const data = await r.json();
-
-            const series = data.series || {};
-            const labels = (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"] || []).map(p => p.month);
-
-            const mk = (key, color) => {
-              const arr = (series[key] || []).map(p => p.value);
-              return { label: key, data: arr, borderColor: color, backgroundColor: color, tension: .25, spanGaps: true };
-            };
-
-            const datasets = [];
-            const palette = { cbp: '#ef4444', aphis: '#10b981', mx: '#6366f1', ton: '#f59e0b' };
-
-            if (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"]) {
-              datasets.push(mk("CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE", palette.cbp));
-              if (!series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] && series["CBP_USER_FEE"]) {
-                datasets.push(mk("CBP_USER_FEE", palette.cbp));
-              }
-            }
-            if (series["APHIS_COMMERCIAL_VESSEL"]) datasets.push(mk("APHIS_COMMERCIAL_VESSEL", palette.aphis));
-            if (series["MX_VTS_PER_CALL"])        datasets.push(mk("MX_VTS_PER_CALL", palette.mx));
-            if (series["TONNAGE_TAX_PER_TON"])    datasets.push(mk("TONNAGE_TAX_PER_TON", palette.ton));
-
-            const ctx = document.getElementById('trendsChart').getContext('2d');
-            if (this.trendsChart) this.trendsChart.destroy();
-            this.trendsChart = new Chart(ctx, {
-              type: 'line',
-              data: { labels, datasets },
-              options: {
-                plugins: { legend: { position: 'bottom' } },
-                scales: { y: { ticks: { callback: v => '$' + Number(v).toLocaleString() } } }
-              }
-            });
-          } catch (e) {
-            console.error('Trends failed:', e);
-            alert('Failed to load trends.');
-          }
-        },
-
-        // Multi-port methods
-        addMpPort() {
-          const code = (this.mpPortInput || '').trim().toUpperCase();
-          if (!code) return;
-          this.mpPorts.push(code);
-          this.mpPortInput = '';
-          this.unlocMp = [];
-        },
-        removeMpPort(i) { this.mpPorts.splice(i, 1); },
-
-        async submitMultiPort() {
-          if (this.mpPorts.length < 2) {
-            alert('Add at least two UN/LOCODE ports.');
-            return;
-          }
-          const vessel = {
-            name: this.mpVesselName || this.selectedVessel?.VesselName || 'Unknown Vessel',
-            imo_number: this.selectedVessel?.IMONumber || null,
-            vessel_type: this.vesselType,
-            gross_tonnage: String(this.grossTonnage || 0),
-            net_tonnage: String(this.netTonnage || 0),
-            loa_meters: String(this.loaMeters || 0),
-            beam_meters: String(this.beamMeters || 0),
-            draft_meters: String(this.draftMeters || 0),
-          };
-          const request = {
-            vessel_name: vessel.name,
-            ports: this.mpPorts.slice(),
-            start_date: this.mpStartDate,
-            days_between_ports: Number(this.mpDaysBetween) || 14,
-            days_in_port: Number(this.mpDaysInPort) || 2,
-          };
-          try {
-            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ request, vessel })
-            });
-            if (!r.ok) throw new Error(await r.text());
-            this.mpResult = await r.json();
-          } catch (e) {
-            console.error('Multi-port failed:', e);
-            alert('Failed to calculate multi-port voyage.');
-          }
-        },
-
         // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
@@ -1119,17 +984,16 @@
 
         // UN/LOCODE typeahead for previous/next/mp ports
         async searchUnloc(current = 'prev') {
-          const baseQ = (current === 'prev' ? this.previousPortCode : this.nextPortCode).trim();
-          const query = current === 'mp' ? (this.mpPortInput || '').trim() : baseQ;
-
-          if (query.length < 2) {
+          const base = current === 'prev' ? this.previousPortCode : current === 'next' ? this.nextPortCode : this.mpPortInput;
+          const q = (base || '').trim();
+          if (q.length < 2) {
             if (current === 'prev') this.unlocPrev = [];
             else if (current === 'next') this.unlocNext = [];
             else this.unlocMp = [];
             return;
           }
           try {
-            const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(query)}&limit=8`);
+            const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(q)}&limit=8`);
             if (!r.ok) throw new Error('UN/LOCODE search failed');
             const rows = await r.json();
             if (current === 'prev') this.unlocPrev = rows;
@@ -1161,15 +1025,15 @@
                 (c.details || '').replace(/\n/g, ' ')
               ]);
             }
-            // Totals (if present)
-            const t = this.estimateV2?.totals;
+
+            const t = this.estimateV2?.totals || {};
             if (t && Object.keys(t).length) {
               rows.push(['', 'TOTAL MANDATORY', t.mandatory ?? '', '', '', '', '']);
               rows.push(['', 'TOTAL LOW', t.total_low ?? '', '', '', '', '']);
               rows.push(['', 'TOTAL HIGH', t.total_high ?? '', '', '', '', '']);
             }
-            // Quick totals (if present)
-            const q = this.estimateV2?.quick_totals;
+
+            const q = this.estimateV2?.quick_totals || {};
             if (q && Object.keys(q).length) {
               rows.push(['', 'QUICK MANDATORY', q.mandatory ?? '', '', '', '', '']);
               rows.push(['', 'QUICK WITH OPTIONAL LOW', q.with_optional_low ?? '', '', '', '', '']);
@@ -1206,6 +1070,91 @@
           a.href = URL.createObjectURL(blob);
           a.download = `estimate_v1_${this.selectedPort}_${this.eta}.csv`;
           a.click();
+        },
+
+        // Historical trends
+        async loadTrends() {
+          if (!this.trendsPort) return;
+          try {
+            const url = `${API_BASE}/api/v2/fees/historical/${encodeURIComponent(this.trendsPort)}?months=${this.trendsMonths}&source=${this.trendsSource}`;
+            const r = await fetch(url);
+            if (!r.ok) throw new Error(await r.text());
+            const data = await r.json();
+            const series = data.series || {};
+            const labels = (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"] || []).map(p => p.month);
+
+            const mk = (key, color) => {
+              const arr = (series[key] || []).map(p => p.value);
+              return { label: key, data: arr, borderColor: color, backgroundColor: color, tension: .25, spanGaps: true };
+            };
+            const palette = { cbp: '#ef4444', aphis: '#10b981', mx: '#6366f1', ton: '#f59e0b' };
+            const datasets = [];
+            if (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"]) {
+              if (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"]) datasets.push(mk("CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE", palette.cbp));
+              else datasets.push(mk("CBP_USER_FEE", palette.cbp));
+            }
+            if (series["APHIS_COMMERCIAL_VESSEL"]) datasets.push(mk("APHIS_COMMERCIAL_VESSEL", palette.aphis));
+            if (series["MX_VTS_PER_CALL"]) datasets.push(mk("MX_VTS_PER_CALL", palette.mx));
+            if (series["TONNAGE_TAX_PER_TON"]) datasets.push(mk("TONNAGE_TAX_PER_TON", palette.ton));
+
+            const ctx = document.getElementById('trendsChart').getContext('2d');
+            if (this.trendsChart) this.trendsChart.destroy();
+            this.trendsChart = new Chart(ctx, {
+              type: 'line',
+              data: { labels, datasets },
+              options: {
+                plugins: { legend: { position: 'bottom' } },
+                scales: { y: { ticks: { callback: v => '$' + Number(v).toLocaleString() } } }
+              }
+            });
+          } catch (e) {
+            console.error('Trends failed:', e);
+            alert('Failed to load trends.');
+          }
+        },
+
+        // Multi-port methods
+        addMpPort() {
+          const code = (this.mpPortInput || '').trim().toUpperCase();
+          if (!code) return;
+          this.mpPorts.push(code);
+          this.mpPortInput = '';
+          this.unlocMp = [];
+        },
+        removeMpPort(i) { this.mpPorts.splice(i, 1); },
+        async submitMultiPort() {
+          if (this.mpPorts.length < 2) { alert('Add at least two UN/LOCODE ports.'); return; }
+
+          const vessel = {
+            name: this.mpVesselName || this.selectedVessel?.VesselName || 'Unknown Vessel',
+            imo_number: this.selectedVessel?.IMONumber || null,
+            vessel_type: this.vesselType,
+            gross_tonnage: String(this.grossTonnage || 0),
+            net_tonnage: String(this.netTonnage || 0),
+            loa_meters: String(this.loaMeters || 0),
+            beam_meters: String(this.beamMeters || 0),
+            draft_meters: String(this.draftMeters || 0),
+          };
+          const request = {
+            vessel_name: vessel.name,
+            ports: this.mpPorts.slice(),
+            start_date: this.mpStartDate,
+            days_between_ports: Number(this.mpDaysBetween) || 14,
+            days_in_port: Number(this.mpDaysInPort) || 2,
+          };
+
+          try {
+            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ request, vessel })
+            });
+            if (!r.ok) throw new Error(await r.text());
+            this.mpResult = await r.json();
+          } catch (e) {
+            console.error('Multi-port failed:', e);
+            alert('Failed to calculate multi-port voyage.');
+          }
         },
 
         async refreshAll() {
