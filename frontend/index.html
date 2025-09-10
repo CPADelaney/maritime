@@ -133,7 +133,7 @@
                         class="px-2 py-1 border rounded hover:bg-gray-100" x-text="vesselPages"></button>
               </template>
 
-              <button @click="nextVesselPage" :disabled="vesselPage >= vesselPages"
+              <button @click="nextVesselPage" :disabled="vesselPage >= this.vesselPages"
                       class="px-2 py-1 border rounded disabled:opacity-50">Next</button>
             </div>
           </div>
@@ -189,23 +189,92 @@
               <input x-model="eta" type="date" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Arrival Type</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Arrival Type (v1)</label>
               <select x-model="arrivalType" class="w-full border border-gray-300 rounded-lg px-3 py-2">
                 <option value="FOREIGN">FOREIGN</option>
                 <option value="COASTWISE">COASTWISE</option>
               </select>
             </div>
             <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Net Tonnage</label>
+              <label class="block text-sm font-medium text-gray-700 mb-1">Net Tonnage (v1)</label>
               <input x-model="netTonnage" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="Optional" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">YTD CBP Paid</label>
               <input x-model="ytdCbpPaid" type="number" step="0.01" class="w-full border border-gray-300 rounded-lg px-3 py-2" placeholder="0.00" />
             </div>
+
+            <!-- v2 controls -->
+            <div class="pt-3 border-t">
+              <div class="flex items-center gap-2 mb-3">
+                <input id="useV2" type="checkbox" x-model="useV2" class="h-4 w-4">
+                <label for="useV2" class="text-sm">Use comprehensive v2 estimator</label>
+              </div>
+
+              <div x-show="useV2" class="space-y-3">
+                <div class="grid grid-cols-1 gap-3">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Previous Port (UN/LOCODE)</label>
+                    <input x-model="previousPortCode" type="text" placeholder="e.g., USLAX or CNSHA" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Next Port (UN/LOCODE)</label>
+                    <input x-model="nextPortCode" type="text" placeholder="optional" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">ETD (optional)</label>
+                    <input x-model="etd" type="date" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Days Alongside</label>
+                    <input x-model.number="daysAlongside" min="1" type="number" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  </div>
+                </div>
+
+                <div>
+                  <label class="block text-sm font-medium text-gray-700 mb-1">Vessel Type</label>
+                  <select x-model="vesselType" class="w-full border border-gray-300 rounded-lg px-3 py-2">
+                    <option value="general_cargo">General Cargo</option>
+                    <option value="container">Container</option>
+                    <option value="tanker">Tanker</option>
+                    <option value="bulk_carrier">Bulk Carrier</option>
+                    <option value="cruise">Cruise</option>
+                    <option value="roro">Ro-Ro</option>
+                    <option value="lng">LNG</option>
+                    <option value="vehicle_carrier">Vehicle Carrier</option>
+                  </select>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Gross Tonnage</label>
+                    <input x-model.number="grossTonnage" type="number" step="1" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Net Tonnage</label>
+                    <input x-model.number="netTonnage" type="number" step="1" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  </div>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">LOA (m)</label>
+                    <input x-model.number="loaMeters" type="number" step="0.1" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Draft (m)</label>
+                    <input x-model.number="draftMeters" type="number" step="0.1" class="w-full border border-gray-300 rounded-lg px-3 py-2" />
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
+
           <button
-            @click="getEstimate"
+            @click="useV2 ? getEstimateV2() : getEstimate()"
             :disabled="!selectedPort || !eta || estimateLoading"
             class="w-full mt-4 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 font-medium">
             <span x-show="!estimateLoading">Calculate Estimate</span>
@@ -225,10 +294,10 @@
           </ul>
         </div>
 
-        <!-- Estimate -->
-        <div x-show="estimate" class="glass rounded-2xl shadow-lg p-6 animate-slide-up">
+        <!-- Estimate v1 -->
+        <div x-show="estimate && !estimateV2" class="glass rounded-2xl shadow-lg p-6 animate-slide-up">
           <div class="flex items-center justify-between mb-4">
-            <h3 class="text-xl font-semibold">Fee Estimate</h3>
+            <h3 class="text-xl font-semibold">Fee Estimate (v1)</h3>
             <div class="flex gap-2">
               <button @click="exportEstimate('csv')" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">Export CSV</button>
               <button @click="exportEstimate('json')" class="text-sm px-3 py-1 bg-gray-100 hover:bg-gray-200 rounded-md">Export JSON</button>
@@ -280,6 +349,51 @@
           </div>
 
           <p class="text-xs text-gray-500 mt-4" x-text="estimate.disclaimer"></p>
+        </div>
+
+        <!-- Estimate v2 -->
+        <div x-show="estimateV2" class="glass rounded-2xl shadow-lg p-6 animate-slide-up">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-xl font-semibold">Fee Estimate (v2)</h3>
+          </div>
+
+          <div class="text-sm text-gray-600 mb-3">
+            <div><span class="font-medium">Arrival:</span> <span x-text="estimateV2?.port?.name"></span> (<span x-text="estimateV2?.port?.code"></span>)</div>
+            <div><span class="font-medium">Prev → Arr → Next:</span>
+              <span x-text="estimateV2?.voyage?.previous_port"></span> →
+              <span x-text="estimateV2?.voyage?.arrival_port"></span> →
+              <span x-text="estimateV2?.voyage?.next_port || '—'"></span>
+            </div>
+          </div>
+
+          <div class="divide-y">
+            <template x-for="c in (estimateV2?.calculations || [])" :key="c.code">
+              <div class="py-2 flex items-start justify-between">
+                <div>
+                  <div class="font-medium" x-text="c.name"></div>
+                  <div class="text-xs text-gray-500" x-text="c.details"></div>
+                </div>
+                <div class="text-right">
+                  <div class="font-mono" x-text="'$' + c.final_amount"></div>
+                  <div class="text-xs text-gray-500">conf: <span x-text="c.confidence"></span></div>
+                </div>
+              </div>
+            </template>
+          </div>
+
+          <div class="mt-3 border-t pt-3 space-y-1">
+            <div class="flex justify-between"><span>Mandatory</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.mandatory || '0.00')"></span></div>
+            <div class="flex justify-between"><span>Optional (low)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.optional_low || '0.00')"></span></div>
+            <div class="flex justify-between"><span>Optional (high)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.optional_high || '0.00')"></span></div>
+            <div class="flex justify-between font-bold border-t pt-2">
+              <span>Total (low)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.total_low || '0.00')"></span>
+            </div>
+            <div class="flex justify-between font-bold">
+              <span>Total (high)</span><span class="font-mono" x-text="'$' + (estimateV2?.totals?.total_high || '0.00')"></span>
+            </div>
+          </div>
+
+          <p class="text-xs text-gray-500 mt-4" x-text="estimateV2?.disclaimer"></p>
         </div>
 
         <!-- Live Data Tabs -->
@@ -432,7 +546,21 @@
         arrivalType: 'FOREIGN',
         netTonnage: '',
         ytdCbpPaid: '0',
+
+        // v2 fields
+        useV2: false,
+        previousPortCode: '',
+        nextPortCode: '',
+        etd: '',
+        daysAlongside: 2,
+        vesselType: 'general_cargo',
+        grossTonnage: 0,
+        loaMeters: 0,
+        draftMeters: 0,
+
+        // results
         estimate: null,
+        estimateV2: null,
         estimateLoading: false,
         liveData: null,
         activeTab: 'documents',
@@ -466,7 +594,6 @@
         // Normalize/augment any vessel row so UI keys always exist
         augmentVessel(v) {
           const out = { ...v };
-        
           const pick = (...cands) => {
             for (const c of cands) {
               if (c in out && out[c] != null) {
@@ -476,8 +603,6 @@
             }
             return null;
           };
-        
-          // local helper (no `this`!)
           const scanByKey = (obj, keyRegex, accept = (val) => String(val).trim() !== '') => {
             for (const [k, val] of Object.entries(obj)) {
               if (val == null) continue;
@@ -488,53 +613,26 @@
             }
             return null;
           };
-        
-          // Canonical id & name
           out.VesselID   = pick('VesselID','vesselid','ID','id');
           out.VesselName = pick('VesselName','vesselname','Name','name') ?? '(unnamed)';
-        
-          // Call sign
           out.CallSign =
             pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign') ??
             scanByKey(out, /(call.?sign|radio.?call)/i);
-        
-          // Flag / country
           out.Flag =
             pick('CountryLookupName','Flag','FlagName','FlagOfRegistry','FlagState','FlagCountry','FlagCode','flag') ??
             scanByKey(out, /(flag|country).*(name|lookup|state|country)?/i, v => isNaN(v));
-        
-          // Type / service
           out.VesselType =
             pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype') ??
             scanByKey(out, /(service|type)/i, v => isNaN(v) && String(v).length < 80);
-        
-          // Gross tonnage
           out.GrossTonnage =
             pick('GrossTonnage','GT','Gross_Tonnage','grosstonnage','GrossTons','GrossTonnageText') ??
             scanByKey(out, /(gross.*ton|^gt$)/i);
-        
-          // Nice-to-haves
           out.YearBuilt = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year');
           out.Status    = pick('StatusLookupName','Status','VesselStatus');
-        
-          // Identifiers
           out.PrimaryIdentification = pick('PrimaryIdentification','Identification','primary_identification');
           out.OfficialNumber        = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber');
           out.IMONumber             = pick('IMONumber','IMO','IMONo','ImoNumber','IMO_Number');
-        
           return out;
-        },
-        
-        // Helper: scan any unknown key names
-        scanByKey(obj, keyRegex, accept = (v) => String(v).trim() !== '') {
-          for (const [k, val] of Object.entries(obj)) {
-            if (val == null) continue;
-            if (keyRegex.test(k)) {
-              const s = String(val).trim();
-              if (accept(s)) return s;
-            }
-          }
-          return null;
         },
   
         // --- Vessel search with client-side pagination + augmentation ---
@@ -549,49 +647,33 @@
           try {
             const params = new URLSearchParams({
               name: this.vesselQuery,
-              page: String(this.vesselPage),   // harmless if backend ignores
-              limit: String(this.vesselLimit), // harmless if backend ignores
+              page: String(this.vesselPage),
+              limit: String(this.vesselLimit),
             });
   
             const r = await fetch(`${API_BASE}/vessels/search?${params}`);
             if (!r.ok) throw new Error('Search failed');
             const data = await r.json();
   
-            // Raw rows from API
             const raw = Array.isArray(data.Table) ? data.Table : [];
-            if (raw.length) console.debug('First raw row keys:', Object.keys(raw[0]), raw[0]);
-            console.debug('PSIX rows received:', raw.length);
-  
-            // Augment rows so UI has stable keys
             const augmented = raw.map(this.augmentVessel);
   
-            // Total rows: use server-provided total if present, else full length
             this.vesselTotal = (typeof data.total === 'number') ? data.total : augmented.length;
-  
-            // Pages: use server-provided pages if present, else compute
             this.vesselPages = (typeof data.pages === 'number')
               ? data.pages
               : Math.max(Math.ceil(this.vesselTotal / this.vesselLimit), 1);
   
-            // Slice locally when server doesn't paginate
             if (data.total == null) {
               const start = (this.vesselPage - 1) * this.vesselLimit;
               const end = start + this.vesselLimit;
               this.vesselResults = augmented.slice(start, end);
             } else {
-              // If the server paginated, assume it already returned the current page
               this.vesselResults = augmented;
             }
   
-            // Range (human-friendly)
             const startIdx = (this.vesselPage - 1) * this.vesselLimit;
             this.vesselStart = this.vesselTotal ? startIdx + 1 : 0;
             this.vesselEnd = Math.min(startIdx + this.vesselResults.length, this.vesselTotal);
-  
-            console.debug(
-              'Showing slice:', this.vesselResults.length,
-              'First item:', this.vesselResults[0]?.VesselName
-            );
   
             if (this.vesselResults.length === 0) this.searchError = 'No vessels found';
           } catch (e) {
@@ -615,15 +697,16 @@
         },
   
         selectVessel(v) {
-          // Augment the selected one so your existing HTML bindings show values
           this.selectedVessel = this.augmentVessel(v);
           if (this.selectedPort) this.loadLiveData();
         },
   
+        // ----- v1 estimator (GET /estimate) -----
         async getEstimate() {
           if (!this.selectedPort || !this.eta) return;
           this.estimateLoading = true;
           this.estimate = null;
+          this.estimateV2 = null;
   
           const params = new URLSearchParams({
             port_code: this.selectedPort,
@@ -646,7 +729,51 @@
             this.estimateLoading = false;
           }
         },
-  
+
+        // ----- v2 estimator (POST /v2/estimate) -----
+        async getEstimateV2() {
+          if (!this.selectedPort || !this.eta || !this.previousPortCode.trim()) {
+            alert('Previous port (UN/LOCODE), arrival port, and ETA are required for v2.');
+            return;
+          }
+          this.estimateLoading = true;
+          this.estimate = null;
+          this.estimateV2 = null;
+
+          const body = {
+            vessel_name: this.selectedVessel?.VesselName || this.vesselQuery || 'Unknown Vessel',
+            vessel_type: this.vesselType,
+            gross_tonnage: String(this.grossTonnage || 0),
+            net_tonnage: String(this.netTonnage || 0),
+            loa_meters: String(this.loaMeters || 0),
+            draft_meters: String(this.draftMeters || 0),
+            previous_port_code: this.previousPortCode.trim().toUpperCase(),  // UN/LOCODE
+            arrival_port_code: this.selectedPort,                              // internal code from /ports
+            next_port_code: this.nextPortCode ? this.nextPortCode.trim().toUpperCase() : null,
+            eta: this.eta ? new Date(this.eta).toISOString() : null,
+            etd: this.etd ? new Date(this.etd).toISOString() : null,
+            days_alongside: Number(this.daysAlongside) || 2,
+            ytd_cbp_paid: String(this.ytdCbpPaid || 0),
+            tonnage_year_paid: "0"
+          };
+
+          try {
+            const r = await fetch(`${API_BASE}/v2/estimate`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(body)
+            });
+            if (!r.ok) throw new Error(await r.text());
+            this.estimateV2 = await r.json();
+            if (this.selectedVessel) await this.loadLiveData();
+          } catch (e) {
+            console.error('v2 estimate failed:', e);
+            alert('Failed to calculate v2 estimate.');
+          } finally {
+            this.estimateLoading = false;
+          }
+        }
+        ,
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
   
@@ -698,13 +825,16 @@
   
         async refreshAll() {
           await this.checkHealth();
-          if (this.selectedPort && this.eta) await this.getEstimate();
+          if (this.selectedPort && this.eta) {
+            if (this.useV2) await this.getEstimateV2();
+            else await this.getEstimate();
+          }
         },
   
         async clearCache() {
           try {
             const r = await fetch(`${API_BASE}/admin/cache/clear`, { method: 'POST' });
-          if (r.ok) {
+            if (r.ok) {
               await this.checkHealth();
               alert('Cache cleared successfully');
             }
@@ -715,7 +845,6 @@
       }
     }
   </script>
-
 
 </body>
 </html>
