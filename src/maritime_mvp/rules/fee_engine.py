@@ -161,16 +161,26 @@ class FeeEngine:
         "USSFO": Decimal("375"),
         "USSEA": Decimal("300"),
         "USPDX": Decimal("275"),
+        # internal codes too:
+        "SFBAY": Decimal("325"),
+        "PUGET": Decimal("300"),
+        "COLRIV": Decimal("275"),
+        "STKN": Decimal("275"),
     }
 
     # Pilotage formula fallbacks
     PILOTAGE_PORT_RATES = {
         "LALB": {"base": 3500, "per_foot": 8.50, "draft_mult": 1.15},
         "USOAK": {"base": 3200, "per_foot": 7.75, "draft_mult": 1.12},
+        "USSFO": {"base": 4200, "per_foot": 9.50, "draft_mult": 1.16},
         "USSEA": {"base": 4000, "per_foot": 9.25, "draft_mult": 1.18},
         "USPDX": {"base": 3800, "per_foot": 8.00, "draft_mult": 1.20},
-        "USSFO": {"base": 4200, "per_foot": 9.50, "draft_mult": 1.16},
+        # internal codes mirror regional baselines
+        "SFBAY": {"base": 3500, "per_foot": 8.75, "draft_mult": 1.14},
+        "PUGET": {"base": 4000, "per_foot": 9.25, "draft_mult": 1.18},
+        "COLRIV": {"base": 3800, "per_foot": 8.00, "draft_mult": 1.20},
     }
+
 
     def __init__(self, db: Session):
         self.db = db
@@ -499,39 +509,68 @@ class FeeEngine:
         )
 
     def _calc_aphis(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
+        """
+        APHIS AQI fee:
+          1) Prefer DB-configured fee rows (handles Cascadia/Great Lakes overrides via applies_cascadia).
+          2) Fallback to risk buckets:
+             - COASTWISE (prev UN/LOCODE starts with 'US') => 'domestic'
+             - Arrival port flagged Cascadia => 'cascadia'
+             - High-risk origin countries => 'high_risk'
+             - Otherwise => 'medium_risk'
+        """
         on = voyage.eta.date()
+    
+        # ---- DB override first (covers Cascadia/Great Lakes via applies_cascadia) ----
         db = self._active_fee("APHIS_COMMERCIAL_VESSEL", on, port)
         if db:
             base = _money(db.rate)
+            # Helpful context in details
+            details_bits = ["DB configured APHIS rate"]
+            if db.applies_cascadia is not None:
+                details_bits.append(f"applies_cascadia={bool(db.applies_cascadia)}")
+            if db.applies_state:
+                details_bits.append(f"state={db.applies_state}")
+            if db.applies_port_code:
+                details_bits.append(f"port={db.applies_port_code}")
+            details = "; ".join(details_bits)
+    
             return FeeCalculation(
                 code=db.code,
                 name=db.name,
                 base_amount=base,
                 final_amount=base,
                 confidence=Decimal("0.95"),
-                calculation_details="DB configured APHIS rate",
+                calculation_details=details,
             )
-
-        # Fallback risk logic
-        country = (voyage.previous_port_code or "")[:2]
-        if country in self.HIGH_RISK_COUNTRIES:
-            risk = "high_risk"
-        elif voyage.arrival_port_code in {"USSEA", "USTAC", "USPDX"}:
-            risk = "cascadia"
-        elif country == "US":
+    
+        # ---- Fallback risk logic ----
+        prev = (voyage.previous_port_code or "").strip().upper()
+        prev_cc = prev[:2] if len(prev) >= 2 else ""
+    
+        # 1) Coastwise moves (prev US*) are domestic
+        if voyage.arrival_type == "COASTWISE" or prev_cc == "US":
             risk = "domestic"
+        # 2) Cascadia/Great Lakes discounted region
+        elif bool(getattr(port, "is_cascadia", False)):
+            risk = "cascadia"
+        # 3) High-risk origins
+        elif prev_cc in self.HIGH_RISK_COUNTRIES:
+            risk = "high_risk"
+        # 4) Default medium
         else:
             risk = "medium_risk"
-
-        base = self.APHIS_RISK_RATES[risk]
+    
+        base = self.APHIS_RISK_RATES.get(risk, self.APHIS_RISK_RATES["medium_risk"])
+    
         return FeeCalculation(
             code="APHIS_AQI",
             name="APHIS Agricultural Quarantine Inspection",
-            base_amount=base,
-            final_amount=base,
+            base_amount=_money(base),
+            final_amount=_money(base),
             confidence=Decimal("0.95"),
-            calculation_details=f"Risk: {risk} from {voyage.previous_port_code}",
+            calculation_details=f"Fallback risk='{risk}' from prev='{prev}' (port.is_cascadia={bool(getattr(port, 'is_cascadia', False))})",
         )
+
 
     def _calc_tonnage_tax(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
         on = voyage.eta.date()
