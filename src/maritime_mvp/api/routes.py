@@ -19,7 +19,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import text
+from sqlalchemy import text, bindparam, Integer
 from sqlalchemy.orm import Session
 
 from ..db import SessionLocal
@@ -796,8 +796,10 @@ async def get_historical_fee_trends(
     if not _has_voyage_estimates(db):
         raise HTTPException(status_code=422, detail="voyage_estimates table not available for estimates source")
 
-    sql = text(
-        """
+    # clamp months to something sane
+    months = max(1, min(int(months or 12), 60))
+
+    sql = text("""
         SELECT
           to_char(date_trunc('month', eta), 'YYYY-MM') AS ym,
           COUNT(*)                                      AS calls,
@@ -808,11 +810,14 @@ async def get_historical_fee_trends(
           AVG(confidence_score)::numeric                AS avg_conf
         FROM voyage_estimates
         WHERE arrival_port_code = :port
-          AND eta >= (date_trunc('month', now()) - (:months::int || ' months')::interval)
+          AND eta >= (date_trunc('month', now()) - (:months * interval '1 month'))
         GROUP BY 1
         ORDER BY 1
-        """
+    """).bindparams(
+        bindparam("port"),
+        bindparam("months", type_=Integer()),
     )
+
     rows = db.execute(sql, {"port": original_code, "months": months}).fetchall()
     series = [
         {
