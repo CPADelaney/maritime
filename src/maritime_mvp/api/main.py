@@ -1,4 +1,3 @@
-# src/maritime_mvp/api/main.py
 from __future__ import annotations
 
 import os
@@ -15,8 +14,8 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
 from sqlalchemy.orm import Session
 
-from .routes import router as enhanced_router
-app.include_router(enhanced_router)
+# v2 router (enhanced endpoints)
+from .enhanced_routes import router as v2_router
 
 # Optional faster JSON (falls back gracefully if orjson isn't installed)
 try:
@@ -219,6 +218,9 @@ app = FastAPI(
     # Uses ORJSONResponse if available; otherwise JSONResponse.
     default_response_class=DefaultJSONResponse,  # type: ignore[arg-type]
 )
+
+# Mount v2 router (enhanced endpoints under /api/v2)
+app.include_router(v2_router)
 
 # ----- CORS -----
 _allow = os.getenv("ALLOW_ORIGINS") or os.getenv("ALLOWED_ORIGINS", "*")
@@ -521,29 +523,30 @@ def estimate(
     finally:
         db.close()
 
+# ----- IMO/UN LOCODE search (uses locode column) -----
 @app.get("/imo_ports/search", tags=["Ports"])
 def search_imo_ports(q: str = Query(..., min_length=2), limit: int = Query(20, ge=1, le=100)):
     db: Session = SessionLocal()
     try:
         rows = db.execute(text("""
-            SELECT unlocode, port_name, country_code, country_name
+            SELECT locode, port_name, country_code, country_name
             FROM imo_ports
-            WHERE unlocode ILIKE :q OR port_name ILIKE :q
-            ORDER BY CASE WHEN unlocode ILIKE :starts THEN 0 ELSE 1 END, port_name
+            WHERE locode ILIKE :q OR port_name ILIKE :q
+            ORDER BY CASE WHEN locode ILIKE :starts THEN 0 ELSE 1 END, port_name
             LIMIT :limit
         """), {"q": f"%{q}%", "starts": f"{q}%", "limit": limit}).mappings().all()
         return list(rows)
     finally:
         db.close()
 
-@app.get("/imo_ports/{unlocode}", tags=["Ports"])
-def get_imo_port(unlocode: str):
+@app.get("/imo_ports/{locode}", tags=["Ports"])
+def get_imo_port(locode: str):
     db: Session = SessionLocal()
     try:
         row = db.execute(text("""
-            SELECT unlocode, port_name, country_code, country_name
-            FROM imo_ports WHERE unlocode = :u
-        """), {"u": unlocode}).mappings().first()
+            SELECT locode, port_name, country_code, country_name
+            FROM imo_ports WHERE locode = :u
+        """), {"u": locode}).mappings().first()
         if not row:
             raise HTTPException(status_code=404, detail="UN/LOCODE not found")
         return dict(row)
@@ -563,7 +566,7 @@ UNLOCODE_TO_INTERNAL = {
     # Columbia River
     "USPDX": "COLRIV",
     "USAST": "COLRIV",  # Astoria
-    # Southern California (treat LA/LB as combined internal region)
+    # Southern California (combined internal region)
     "USLAX": "LALB",
     "USLGB": "LALB",
 }
@@ -612,7 +615,6 @@ def estimate_v2(
                 used_mapping = port is not None
 
         if not port:
-            # Final attempt: keep a helpful message
             raise HTTPException(
                 status_code=404,
                 detail=f"Arrival port '{arrival_port_code}' not supported yet (add to ports table or mapping)."
@@ -636,10 +638,11 @@ def estimate_v2(
         prev_unloc = (previous_port_code or "").strip().upper()
         next_unloc = ((next_port_code or "").strip().upper() or None)
 
+        # IMPORTANT: pass internal port code to the FeeEngine
         voyage = VoyageContext(
             previous_port_code=prev_unloc,
-            arrival_port_code=requested_unloc,  # keep original UN/LOCODE in the voyage context
-            next_port_code=next_unloc,          # normalized: empty -> None
+            arrival_port_code=resolved_code,
+            next_port_code=next_unloc,
             eta=eta or datetime.utcnow(),
             etd=etd,
             days_alongside=max(1, int(days_alongside or 1)),
