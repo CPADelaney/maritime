@@ -750,6 +750,23 @@
             }
             return null;
           };
+
+          const extractIMO = () => {
+            // direct fields first
+            const direct = pick('IMONumber','IMO','ImoNumber','IMO_Number','PrimaryVesselNumber','primary_vessel_number');
+            if (direct && /\d{6,7}/.test(String(direct))) return String(direct).match(/\d{6,7}/)[0];
+          
+            // look for any field that *mentions* IMO and contains digits
+            const valHit = scanDeep(src, /(imo|imo\s*no|imo\s*number)/i, v => /\d{6,7}/.test(String(v)));
+            if (valHit) return String(valHit).match(/\d{6,7}/)[0];
+          
+            // brute scan of serialized row (last resort)
+            const blob = JSON.stringify(src);
+            const m = blob.match(/imo[^0-9]{0,6}(\d{6,7})/i) || blob.match(/\b(\d{7})\b/);
+            return m ? m[1] : null;
+          };
+          
+          out.IMONumber = extractIMO();
         
           const pick = (...cands) => {
             for (const c of cands) {
@@ -894,7 +911,7 @@
           // reset badges
           this.autoGT = this.autoNT = this.autoLOA = this.autoBeam = this.autoDraft = false;
         
-          // vessel-type inference (kept as-is)
+          // quick vessel-type guess from free text
           const guessType = (t) => {
             const s = (t || '').toLowerCase();
             if (s.includes('container')) return 'container';
@@ -922,14 +939,14 @@
             return curr;
           };
         
-          // prefill from row if present
+          // prefill from the search row if present
           if (sv.GrossTonnage != null) this.grossTonnage = prefer(this.grossTonnage, sv.GrossTonnage, 'autoGT', 0);
           if (sv.NetTonnage   != null) this.netTonnage   = prefer(this.netTonnage,   sv.NetTonnage,   'autoNT', 0);
           if (sv.LOA_m        != null) this.loaMeters    = prefer(this.loaMeters,    sv.LOA_m,        'autoLOA', 2);
           if (sv.Beam_m       != null) this.beamMeters   = prefer(this.beamMeters,   sv.Beam_m,       'autoBeam', 2);
           if (sv.Draft_m      != null) this.draftMeters  = prefer(this.draftMeters,  sv.Draft_m,      'autoDraft', 2);
         
-          // 🔑 wait for enrichment (so fields pop right away)
+          // 🔑 IMO-only enrichment (await so fields populate immediately)
           await this.enrichVesselDimensions();
         
           if (this.selectedPort) this.loadLiveData();
@@ -1013,70 +1030,104 @@
         },
 
         async enrichVesselDimensions() {
-          // do we still need anything?
-          const needs = () => ({
-            dims: !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !(Number(this.draftMeters) > 0),
-            tons: !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0),
-          });
-          if (!needs().dims && !needs().tons) return;
+          // what do we still need?
+          const needsDims = !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !(Number(this.draftMeters) > 0);
+          const needsTons = !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0);
+          if (!needsDims && !needsTons) return;
         
-          // pull clean identifiers
-          const imo = (this.selectedVessel?.IMONumber || '')
-                        .toString()
-                        .match(/\b\d{6,7}\b/)?.[0] || '';
-          const callsign = (this.selectedVessel?.CallSign || '').trim();
-          const name = (this.selectedVessel?.VesselName || '').trim();
+          // 🔑 Only use IMO; backend rejects name/callsign on these endpoints
+          const imo = (this.selectedVessel?.IMONumber || '').toString().match(/\b\d{6,7}\b/)?.[0] || '';
+          if (!imo) {
+            console.info('[enrich] No IMO available; skipping enrichment to avoid 422s.');
+            return;
+          }
         
-          // try one identifier at a time (this avoids 422s)
-          const idOptions = [];
-          if (imo) idOptions.push({ imo });
-          if (callsign) idOptions.push({ callsign });
-          if (name) idOptions.push({ name });
+          // If selection changes while we fetch, abort updates
+          const selectionToken = (this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + imo;
         
-          if (idOptions.length === 0) return; // nothing to enrich with
+          // Helper: safe apply numeric value if current is empty/zero
+          const setIfNeeded = (curr, next, flagKey, dp = 2) => {
+            if (Number(curr) > 0) return curr;
+            const n = Number(next);
+            if (Number.isFinite(n) && n > 0) {
+              this[flagKey] = true;
+              return dp === 0 ? n : Number(n.toFixed(dp));
+            }
+            return curr;
+          };
         
-          // candidate endpoints (try in order; ignore 404/422/500)
-          const paths = [
+          // Try these endpoints in order; stop on first success
+          const endpoints = [
             '/vessels/details',
             '/vessels/summary',
             '/api/v2/vessels/details',
             '/psix/summary',
           ];
+          const qs = new URLSearchParams({ imo }).toString();
         
-          const tryUpdateFrom = (aug) => {
-            let updated = false;
-            if (needs().tons) {
-              if (!Number(this.grossTonnage) && aug.GrossTonnage != null) {
-                this.grossTonnage = Number(aug.GrossTonnage);
-                this.autoGT = true; updated = true;
-              }
-              if (!Number(this.netTonnage) && aug.NetTonnage != null) {
-                this.netTonnage = Number(aug.NetTonnage);
-                this.autoNT = true; updated = true;
-              }
-            }
-            if (needs().dims) {
-              if (!Number(this.loaMeters) && aug.LOA_m != null)  { this.loaMeters  = Number(aug.LOA_m.toFixed(2));  this.autoLOA = true;  updated = true; }
-              if (!Number(this.beamMeters) && aug.Beam_m != null) { this.beamMeters = Number(aug.Beam_m.toFixed(2)); this.autoBeam = true; updated = true; }
-              if (!Number(this.draftMeters) && aug.Draft_m != null){ this.draftMeters= Number(aug.Draft_m.toFixed(2)); this.autoDraft = true;updated = true; }
-            }
-            return updated;
+          const withTimeout = (ms = 3500) => {
+            const ctl = new AbortController();
+            const t = setTimeout(() => ctl.abort(), ms);
+            return { signal: ctl.signal, clear: () => clearTimeout(t) };
           };
         
-          for (const id of idOptions) {
-            const qs = new URLSearchParams(id).toString();
-            for (const path of paths) {
-              try {
-                const url = `${API_BASE}${path}?${qs}`;
-                const r = await fetch(url);
-                if (!r.ok) continue; // 404 / 422 / etc → try next
-                const details = await r.json();
-                const aug = this.augment(details);
-                if (tryUpdateFrom(aug)) return; // ✅ stop on first success
-              } catch { /* ignore and continue */ }
+          for (const path of endpoints) {
+            try {
+              const { signal, clear } = withTimeout();
+              const res = await fetch(`${API_BASE}${path}?${qs}`, { signal });
+              clear();
+              if (!res.ok) continue;
+        
+              // Be forgiving about payload shapes
+              let payload = await res.json();
+              if (payload && typeof payload === 'object') {
+                if (Array.isArray(payload.Table) && payload.Table.length) payload = payload.Table[0];
+                else if (Array.isArray(payload) && payload.length) payload = payload[0];
+                else if (payload.data) payload = payload.data;
+                else if (payload.result) payload = payload.result;
+              }
+        
+              // Reuse your normalizer to unify keys + parse units
+              const aug = this.augment(payload || {});
+              // If user changed selection while we waited, bail
+              const stillSelected = ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + imo) === selectionToken;
+              if (!stillSelected) return;
+        
+              let updated = false;
+        
+              if (needsTons) {
+                if (!Number(this.grossTonnage) && aug.GrossTonnage != null) {
+                  this.grossTonnage = setIfNeeded(this.grossTonnage, aug.GrossTonnage, 'autoGT', 0);
+                  updated = true;
+                }
+                if (!Number(this.netTonnage) && aug.NetTonnage != null) {
+                  this.netTonnage = setIfNeeded(this.netTonnage, aug.NetTonnage, 'autoNT', 0);
+                  updated = true;
+                }
+              }
+        
+              if (needsDims) {
+                if (!Number(this.loaMeters) && aug.LOA_m != null) {
+                  this.loaMeters = setIfNeeded(this.loaMeters, aug.LOA_m, 'autoLOA', 2);
+                  updated = true;
+                }
+                if (!Number(this.beamMeters) && aug.Beam_m != null) {
+                  this.beamMeters = setIfNeeded(this.beamMeters, aug.Beam_m, 'autoBeam', 2);
+                  updated = true;
+                }
+                if (!Number(this.draftMeters) && aug.Draft_m != null) {
+                  this.draftMeters = setIfNeeded(this.draftMeters, aug.Draft_m, 'autoDraft', 2);
+                  updated = true;
+                }
+              }
+        
+              if (updated) return; // ✅ stop after first successful enrichment
+            } catch (err) {
+              // swallow 404/422/timeout and try the next endpoint
             }
           }
         },
+
 
 
         // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
