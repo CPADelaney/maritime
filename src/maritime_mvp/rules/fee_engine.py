@@ -1,5 +1,7 @@
 # src/maritime_mvp/rules/fee_engine.py
 from __future__ import annotations
+
+import logging
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
@@ -10,6 +12,15 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Fee, Port
+
+logger = logging.getLogger(__name__)
+
+# Optional US holidays (federal + state); fall back gracefully if unavailable
+try:  # pragma: no cover
+    import holidays as _holidays
+    _HOLIDAYS_AVAILABLE = True
+except Exception:  # pragma: no cover
+    _HOLIDAYS_AVAILABLE = False
 
 
 # -------------------------------
@@ -62,7 +73,7 @@ class VesselSpecs:
     vessel_type: VesselType = VesselType.GENERAL_CARGO
     gross_tonnage: Decimal = Decimal("0")
     net_tonnage: Decimal = Decimal("0")
-    loa_meters: Decimal = Decimal("0")  # Length Overall in meters
+    loa_meters: Decimal = Decimal("0")   # Length Overall in meters
     beam_meters: Decimal = Decimal("0")
     draft_meters: Decimal = Decimal("0")
 
@@ -79,7 +90,7 @@ class VesselSpecs:
 class VoyageContext:
     """Complete voyage context including port sequence."""
     previous_port_code: str  # UN/LOCODE like "CNSHA" or "USLAX"
-    arrival_port_code: str   # Like "USOAK"
+    arrival_port_code: str   # Internal like "LALB" / "SFBAY" or UN/LOCODE depending on your schema
     next_port_code: Optional[str] = None
 
     eta: datetime = field(default_factory=datetime.now)
@@ -88,7 +99,7 @@ class VoyageContext:
 
     @property
     def arrival_type(self) -> str:
-        if self.previous_port_code and self.previous_port_code.startswith("US"):
+        if self.previous_port_code and self.previous_port_code.upper().startswith("US"):
             return "COASTWISE"
         return "FOREIGN"
 
@@ -98,7 +109,7 @@ class VoyageContext:
 
     @property
     def is_holiday(self) -> bool:
-        # Simple, replace with python-holidays if needed
+        # Simple local fallback; comprehensive engine overrides this with state-aware detection.
         holidays = {(1, 1), (7, 4), (12, 25)}
         return (self.eta.month, self.eta.day) in holidays
 
@@ -181,12 +192,34 @@ class FeeEngine:
         "COLRIV": {"base": 3800, "per_foot": 8.00, "draft_mult": 1.20},
     }
 
-
     def __init__(self, db: Session):
         self.db = db
         # Rolling caps for comprehensive API; the simple API takes caps from ctx
         self.ytd_cbp_paid = Decimal("0.00")
         self.tonnage_year_paid = Decimal("0.00")
+
+    # ------------- Holiday helper -------------
+
+    def _is_us_holiday(self, on: date, state: Optional[str]) -> bool:
+        """
+        True if 'on' is a US holiday (federal or state, when provided).
+        Falls back to a minimal fixed-date set if 'holidays' is unavailable.
+        """
+        if _HOLIDAYS_AVAILABLE:
+            try:
+                fed = _holidays.UnitedStates()
+                if on in fed:
+                    return True
+                if state:
+                    try:
+                        st = _holidays.US(state=state.upper())
+                        return on in st
+                    except Exception:
+                        return False
+            except Exception:
+                logger.debug("holidays lookup failed; falling back", exc_info=True)
+        # Fallback: minimal fixed-date set
+        return (on.month, on.day) in {(1, 1), (7, 4), (12, 25)}
 
     # ------------- DB utilities -------------
 
@@ -232,7 +265,6 @@ class FeeEngine:
         port = self._get_port(ctx.port_code)
 
         # ---- 1) CBP User Fee (calendar-year cap) ----
-        # Prefer DB fee code; fallback to FY schedule
         db_cbp = self._active_fee("CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE", ctx.arrival_date, port)
         if db_cbp:
             base = _money(db_cbp.rate)
@@ -251,7 +283,6 @@ class FeeEngine:
                 )
             )
         else:
-            # Fallback to formula (FY25/26 step)
             base, cap = self._cbp_rate_and_cap_by_date(ctx.arrival_date)
             remaining = max(Decimal("0.00"), cap - _money(ctx.ytd_cbp_paid))
             charge = _money(min(base, remaining))
@@ -276,7 +307,6 @@ class FeeEngine:
                 )
             )
         else:
-            # Cheap heuristic without full voyage context:
             # Cascadia gets Cascadia rate; domestic coastwise gets domestic; else medium.
             if port.is_cascadia:
                 risk = "cascadia"
@@ -321,7 +351,6 @@ class FeeEngine:
         if db_ton and ctx.net_tonnage:
             per_ton = _money(db_ton.rate)
             amt = _money(Decimal(ctx.net_tonnage) * per_ton)
-            # If DB configured a cap+period, apply it (commonly tonnage-year)
             if db_ton.cap_amount and db_ton.cap_period and ctx.tonnage_year_paid is not None:
                 cap = _money(db_ton.cap_amount)
                 remaining = max(Decimal("0.00"), cap - _money(ctx.tonnage_year_paid))
@@ -335,10 +364,8 @@ class FeeEngine:
                 )
             )
         elif ctx.net_tonnage:
-            # Fallback to generic vessel-type rate (general cargo)
             per_ton = self.TONNAGE_RATES[VesselType.GENERAL_CARGO]
             base = _money(Decimal(ctx.net_tonnage) * per_ton)
-            # Apply simplified federal cap ($19,100) against ctx-tonnage-year
             remaining = max(Decimal("0.00"), Decimal("19100.00") - _money(ctx.tonnage_year_paid))
             amt = _money(min(base, remaining))
             items.append(
@@ -379,7 +406,6 @@ class FeeEngine:
     def calculate_comprehensive(self, vessel: VesselSpecs, voyage: VoyageContext) -> Dict[str, Any]:
         """Full enhanced breakdown with DB overrides + formula fallbacks."""
         port = self._get_port(voyage.arrival_port_code)
-        on_date = voyage.eta.date()
         calcs: List[FeeCalculation] = []
 
         # 1) CBP
@@ -395,8 +421,8 @@ class FeeEngine:
         if port.is_california:
             calcs.append(self._calc_ca_misp(voyage, port))
 
-        # 5) Pilotage
-        calcs.append(self._calc_pilotage(vessel, voyage))
+        # 5) Pilotage (weekend/holiday multipliers, state-aware holiday detection)
+        calcs.append(self._calc_pilotage(vessel, voyage, port))
 
         # 6) Tugboats (optional estimate)
         calcs.append(self._estimate_tugboats(vessel, voyage))
@@ -422,6 +448,7 @@ class FeeEngine:
                 "gross_tonnage": str(_money(vessel.gross_tonnage)),
                 "net_tonnage": str(_money(vessel.net_tonnage)),
                 "loa_meters": str(_money(vessel.loa_meters)),
+                "beam_meters": str(_money(vessel.beam_meters)),
                 "draft_meters": str(_money(vessel.draft_meters)),
             },
             "voyage": {
@@ -432,7 +459,11 @@ class FeeEngine:
                 "eta": voyage.eta.isoformat(),
                 "etd": voyage.etd.isoformat() if voyage.etd else None,
                 "is_weekend": voyage.is_weekend_arrival,
-                "is_holiday": voyage.is_holiday,
+                # Robust US holiday detection (federal + state where available)
+                "is_holiday": self._is_us_holiday(
+                    voyage.eta.date(),
+                    getattr(port, "state", None),
+                ),
             },
             "calculations": [
                 {
@@ -519,12 +550,11 @@ class FeeEngine:
              - Otherwise => 'medium_risk'
         """
         on = voyage.eta.date()
-    
+
         # ---- DB override first (covers Cascadia/Great Lakes via applies_cascadia) ----
         db = self._active_fee("APHIS_COMMERCIAL_VESSEL", on, port)
         if db:
             base = _money(db.rate)
-            # Helpful context in details
             details_bits = ["DB configured APHIS rate"]
             if db.applies_cascadia is not None:
                 details_bits.append(f"applies_cascadia={bool(db.applies_cascadia)}")
@@ -533,7 +563,7 @@ class FeeEngine:
             if db.applies_port_code:
                 details_bits.append(f"port={db.applies_port_code}")
             details = "; ".join(details_bits)
-    
+
             return FeeCalculation(
                 code=db.code,
                 name=db.name,
@@ -542,11 +572,11 @@ class FeeEngine:
                 confidence=Decimal("0.95"),
                 calculation_details=details,
             )
-    
+
         # ---- Fallback risk logic ----
         prev = (voyage.previous_port_code or "").strip().upper()
         prev_cc = prev[:2] if len(prev) >= 2 else ""
-    
+
         # 1) Coastwise moves (prev US*) are domestic
         if voyage.arrival_type == "COASTWISE" or prev_cc == "US":
             risk = "domestic"
@@ -559,9 +589,9 @@ class FeeEngine:
         # 4) Default medium
         else:
             risk = "medium_risk"
-    
+
         base = self.APHIS_RISK_RATES.get(risk, self.APHIS_RISK_RATES["medium_risk"])
-    
+
         return FeeCalculation(
             code="APHIS_AQI",
             name="APHIS Agricultural Quarantine Inspection",
@@ -570,7 +600,6 @@ class FeeEngine:
             confidence=Decimal("0.95"),
             calculation_details=f"Fallback risk='{risk}' from prev='{prev}' (port.is_cascadia={bool(getattr(port, 'is_cascadia', False))})",
         )
-
 
     def _calc_tonnage_tax(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
         on = voyage.eta.date()
@@ -634,17 +663,23 @@ class FeeEngine:
             calculation_details="Fallback fixed per voyage",
         )
 
-    def _calc_pilotage(self, vessel: VesselSpecs, voyage: VoyageContext) -> FeeCalculation:
-        rates = self.PILOTAGE_PORT_RATES.get(voyage.arrival_port_code, {"base": 3500, "per_foot": 8.00, "draft_mult": 1.15})
+    def _calc_pilotage(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
+        rates = self.PILOTAGE_PORT_RATES.get(
+            voyage.arrival_port_code,
+            {"base": 3500, "per_foot": 8.00, "draft_mult": 1.15},
+        )
         base = _money(rates["base"])
         loa_charge = _money(vessel.loa_feet * Decimal(str(rates["per_foot"])))
         draft_mult = Decimal(str(rates["draft_mult"]))
         base_amt = _money(base + (loa_charge * draft_mult))
 
+        # Weekend / US holiday (federal + state) detection
+        is_holiday = self._is_us_holiday(voyage.eta.date(), getattr(port, "state", None))
+
         multipliers: Dict[str, Decimal] = {}
         if voyage.is_weekend_arrival:
             multipliers["weekend"] = Decimal("1.5")
-        if voyage.is_holiday:
+        if is_holiday:
             multipliers["holiday"] = Decimal("2.0")
 
         final_mult = max(multipliers.values()) if multipliers else Decimal("1.0")
@@ -659,7 +694,11 @@ class FeeEngine:
             multipliers=multipliers,
             final_amount=final_amt,
             confidence=Decimal("0.85"),
-            calculation_details=f"LOA {vessel.loa_feet:.0f}ft × ${rates['per_foot']}/ft × draft factor {draft_mult}",
+            calculation_details=(
+                f"LOA {vessel.loa_feet:.0f}ft × ${rates['per_foot']}/ft × draft factor {draft_mult}"
+                + (", weekend" if voyage.is_weekend_arrival else "")
+                + (", holiday" if is_holiday else "")
+            ),
             is_optional=False,
         )
 
