@@ -151,7 +151,12 @@ class PsixClient:
 
                     rows = self._extract_rows(payload)
                     data = {"Table": rows}
-                    _cache_set(ck, data)
+                    if rows:
+                        _cache_set(ck, data)           # cache non-empty for normal TTL
+                    else:
+                        # either don't cache empties or cache briefly
+                        # _cache_set(ck, data, ttl=30)  # 30s, optional
+                        pass
                     return data
 
                 except requests.RequestException as e:
