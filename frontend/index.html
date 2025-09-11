@@ -733,7 +733,9 @@
         augment(v) {
           const src = (v && typeof v === 'object') ? { ...v } : {};
   
-          const scanDeep = (obj, keyRegex, accept = (val) => String(val).trim() !== '', depth = 0) => {
+          const scanDeep = (obj, keyRegex, accept = (val) => (
+            (typeof val === 'string' && val.trim() !== '') || typeof val === 'number'
+          ), depth = 0) => {
             if (!obj || depth > 4) return null;
             for (const [k, val] of Object.entries(obj)) {
               if (val == null) continue;
@@ -811,12 +813,7 @@
           const GrossTonnage = (toNumber(gtRaw) ?? gtRaw) ?? null;
           const NetTonnage   = (toNumber(ntRaw) ?? ntRaw) ?? null;
   
-          // Dimensions (support PSIX feet fields)
-          const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','LengthInFeet','loa_m','loa','length_overall','Length (ft)')
-                        ?? scan(/(length|loa)/i);
-          const beamRaw  = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','BreadthInFeet','beam_m','Breadth (ft)')
-                        ?? scan(/(beam|breadth|width)/i);
-          
+         
           // IMPORTANT: do NOT map Depth → Draft; expose Depth separately
           const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','LengthInFeet','loa_m','loa','length_overall','Length (ft)') ?? scan(/(length|loa)/i);
           const beamRaw  = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','BreadthInFeet','beam_m','Breadth (ft)') ?? scan(/(beam|breadth|width)/i);
@@ -828,7 +825,14 @@
           const Draft_m = toMeters(draftRaw);
           const Depth_m = toMeters(depthRaw);
           
-          return { ...src, /* …other fields… */ LOA_m, Beam_m, Draft_m, Depth_m };
+          return {
+            ...src,
+            VesselID, VesselName, CallSign, Flag, VesselType,
+            IMONumber, OfficialNumber, YearBuilt,
+            GrossTonnage, NetTonnage,
+            LOA_m, Beam_m, Draft_m, Depth_m
+          };
+          }, // <— close augment properly
   
         // --- Vessel search with server pagination + augmentation ---
         async searchVessel(page = 1) {
