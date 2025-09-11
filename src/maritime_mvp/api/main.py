@@ -613,18 +613,22 @@ def search_vessels(
 ) -> Any:
     """
     Search PSIX by name and return a paginated, trimmed list.
-    Uses get_vessel_summary(vessel_id=0, vessel_name=...) per PSIX search behavior.
+
+    Uses get_vessel_summary(vessel_id=0, vessel_name=...) which is how PSIX
+    performs attribute-based searches.
     """
-    client = PsixClient(timeout=12, retries=0)  # tighter timeout helps avoid proxy 502s
+    # Use a sane timeout and allow 1 retry (PSIX can be slow intermittently)
+    client = PsixClient(timeout=30, retries=1)
+
     try:
-        # IMPORTANT: when searching by attributes, send <VesselID>0</VesselID>
         raw = client.get_vessel_summary(vessel_id=None, vessel_name=name)
-    except Exception as e:
-        logger.exception("PSIX search failed")
+    except Exception:
+        logger.exception("PSIX search failed for name=%r", name)
         raise HTTPException(status_code=502, detail="PSIX search failed")
 
     rows = (raw or {}).get("Table") or []
 
+    # sort for stable UX
     def _nm(r): return (r.get("VesselName") or r.get("vesselname") or "").upper()
     def _cs(r): return (r.get("CallSign") or r.get("callsign") or "").upper()
     rows.sort(key=lambda r: (_nm(r), _cs(r)))
@@ -634,7 +638,6 @@ def search_vessels(
     page_ = min(max(page, 1), pages)
     start_idx = (page_ - 1) * limit
     end_idx = min(start_idx + limit, total)
-
     page_rows = rows[start_idx:end_idx]
 
     def pick(r):
