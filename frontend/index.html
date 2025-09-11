@@ -818,25 +818,17 @@
                         ?? scan(/(beam|breadth|width)/i);
           
           // IMPORTANT: do NOT map Depth → Draft; expose Depth separately
-          const draftRaw = pick('Draft','SummerDraft','draft_m')
-                        ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b/i);
+          const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','LengthInFeet','loa_m','loa','length_overall','Length (ft)') ?? scan(/(length|loa)/i);
+          const beamRaw  = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','BreadthInFeet','beam_m','Breadth (ft)') ?? scan(/(beam|breadth|width)/i);
+          const draftRaw = pick('Draft','SummerDraft','draft_m') ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b/i);
           const depthRaw = pick('Depth','DepthInFeet','Depth (ft)') ?? scan(/(^|\b)depth\b/i);
           
           const LOA_m   = toMeters(lenRaw);
           const Beam_m  = toMeters(beamRaw);
           const Draft_m = toMeters(draftRaw);
           const Depth_m = toMeters(depthRaw);
-  
-          const PrimaryIdentification =
-            pick('PrimaryIdentification') || (IMONumber ? `IMO ${IMONumber}` : (OfficialNumber || CallSign || null));
-  
-          return {
-            ...src,
-            VesselID, VesselName, CallSign, Flag, VesselType,
-            IMONumber, OfficialNumber, YearBuilt, PrimaryIdentification,
-            GrossTonnage, NetTonnage, LOA_m, Beam_m, Draft_m, Depth_m,
-          };
-        },
+          
+          return { ...src, /* …other fields… */ LOA_m, Beam_m, Draft_m, Depth_m };
   
         // --- Vessel search with server pagination + augmentation ---
         async searchVessel(page = 1) {
@@ -1021,83 +1013,14 @@
   
         // ----- NEW: PSIX-first enrichment flow -----
         async enrichVesselDimensions() {
-          // What do we still need?
           const needsDims = !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !(Number(this.draftMeters) > 0);
           const needsTons = !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0);
           if (!needsDims && !needsTons) return;
         
           const sv = this.selectedVessel || {};
-          let vesselId = sv.VesselID || null;
-        
-          const stillToken = (sv.VesselID || sv.VesselName || '') + ':' + (sv.CallSign || '');
-        
-          // Helper: run a list of URLs until one returns 2xx JSON
-          const firstOkJson = async (urls) => {
-            for (const u of urls) {
-              try {
-                const res = await fetch(u);
-                if (!res.ok) continue;
-                return await res.json();
-              } catch (_) {}
-            }
-            return null;
-          };
-        
-          // If no VesselID, try resolving via multiple route/param variants
-          if (!vesselId) {
-            const name = (sv.VesselName || '').trim();
-            const cs   = (sv.CallSign || sv.VesselCallSign || '').trim();
-        
-            // Query param variants PSIX-style and lowercase
-            const qsets = [];
-            if (cs) {
-              qsets.push({ CallSign: cs }, { CallSign: cs, Service: 'ALL' }, { callsign: cs }, { call_sign: cs });
-            }
-            if (name) {
-              qsets.push({ VesselName: name }, { VesselName: name, Service: 'ALL' }, { name }, { vessel_name: name });
-            }
-            // Fallback: both together
-            if (cs && name) {
-              qsets.push({ CallSign: cs, VesselName: name }, { callsign: cs, name });
-            }
-        
-            const buildQs = (obj) =>
-              Object.entries(obj)
-                .map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`)
-                .join('&');
-        
-            // Try a few likely backend routes
-            const routes = ['/psix/summary', '/psix/getVesselSummary', '/vessels/summary'];
-        
-            const urls = [];
-            for (const r of routes) for (const q of qsets) urls.push(`${API_BASE}${r}?${buildQs(q)}`);
-        
-            const summary = await firstOkJson(urls);
-        
-            // Normalize summary shapes -> find VesselID
-            if (summary) {
-              const rows = Array.isArray(summary?.Table) ? summary.Table
-                        : Array.isArray(summary?.rows)  ? summary.rows
-                        : Array.isArray(summary)        ? summary
-                        : (summary?.data?.rows || []);
-              if (rows && rows.length) {
-                // Prefer exact callsign match if present
-                const byCs = cs ? rows.find(r => String(r.VesselCallSign || r.CallSign || '').trim().toUpperCase() === cs.toUpperCase()) : null;
-                const row  = byCs || rows[0];
-                vesselId = row?.VesselID ?? null;
-                if (vesselId) console.info('[enrich] PSIX VesselID resolved via variants:', vesselId);
-              }
-            }
-        
-            if (!vesselId) {
-              console.info('[enrich] No VesselID resolvable (PSIX variants), skipping.');
-              return;
-            }
-          }
-        
-          // Prevent races if selection changed
+          const selToken = (sv.VesselID || sv.VesselName || '') + ':' + (sv.CallSign || '');
           const stillSelected = () =>
-            ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + (this.selectedVessel?.CallSign || '')) === stillToken;
+            ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + (this.selectedVessel?.CallSign || '')) === selToken;
         
           const setIf = (curr, next, flag, dp = 2) => {
             if (Number(curr) > 0) return curr;
@@ -1106,65 +1029,145 @@
             return curr;
           };
         
-          // Try detail endpoints (some backends split them)
-          const detailUrls = [
-            `${API_BASE}/psix/details?vessel_id=${encodeURIComponent(vesselId)}`,     // our aggregate, if present
-            `${API_BASE}/psix/dimensions?vessel_id=${encodeURIComponent(vesselId)}`,  // PSIX Dimensions (feet)
-            `${API_BASE}/psix/tonnage?vessel_id=${encodeURIComponent(vesselId)}`,     // PSIX Tonnage
-            `${API_BASE}/vessels/details?vessel_id=${encodeURIComponent(vesselId)}`,  // generic details
-            `${API_BASE}/vessels/summary?vessel_id=${encodeURIComponent(vesselId)}`,  // generic summary
-            `${API_BASE}/api/v2/vessels/details?vessel_id=${encodeURIComponent(vesselId)}`
-          ];
+          const qs = (obj) => Object.entries(obj).map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
+          const unify = (payload) => {
+            // Accept common shapes: {Table:[...]}, {rows:[...]}, [...], {data:{...}} …
+            if (!payload) return [];
+            if (Array.isArray(payload?.Table)) return payload.Table;
+            if (Array.isArray(payload?.rows)) return payload.rows;
+            if (Array.isArray(payload)) return payload;
+            if (Array.isArray(payload?.data?.rows)) return payload.data.rows;
+            if (payload?.data && typeof payload.data === 'object') return [payload.data];
+            if (payload?.result && typeof payload.result === 'object') return [payload.result];
+            return [payload];
+          };
         
-          // Pull everything we can and merge
+          const tryFetch = async (urls) => {
+            for (const u of urls) {
+              try {
+                const r = await fetch(u);
+                if (!r.ok) continue;
+                const j = await r.json();
+                console.info('[enrich] ✅', u);
+                return j;
+              } catch (_) { /* keep trying */ }
+            }
+            return null;
+          };
+        
+          // -------------------------
+          // 1) Resolve VesselID via our backend (no /psix/* calls)
+          // -------------------------
+          let vesselId = sv.VesselID || null;
+          if (!vesselId) {
+            const idParamSets = [{ id: sv.id }, { vessel_id: sv.id }, { VesselID: sv.id }].filter(p => Object.values(p)[0]);
+            const keyParamSets = [];
+            const cs = (sv.CallSign || sv.VesselCallSign || '').trim();
+            const nm = (sv.VesselName || '').trim();
+        
+            if (cs) keyParamSets.push({ callsign: cs }, { CallSign: cs }, { call_sign: cs });
+            if (nm) keyParamSets.push({ vessel_name: nm }, { name: nm }, { VesselName: nm });
+        
+            const idUrls = [];
+            for (const p of idParamSets) {
+              idUrls.push(`${API_BASE}/vessels/summary?${qs(p)}`);
+              idUrls.push(`${API_BASE}/vessels/details?${qs(p)}`);
+              idUrls.push(`${API_BASE}/api/v2/vessels/details?${qs(p)}`);
+            }
+        
+            let summary = idUrls.length ? await tryFetch(idUrls) : null;
+            if (!summary && keyParamSets.length) {
+              const keyUrls = [];
+              for (const p of keyParamSets) {
+                keyUrls.push(`${API_BASE}/vessels/summary?${qs(p)}`);
+                keyUrls.push(`${API_BASE}/vessels/details?${qs(p)}`);
+                keyUrls.push(`${API_BASE}/api/v2/vessels/details?${qs(p)}`);
+              }
+              summary = await tryFetch(keyUrls);
+            }
+        
+            const rows = unify(summary);
+            if (rows.length) {
+              // Prefer exact callsign match if available
+              const row = (cs && rows.find(r => String(r.VesselCallSign || r.CallSign || '').trim().toUpperCase() === cs.toUpperCase())) || rows[0];
+              vesselId = row?.VesselID ?? row?.vessel_id ?? row?.ID ?? null;
+              if (vesselId && !sv.VesselID) this.selectedVessel.VesselID = vesselId; // cache it for later calls
+            }
+          }
+        
+          if (!stillSelected()) return;
+        
+          // -------------------------
+          // 2) Pull details (with or without an ID) and merge
+          // -------------------------
+          const detailUrls = [];
+          if (vesselId) {
+            detailUrls.push(`${API_BASE}/vessels/details?${qs({ vessel_id: vesselId })}`);
+            detailUrls.push(`${API_BASE}/api/v2/vessels/details?${qs({ vessel_id: vesselId })}`);
+            detailUrls.push(`${API_BASE}/vessels/summary?${qs({ vessel_id: vesselId })}`);
+          } else {
+            // No ID: query by callsign/name directly against details endpoints
+            const cs = (sv.CallSign || sv.VesselCallSign || '').trim();
+            const nm = (sv.VesselName || '').trim();
+            if (cs) {
+              detailUrls.push(`${API_BASE}/vessels/details?${qs({ callsign: cs })}`);
+              detailUrls.push(`${API_BASE}/api/v2/vessels/details?${qs({ callsign: cs })}`);
+            }
+            if (nm) {
+              detailUrls.push(`${API_BASE}/vessels/details?${qs({ vessel_name: nm })}`);
+              detailUrls.push(`${API_BASE}/api/v2/vessels/details?${qs({ name: nm })}`);
+              detailUrls.push(`${API_BASE}/api/v2/vessels/details?${qs({ vessel_name: nm, service: 'ALL' })}`);
+            }
+          }
+        
           let merged = {};
           for (const u of detailUrls) {
             try {
-              const res = await fetch(u);
-              if (!res.ok) continue;
-              let js = await res.json();
-              // unify typical shapes
-              if (Array.isArray(js?.Table) && js.Table.length) js = js.Table[0];
-              else if (Array.isArray(js) && js.length) js = js[0];
-              else if (js?.data) js = js.data;
-              else if (js?.result) js = js.result;
+              const r = await fetch(u);
+              if (!r.ok) continue;
+              const j = await r.json();
+              const rows = unify(j);
+              if (!rows.length) continue;
+              // Prefer a row with dimensions/tonnage
+              const pickRow = rows.find(rw => rw.LengthInFeet || rw.GrossTonnage || rw.NetTonnage || rw.LOA_m || rw.Beam_m || rw.Draft_m) || rows[0];
+              // Convert PSIX feet if present (never infer Draft from Depth)
+              const extra = {};
+              if (pickRow.LengthInFeet != null)  extra.LOA_m  = Number(pickRow.LengthInFeet)  * 0.3048;
+              if (pickRow.BreadthInFeet != null) extra.Beam_m = Number(pickRow.BreadthInFeet) * 0.3048;
+              if (pickRow.DepthInFeet != null)   extra.Depth_m = Number(pickRow.DepthInFeet)  * 0.3048;
         
-              // Map PSIX "InFeet" to meters on the fly (without overwriting Draft)
-              if (js && typeof js === 'object') {
-                const m = {};
-                if (js.LengthInFeet != null)   m.LOA_m  = Number(js.LengthInFeet)  * 0.3048;
-                if (js.BreadthInFeet != null)  m.Beam_m = Number(js.BreadthInFeet) * 0.3048;
-                if (js.DepthInFeet != null)    m.Depth_m = Number(js.DepthInFeet)  * 0.3048;
-                merged = { ...merged, ...js, ...m };
-              }
+              merged = { ...merged, ...pickRow, ...extra };
+              // If we still didn’t have VesselID, try to grab it from this payload
+              if (!vesselId) vesselId = pickRow.VesselID ?? pickRow.vessel_id ?? pickRow.ID ?? vesselId;
             } catch (_) {}
           }
         
           if (!stillSelected()) return;
         
-          // Normalize merged with augment to reuse parsing rules
+          // -------------------------
+          // 3) Normalize + apply
+          // -------------------------
           const aug = this.augment(merged || {});
           let updated = false;
         
           if (needsTons) {
-            const beforeGT = this.grossTonnage;
-            const beforeNT = this.netTonnage;
+            const bGT = this.grossTonnage, bNT = this.netTonnage;
             this.grossTonnage = setIf(this.grossTonnage, aug.GrossTonnage, 'autoGT', 0);
             this.netTonnage   = setIf(this.netTonnage,   aug.NetTonnage,   'autoNT', 0);
-            updated ||= (this.grossTonnage !== beforeGT || this.netTonnage !== beforeNT);
+            updated ||= (this.grossTonnage !== bGT || this.netTonnage !== bNT);
           }
-        
           if (needsDims) {
             const bL = this.loaMeters, bB = this.beamMeters, bD = this.draftMeters;
             this.loaMeters  = setIf(this.loaMeters,  aug.LOA_m,  'autoLOA', 2);
             this.beamMeters = setIf(this.beamMeters, aug.Beam_m, 'autoBeam', 2);
-            // Draft only if true draft provided (we never infer from Depth)
+            // Only set real draft if present (never from Depth)
             this.draftMeters = setIf(this.draftMeters, aug.Draft_m, 'autoDraft', 2);
             updated ||= (this.loaMeters !== bL || this.beamMeters !== bB || this.draftMeters !== bD);
           }
         
-          console.info(updated ? '[enrich] Populated from PSIX/vessels detail variants' : '[enrich] Details fetched, nothing new');
+          console.info(updated ? '[enrich] Populated from /vessels/* details' : '[enrich] Details fetched, nothing new');
         },
+
 
   
         // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
