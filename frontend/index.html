@@ -777,91 +777,68 @@
             return n; // assume meters if unitless
           };
         
-          // Extract a 6–7 digit IMO number from common fields or anywhere in the object
-          const extractIMO = () => {
-            const getDigits = (v) => v ? String(v).match(/\b\d{6,7}\b/)?.[0] : null;
-            // direct/common fields first
-            const direct = pick(
-              'IMONumber','IMO','ImoNumber','IMO_Number','IMONo',
-              'PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No'
-            );
-            let val = getDigits(direct);
-            if (!val) {
-              // any key mentioning "imo" that contains digits
-              const hit = scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
-              val = getDigits(hit);
-            }
-            if (!val) {
-              // brute-force last resort
-              const blob = JSON.stringify(src);
-              const m = blob.match(/imo[^0-9]{0,6}(\d{6,7})/i) || blob.match(/\b(\d{7})\b/);
-              val = m ? m[1] : null;
-            }
-            return val;
-          };
-
-          // IDs (used by enrichment)
           const num7 = (x) => (x ? String(x).match(/\b\d{6,7}\b/)?.[0] : null);
-          
-          // Try standard IMO fields first
-          let imoCand = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMOShipNo','imo');
-          // PSIX often sticks it in "PrimaryVesselNumber"
-          if (!imoCand) imoCand = pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No');
-          
-          out.IMONumber = num7(imoCand) || null;
-          
-          out.OfficialNumber =
-            pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number') || null;
-
         
-          // ---------- build the normalized output ----------
-          const out = { ...src };
-        
-          // identity / descriptors
-          out.VesselID   = pick('VesselID','vesselid','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
-          out.VesselName = pick('VesselName','vesselname','Name','name') ?? scan(/vessel.*name|^name$/i);
-          out.CallSign   = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign')
-                           ?? scan(/call.?sign|radio.?call/i);
-          out.Flag       = pick('CountryLookupName','Flag','FlagName','FlagOfRegistry','FlagState','FlagCountry','FlagCode','flag')
-                           ?? scan(/(flag|country)(.*(name|lookup|state|country))?/i, v => isNaN(v));
-          out.VesselType = pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype')
-                           ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
+          // ---------- compute normalized fields ----------
+          const VesselID   = pick('VesselID','vesselid','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
+          const VesselName = pick('VesselName','vesselname','Name','name') ?? scan(/vessel.*name|^name$/i);
+          const CallSign   = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign')
+                             ?? scan(/call.?sign|radio.?call/i);
+          const Flag       = pick('CountryLookupName','Flag','FlagName','FlagOfRegistry','FlagState','FlagCountry','FlagCode','flag')
+                             ?? scan(/(flag|country)(.*(name|lookup|state|country))?/i, v => isNaN(v));
+          const VesselType = pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype')
+                             ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
         
           // IDs
-          out.IMONumber       = extractIMO();
-          out.OfficialNumber  = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber')
-                                ?? scan(/official.?number/i);
-          out.YearBuilt       = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
-                                ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i, v => {
-                                  const n = Number(String(v).replace(/\D/g,''));
-                                  return Number.isFinite(n) ? n : null;
-                                });
+          let imoRaw = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMONo','IMOShipNo','imo')
+                    || pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No')
+                    || scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
+          const IMONumber = num7(imoRaw);
+        
+          const OfficialNumber =
+            pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number')
+            ?? scan(/official.?number/i);
+        
+          const YearBuilt = (() => {
+            const y = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
+                   ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i);
+            const n = Number(String(y ?? '').replace(/\D/g,''));
+            return Number.isFinite(n) ? n : null;
+          })();
         
           // tonnage
-          let gross = pick('GrossTonnage','GT','Gross_Tonnage','GrossTons','GrossTonnageText')
-                      ?? scan(/gross.*ton|(^|\b)gt\b/i);
-          let net   = pick('NetTonnage','NT','Net_Tonnage')
-                      ?? scan(/net.*ton|(^|\b)nt\b/i);
-        
-          const gtN = toNumber(gross);
-          const ntN = toNumber(net);
-          out.GrossTonnage = (gtN != null) ? gtN : gross ?? null;
-          out.NetTonnage   = (ntN != null) ? ntN : net   ?? null;
+          const gtRaw = pick('GrossTonnage','GT','Gross_Tonnage','GrossTons','GrossTonnageText')
+                     ?? scan(/gross.*ton|(^|\b)gt\b/i);
+          const ntRaw = pick('NetTonnage','NT','Net_Tonnage')
+                     ?? scan(/net.*ton|(^|\b)nt\b/i);
+          const GrossTonnage = (toNumber(gtRaw) ?? gtRaw) ?? null;
+          const NetTonnage   = (toNumber(ntRaw) ?? ntRaw) ?? null;
         
           // dimensions
           const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','loa_m','loa','length_overall','Length (ft)')
-                           ?? scan(/(length|loa)/i);
+                        ?? scan(/(length|loa)/i);
           const beamRaw  = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','beam_m','Breadth (ft)')
-                           ?? scan(/(beam|breadth|width)/i);
+                        ?? scan(/(beam|breadth|width)/i);
           const draftRaw = pick('Draft','SummerDraft','draft_m','Depth','Depth (ft)')
-                           ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b|(^|\b)depth\b/i);
+                        ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b|(^|\b)depth\b/i);
         
-          out.LOA_m   = toMeters(lenRaw);
-          out.Beam_m  = toMeters(beamRaw);
-          out.Draft_m = toMeters(draftRaw);
+          const LOA_m   = toMeters(lenRaw);
+          const Beam_m  = toMeters(beamRaw);
+          const Draft_m = toMeters(draftRaw);
         
+          const PrimaryIdentification =
+            pick('PrimaryIdentification') || (IMONumber ? `IMO ${IMONumber}` : (OfficialNumber || CallSign || null));
+        
+          // ---------- build and return ----------
+          const out = {
+            ...src,
+            VesselID, VesselName, CallSign, Flag, VesselType,
+            IMONumber, OfficialNumber, YearBuilt, PrimaryIdentification,
+            GrossTonnage, NetTonnage, LOA_m, Beam_m, Draft_m,
+          };
           return out;
         },
+
 
         // --- Vessel search with server pagination + augmentation ---
         async searchVessel(page = 1) {
