@@ -7,7 +7,7 @@ from __future__ import annotations
 import os, re, html as _html, logging, requests, warnings
 from typing import Any, Dict, List, Optional
 
-from lxml import etree as LET  # lxml is already in requirements
+from lxml import etree as ET
 
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 logger = logging.getLogger(__name__)
@@ -204,25 +204,39 @@ class PsixClient:
         for ns in namespaces:
             soap_action = f'"{ns}/{op}"'
             body = f"""<?xml version="1.0" encoding="utf-8"?>
-<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
-               xmlns:xsd="http://www.w3.org/2001/XMLSchema"
-               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
-  <soap:Body>
-    <{op} xmlns="{ns}">{body_xml}</{op}>
-  </soap:Body>
-</soap:Envelope>"""
-            resp = self.session.post(self.url, data=body, headers={"SOAPAction": soap_action}, timeout=self.timeout)
-            txt = resp.text
-            m = re.search(fr"<{op}Result[^>]*>(.*?)</{op}Result>", txt, re.IGNORECASE | re.DOTALL)
-            if not m:
+    <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                   xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+                   xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+      <soap:Body>
+        <{op} xmlns="{ns}">{body_xml}</{op}>
+      </soap:Body>
+    </soap:Envelope>"""
+            try:
+                resp = self.session.post(self.url, data=body, headers={"SOAPAction": soap_action}, timeout=self.timeout)
+                resp.raise_for_status()
+            except requests.RequestException as e:
+                logger.debug("PSIX %s call failed (ns=%s): %s", op, ns, e)
                 continue
-            payload = m.group(1)
+    
+            txt = resp.text
+            # Parse and find the *Result node by local-name (handles prefixes)
+            try:
+                root = ET.fromstring(txt.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
+                result_nodes = root.xpath(f".//*[local-name()='{op}Result']")
+                if not result_nodes:
+                    continue
+                payload = "".join(result_nodes[0].itertext())
+            except Exception as e:
+                logger.debug("PSIX %s result parse error: %s", op, e)
+                continue
+    
             if "&lt;" in payload or "&amp;lt;" in payload:
                 payload = _html.unescape(payload)
+    
             rows = self._extract_rows(payload)
             return {"Table": rows}
         return {"Table": []}
-
+    
     def get_vessel_particulars(self, vessel_id: int) -> Dict[str, Any]:
         return self._soap_call("getVesselParticulars", f"<VesselID>{vessel_id}</VesselID>")
 
