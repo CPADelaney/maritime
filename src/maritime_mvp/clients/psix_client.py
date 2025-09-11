@@ -199,6 +199,42 @@ class PsixClient:
 
         return rec
 
+    def _soap_call(self, op: str, body_xml: str) -> Dict[str, Any]:
+        namespaces = ["https://cgmix.uscg.mil", "http://cgmix.uscg.mil"]
+        for ns in namespaces:
+            soap_action = f'"{ns}/{op}"'
+            body = f"""<?xml version="1.0" encoding="utf-8"?>
+<soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+               xmlns:xsd="http://www.w3.org/2001/XMLSchema"
+               xmlns:soap="http://schemas.xmlsoap.org/soap/envelope/">
+  <soap:Body>
+    <{op} xmlns="{ns}">{body_xml}</{op}>
+  </soap:Body>
+</soap:Envelope>"""
+            resp = self.session.post(self.url, data=body, headers={"SOAPAction": soap_action}, timeout=self.timeout)
+            txt = resp.text
+            m = re.search(fr"<{op}Result[^>]*>(.*?)</{op}Result>", txt, re.IGNORECASE | re.DOTALL)
+            if not m:
+                continue
+            payload = m.group(1)
+            if "&lt;" in payload or "&amp;lt;" in payload:
+                payload = _html.unescape(payload)
+            rows = self._extract_rows(payload)
+            return {"Table": rows}
+        return {"Table": []}
+
+    def get_vessel_particulars(self, vessel_id: int) -> Dict[str, Any]:
+        return self._soap_call("getVesselParticulars", f"<VesselID>{vessel_id}</VesselID>")
+
+    def get_vessel_dimensions(self, vessel_id: int) -> Dict[str, Any]:
+        return self._soap_call("getVesselDimensions", f"<VesselID>{vessel_id}</VesselID>")
+
+    def get_vessel_tonnage(self, vessel_id: int) -> Dict[str, Any]:
+        return self._soap_call("getVesselTonnage", f"<VesselID>{vessel_id}</VesselID>")
+
+    def get_vessel_documents(self, vessel_id: int) -> Dict[str, Any]:
+        return self._soap_call("getVesselDocuments", f"<VesselID>{vessel_id}</VesselID>")
+
     def _normalize_row(self, rec: Dict[str, Any]) -> None:
         """
         Populate common display keys from PSIX's actual column names, if missing.
