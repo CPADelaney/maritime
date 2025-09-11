@@ -425,6 +425,14 @@ def vessels_details(
         "_dimension_rows": dims,
     }
     return {"rows": [merged]}
+
+def search_by_name(self, name: str) -> Dict[str, Any]:
+    # PSIX requires <VesselID>0</VesselID> when searching by attributes
+    return self.get_vessel_summary(vessel_id=None, vessel_name=name)
+
+def search_by_callsign(self, callsign: str) -> Dict[str, Any]:
+    return self.get_vessel_summary(vessel_id=None, call_sign=callsign)
+
 # ----- Frontend mounting -----
 def find_frontend_dir() -> Optional[Path]:
     candidates = [
@@ -611,24 +619,15 @@ def search_vessels(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     limit: int = Query(25, ge=1, le=100, description="Rows per page (default 25)"),
 ) -> Any:
-    """
-    Search PSIX by name and return a paginated, trimmed list.
-
-    Uses get_vessel_summary(vessel_id=0, vessel_name=...) which is how PSIX
-    performs attribute-based searches.
-    """
-    # Use a sane timeout and allow 1 retry (PSIX can be slow intermittently)
-    client = PsixClient(timeout=30, retries=1)
-
+    client = PsixClient(timeout=30, retries=1)  # sane defaults; PSIX can be slow intermittently
     try:
-        raw = client.get_vessel_summary(vessel_id=None, vessel_name=name)
+        raw = client.search_by_name(name)  # <— back to the prior behavior
     except Exception:
-        logger.exception("PSIX search failed for name=%r", name)
+        logger.exception("PSIX search failed")
         raise HTTPException(status_code=502, detail="PSIX search failed")
 
     rows = (raw or {}).get("Table") or []
 
-    # sort for stable UX
     def _nm(r): return (r.get("VesselName") or r.get("vesselname") or "").upper()
     def _cs(r): return (r.get("CallSign") or r.get("callsign") or "").upper()
     rows.sort(key=lambda r: (_nm(r), _cs(r)))
