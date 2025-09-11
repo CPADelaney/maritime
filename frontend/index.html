@@ -635,7 +635,7 @@
         // status
         apiStatus: 'Checking…',
         cacheStats: '',
-
+  
         // search & paging
         vesselQuery: '',
         vesselSearched: false,
@@ -648,7 +648,7 @@
         vesselTotal: 0,
         vesselStart: 0,
         vesselEnd: 0,
-
+  
         // selection & forms
         selectedVessel: null,
         ports: [],
@@ -657,7 +657,7 @@
         arrivalType: 'FOREIGN',
         netTonnage: '',
         ytdCbpPaid: '0',
-
+  
         // v2 fields
         useV2: false,
         previousPortCode: '',
@@ -669,25 +669,25 @@
         loaMeters: 0,
         draftMeters: 0,
         beamMeters: 0,
-
+  
         // autofill flags (for badges)
         autoGT: false,
         autoNT: false,
         autoLOA: false,
         autoBeam: false,
         autoDraft: false,
-
+  
         // UN/LOCODE suggestions
         unlocPrev: [],
         unlocNext: [],
         unlocMp: [],
-
+  
         // trends & multi-port
         trendsChart: null,
         trendsPort: '',
         trendsMonths: 12,
         trendsSource: 'fees',
-
+  
         mpVesselName: '',
         mpStartDate: new Date().toISOString().split('T')[0],
         mpDaysBetween: 14,
@@ -695,19 +695,19 @@
         mpPortInput: '',
         mpPorts: [],
         mpResult: null,
-
+  
         // results
         estimate: null,
         estimateV2: null,
         estimateLoading: false,
         liveData: null,
         activeTab: 'documents',
-
+  
         async init() {
           await this.checkHealth();
           await this.loadPorts();
         },
-
+  
         async checkHealth() {
           try {
             const r = await fetch(`${API_BASE}/health`);
@@ -719,7 +719,7 @@
             console.error('Health failed:', e);
           }
         },
-
+  
         async loadPorts() {
           try {
             const r = await fetch(`${API_BASE}/ports`);
@@ -728,11 +728,11 @@
             console.error('Ports load failed:', e);
           }
         },
-
-        // Normalize/augment vessel row so UI keys always exist + parse dims
+  
+        // ---------- Normalizer (no out-before-init) ----------
         augment(v) {
           const src = (v && typeof v === 'object') ? { ...v } : {};
-        
+  
           const scanDeep = (obj, keyRegex, accept = (val) => String(val).trim() !== '', depth = 0) => {
             if (!obj || depth > 4) return null;
             for (const [k, val] of Object.entries(obj)) {
@@ -749,6 +749,7 @@
             return null;
           };
           const scan = (re, accept) => scanDeep(src, re, accept);
+  
           const pick = (...cands) => {
             for (const c of cands) {
               if (c in src && src[c] != null) {
@@ -758,22 +759,25 @@
             }
             return null;
           };
+  
           const toNumber = (val) => {
             if (val == null) return null;
             const n = Number(String(val).replace(/[^0-9.+-]/g, ''));
             return Number.isFinite(n) ? n : null;
           };
+  
           const toMeters = (val) => {
             if (val == null) return null;
             const s = String(val).toLowerCase();
             const n = toNumber(s);
             if (n == null) return null;
             if (s.includes('ft') || s.includes('feet') || s.includes("'")) return n * 0.3048;
-            return n;
+            return n; // assume meters if unitless
           };
+  
           const num7 = (x) => (x ? String(x).match(/\b\d{6,7}\b/)?.[0] : null);
-        
-          // Identity
+  
+          // Identity / descriptors
           const VesselID   = pick('VesselID','vesselid','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
           const VesselName = pick('VesselName','vesselname','Name','name') ?? scan(/vessel.*name|^name$/i);
           const CallSign   = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign')
@@ -782,23 +786,23 @@
                           ?? scan(/(flag|country)(.*(name|lookup|state|country))?/i, v => isNaN(v));
           const VesselType = pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype')
                           ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
-        
+  
           // IDs
           const imoRaw = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMONo','IMOShipNo','imo')
                       || pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No')
                       || scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
           const IMONumber = num7(imoRaw);
-        
+  
           const OfficialNumber = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number')
                               ?? scan(/official.?number/i);
-        
+  
           const YearBuilt = (() => {
             const y = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
                    ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i);
             const n = Number(String(y ?? '').replace(/\D/g,''));
             return Number.isFinite(n) ? n : null;
           })();
-        
+  
           // Tonnage
           const gtRaw = pick('GrossTonnage','GT','Gross_Tonnage','GrossTons','GrossTonnageText')
                      ?? scan(/gross.*ton|(^|\b)gt\b/i);
@@ -806,73 +810,76 @@
                      ?? scan(/net.*ton|(^|\b)nt\b/i);
           const GrossTonnage = (toNumber(gtRaw) ?? gtRaw) ?? null;
           const NetTonnage   = (toNumber(ntRaw) ?? ntRaw) ?? null;
-        
+  
           // Dimensions
           const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','loa_m','loa','length_overall','Length (ft)')
                         ?? scan(/(length|loa)/i);
           const beamRaw  = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','beam_m','Breadth (ft)')
                         ?? scan(/(beam|breadth|width)/i);
-          const draftRaw = pick('Draft','SummerDraft','draft_m','Depth','Depth (ft)')
-                        ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b|(^|\b)depth\b/i);
+  
+          // IMPORTANT: do NOT map Depth → Draft here; expose Depth separately
+          const draftRaw = pick('Draft','SummerDraft','draft_m')   // no "Depth" here
+                        ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b/i);
+          const depthRaw = pick('Depth','Depth (ft)') ?? scan(/(^|\b)depth\b/i);
+  
           const LOA_m   = toMeters(lenRaw);
           const Beam_m  = toMeters(beamRaw);
           const Draft_m = toMeters(draftRaw);
-        
+          const Depth_m = toMeters(depthRaw);
+  
           const PrimaryIdentification =
             pick('PrimaryIdentification') || (IMONumber ? `IMO ${IMONumber}` : (OfficialNumber || CallSign || null));
-        
+  
           return {
             ...src,
             VesselID, VesselName, CallSign, Flag, VesselType,
             IMONumber, OfficialNumber, YearBuilt, PrimaryIdentification,
-            GrossTonnage, NetTonnage, LOA_m, Beam_m, Draft_m,
+            GrossTonnage, NetTonnage, LOA_m, Beam_m, Draft_m, Depth_m,
           };
         },
-
-
-
+  
         // --- Vessel search with server pagination + augmentation ---
         async searchVessel(page = 1) {
           if (!this.vesselQuery.trim()) return;
-
+  
           this.vesselSearched = true;
           this.searchLoading = true;
           this.searchError = null;
           this.vesselPage = page;
-
+  
           try {
             const params = new URLSearchParams({
               name: this.vesselQuery,
               page: String(this.vesselPage),
               limit: String(this.vesselLimit),
             });
-
+  
             const r = await fetch(`${API_BASE}/vessels/search?${params}`);
             if (!r.ok) throw new Error('Search failed');
             const data = await r.json();
-
+  
             this._lastSearchPayload = data;
-
+  
             const raw = Array.isArray(data?.Table) ? data.Table
                       : Array.isArray(data?.rows)  ? data.rows
                       : Array.isArray(data)        ? data
                       : [];
-            
+  
             const augmented = raw.map(this.augment.bind(this));
-
+  
             console.log('[search] first row keys:', raw[0] ? Object.keys(raw[0]) : '(no rows)');
-
+  
             this.vesselTotal = (typeof data.total === 'number') ? data.total : augmented.length;
             this.vesselPages = (typeof data.pages === 'number')
               ? data.pages
               : Math.max(Math.ceil(this.vesselTotal / this.vesselLimit), 1);
-
+  
             this.vesselResults = augmented;
-
+  
             const startIdx = (this.vesselPage - 1) * this.vesselLimit;
             this.vesselStart = this.vesselTotal ? (data.start ?? startIdx + 1) : 0;
             this.vesselEnd = data.end ?? Math.min(startIdx + this.vesselResults.length, this.vesselTotal);
-
+  
             if (this.vesselResults.length === 0) this.searchError = 'No vessels found';
           } catch (e) {
             this.searchError = e.message || 'Search failed';
@@ -881,31 +888,31 @@
             this.searchLoading = false;
           }
         },
-
+  
         prevVesselPage() { if (this.vesselPage > 1) this.searchVessel(this.vesselPage - 1); },
         nextVesselPage() { if (this.vesselPage < this.vesselPages) this.searchVessel(this.vesselPage + 1); },
         goToVesselPage(p) { if (p >= 1 && p <= this.vesselPages) this.searchVessel(p); },
         pageWindow() {
-          const win = 2; // current ±2
+          const win = 2;
           const start = Math.max(1, this.vesselPage - win);
           const end = Math.min(this.vesselPages, this.vesselPage + win);
           const arr = [];
           for (let i = start; i <= end; i++) arr.push(i);
           return arr;
         },
-
+  
         async selectVessel(v) {
           const normalized = this.augment(v) || {};
           this._rawSelected = v;
           this.selectedVessel = normalized;
-        
+  
           console.log('[select] raw row:', v);
           console.log('[select] normalized:', normalized);
-        
+  
           // reset badges
           this.autoGT = this.autoNT = this.autoLOA = this.autoBeam = this.autoDraft = false;
-        
-          // type guess
+  
+          // quick type guess
           const s = (normalized.VesselType || '').toLowerCase();
           const guess =
             s.includes('container') ? 'container' :
@@ -917,7 +924,7 @@
             (s.includes('vehicle') || s.includes('car carrier')) ? 'vehicle_carrier' :
             'general_cargo';
           if (this.vesselType === 'general_cargo' && guess !== 'general_cargo') this.vesselType = guess;
-        
+  
           // prefill from search row
           const prefer = (curr, next, flag, dp = 2) => {
             if (Number(curr) > 0) return curr;
@@ -930,18 +937,18 @@
           if (normalized.LOA_m        != null) this.loaMeters    = prefer(this.loaMeters,    normalized.LOA_m,        'autoLOA', 2);
           if (normalized.Beam_m       != null) this.beamMeters   = prefer(this.beamMeters,   normalized.Beam_m,       'autoBeam', 2);
           if (normalized.Draft_m      != null) this.draftMeters  = prefer(this.draftMeters,  normalized.Draft_m,      'autoDraft', 2);
-        
+  
           await this.enrichVesselDimensions();
           if (this.selectedPort) this.loadLiveData();
         },
-
+  
         // ----- v1 estimator (GET /estimate) -----
         async getEstimate() {
           if (!this.selectedPort || !this.eta) return;
           this.estimateLoading = true;
           this.estimate = null;
           this.estimateV2 = null;
-
+  
           const params = new URLSearchParams({
             port_code: this.selectedPort,
             eta: this.eta,
@@ -950,7 +957,7 @@
           });
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
-
+  
           try {
             const r = await fetch(`${API_BASE}/estimate?${params}`);
             if (!r.ok) throw new Error('Estimate failed');
@@ -963,7 +970,7 @@
             this.estimateLoading = false;
           }
         },
-
+  
         // ----- v2 estimator (POST /v2/estimate) -----
         async getEstimateV2() {
           if (!this.selectedPort || !this.eta || !this.previousPortCode.trim()) {
@@ -973,7 +980,7 @@
           this.estimateLoading = true;
           this.estimate = null;
           this.estimateV2 = null;
-
+  
           const body = {
             vessel_name: this.selectedVessel?.VesselName || this.vesselQuery || 'Unknown Vessel',
             vessel_type: this.vesselType,
@@ -982,8 +989,8 @@
             loa_meters: String(this.loaMeters || 0),
             draft_meters: String(this.draftMeters || 0),
             beam_meters: String(this.beamMeters || 0),
-            previous_port_code: this.previousPortCode.trim().toUpperCase(),  // UN/LOCODE
-            arrival_port_code: this.selectedPort,                             // internal code from /ports
+            previous_port_code: this.previousPortCode.trim().toUpperCase(),
+            arrival_port_code: this.selectedPort,
             next_port_code: this.nextPortCode ? this.nextPortCode.trim().toUpperCase() : null,
             eta: this.eta ? new Date(this.eta).toISOString() : null,
             etd: this.etd ? new Date(this.etd).toISOString() : null,
@@ -991,7 +998,7 @@
             ytd_cbp_paid: String(this.ytdCbpPaid || 0),
             tonnage_year_paid: "0"
           };
-
+  
           try {
             const r = await fetch(`${API_BASE}/v2/estimate`, {
               method: 'POST',
@@ -1011,130 +1018,98 @@
             this.estimateLoading = false;
           }
         },
-
+  
+        // ----- NEW: PSIX-first enrichment flow -----
         async enrichVesselDimensions() {
-          // what do we still need?
+          // Do we still need anything?
           const needsDims = !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !(Number(this.draftMeters) > 0);
           const needsTons = !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0);
           if (!needsDims && !needsTons) return;
-        
+  
           const sv = this.selectedVessel || {};
-        
-          // pull identifiers from the selected row
-          const vid   = sv.VesselID || sv.id || null;
-          const imo   = (sv.IMONumber || '').toString().match(/\b\d{6,7}\b/)?.[0] || null;
-          const offno = sv.OfficialNumber || sv.USOfficialNumber || null;
-          const cs    = (sv.CallSign || '').trim() || null;
-        
-          // prefer ID -> Official Number -> IMO -> (last) callsign
-          const attempts = [];
-          if (vid)   attempts.push({ label: 'id',         qs: { id: String(vid) } });
-          if (offno) attempts.push({ label: 'official',   qs: { official_number: String(offno) } });
-          if (imo)   attempts.push({ label: 'imo',        qs: { imo } });
-          if (cs)    attempts.push({ label: 'callsign',   qs: { callsign: cs }, only: ['/psix/summary'] }); // keep narrow to avoid 422s
-        
-          if (!attempts.length) {
-            console.info('[enrich] No id/official/imo/callsign available; skipping enrichment.');
+          let vesselId = sv.VesselID || null;
+  
+          // If we don't have a VesselID, try PSIX summary by callsign or name
+          if (!vesselId) {
+            const q = new URLSearchParams({
+              callsign: sv.CallSign || sv.VesselCallSign || '',
+              name: sv.VesselName || ''
+            });
+            try {
+              const res = await fetch(`${API_BASE}/psix/summary?${q}`);
+              if (res.ok) {
+                const js = await res.json();
+                vesselId = js?.rows?.[0]?.VesselID || null;
+                if (vesselId) console.info('[enrich] PSIX VesselID resolved:', vesselId);
+              }
+            } catch (e) {
+              // ignore
+            }
+          }
+  
+          if (!vesselId) {
+            console.info('[enrich] No VesselID resolvable (PSIX), skipping.');
             return;
           }
-        
-          // abort if selection changes while fetching
-          const selectionToken = (sv.VesselID || sv.VesselName || '') + ':' + (imo || '');
-        
-          const setIfNeeded = (curr, next, flagKey, dp = 2) => {
+  
+          // Prevent races if selection changes while fetching
+          const token = (sv.VesselID || sv.VesselName || '') + ':' + (sv.CallSign || '');
+  
+          const setIf = (curr, next, flag, dp = 2) => {
             if (Number(curr) > 0) return curr;
             const n = Number(next);
-            if (Number.isFinite(n) && n > 0) {
-              this[flagKey] = true;
-              return dp === 0 ? n : Number(n.toFixed(dp));
-            }
+            if (Number.isFinite(n) && n > 0) { this[flag] = true; return dp ? Number(n.toFixed(dp)) : n; }
             return curr;
           };
-        
-          const pathsDefault = ['/vessels/details', '/vessels/summary', '/psix/summary', '/api/v2/vessels/details'];
-        
-          const withTimeout = (ms = 3500) => {
-            const ctl = new AbortController();
-            const t = setTimeout(() => ctl.abort(), ms);
-            return { signal: ctl.signal, clear: () => clearTimeout(t) };
-          };
-        
-          for (const attempt of attempts) {
-            const paths = attempt.only || pathsDefault;
-            const qs = new URLSearchParams(attempt.qs).toString();
-            for (const p of paths) {
-              try {
-                const { signal, clear } = withTimeout();
-                const res = await fetch(`${API_BASE}${p}?${qs}`, { signal });
-                clear();
-                if (!res.ok) continue;
-        
-                // unify shapes
-                let payload = await res.json();
-                if (payload && typeof payload === 'object') {
-                  if (Array.isArray(payload.Table) && payload.Table.length) payload = payload.Table[0];
-                  else if (Array.isArray(payload) && payload.length) payload = payload[0];
-                  else if (payload.data) payload = payload.data;
-                  else if (payload.result) payload = payload.result;
-                }
-        
-                const stillSelected = ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + (imo || '')) === selectionToken;
-                if (!stillSelected) return;
-        
-                const aug = this.augment(payload || {});
-                let updated = false;
-        
-                if (needsTons) {
-                  if (!Number(this.grossTonnage) && aug.GrossTonnage != null) {
-                    this.grossTonnage = setIfNeeded(this.grossTonnage, aug.GrossTonnage, 'autoGT', 0);
-                    updated = true;
-                  }
-                  if (!Number(this.netTonnage) && aug.NetTonnage != null) {
-                    this.netTonnage = setIfNeeded(this.netTonnage, aug.NetTonnage, 'autoNT', 0);
-                    updated = true;
-                  }
-                }
-        
-                if (needsDims) {
-                  if (!Number(this.loaMeters) && aug.LOA_m != null) {
-                    this.loaMeters = setIfNeeded(this.loaMeters, aug.LOA_m, 'autoLOA', 2);
-                    updated = true;
-                  }
-                  if (!Number(this.beamMeters) && aug.Beam_m != null) {
-                    this.beamMeters = setIfNeeded(this.beamMeters, aug.Beam_m, 'autoBeam', 2);
-                    updated = true;
-                  }
-                  if (!Number(this.draftMeters) && aug.Draft_m != null) {
-                    this.draftMeters = setIfNeeded(this.draftMeters, aug.Draft_m, 'autoDraft', 2);
-                    updated = true;
-                  }
-                }
-        
-                if (updated) {
-                  console.info(`[enrich] Populated from ${p} via ${attempt.label}`);
-                  return; // ✅ stop after first success
-                }
-              } catch (err) {
-                // swallow 404/422/timeout and continue
-              }
+  
+          try {
+            const r = await fetch(`${API_BASE}/psix/details?vessel_id=${encodeURIComponent(vesselId)}`);
+            if (!r.ok) throw new Error('details failed');
+            const details = await r.json();
+  
+            // still selected?
+            const still = ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + (this.selectedVessel?.CallSign || '')) === token;
+            if (!still) return;
+  
+            // Apply updates. We DON’T force Draft from Depth.
+            let updated = false;
+            if (needsTons) {
+              const beforeGT = this.grossTonnage;
+              const beforeNT = this.netTonnage;
+              this.grossTonnage = setIf(this.grossTonnage, details.GrossTonnage, 'autoGT', 0);
+              this.netTonnage   = setIf(this.netTonnage,   details.NetTonnage,   'autoNT', 0);
+              updated ||= (this.grossTonnage !== beforeGT || this.netTonnage !== beforeNT);
             }
+            if (needsDims) {
+              const beforeL = this.loaMeters, beforeB = this.beamMeters, beforeD = this.draftMeters;
+              this.loaMeters  = setIf(this.loaMeters,  details.LOA_m,  'autoLOA', 2);
+              this.beamMeters = setIf(this.beamMeters, details.Beam_m, 'autoBeam', 2);
+              // Draft stays as-is unless backend provides true draft
+              // this.draftMeters = setIf(this.draftMeters, details.Draft_m, 'autoDraft', 2);
+              updated ||= (this.loaMeters !== beforeL || this.beamMeters !== beforeB || this.draftMeters !== beforeD);
+            }
+  
+            if (updated) {
+              console.info('[enrich] Populated from /psix/details');
+            } else {
+              console.info('[enrich] PSIX returned, but nothing new to set.');
+            }
+          } catch (e) {
+            console.info('[enrich] PSIX details fetch failed:', e.message || e);
           }
-        
-          console.info('[enrich] No details endpoints succeeded (id/official/imo/callsign).');
         },
-
-
+  
         // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
-
+  
           const params = new URLSearchParams({
             vessel_name: this.selectedVessel.VesselName || '',
             port_code: this.selectedPort
           });
           const vid = this.selectedVessel.VesselID;
           if (vid) params.set('vessel_id', vid);
-
+  
           try {
             const r = await fetch(`${API_BASE}/live/portbundle?${params}`);
             if (!r.ok) throw new Error('Live data failed');
@@ -1143,7 +1118,7 @@
             console.error('Live data failed:', e);
           }
         },
-
+  
         // UN/LOCODE typeahead for previous/next/mp ports
         async searchUnloc(current = 'prev') {
           const base = current === 'prev' ? this.previousPortCode : current === 'next' ? this.nextPortCode : this.mpPortInput;
@@ -1165,10 +1140,9 @@
             console.error('UN/LOCODE search error:', e);
           }
         },
-
+  
         // Client-side export (CSV/JSON) of the current estimate
         clientExport(format = 'csv') {
-          // Prefer v2 if available
           if (this.estimateV2) {
             if (format === 'json') {
               const blob = new Blob([JSON.stringify(this.estimateV2, null, 2)], { type: 'application/json' });
@@ -1178,7 +1152,6 @@
               a.click();
               return;
             }
-            // CSV for v2
             const rows = [['Code','Name','Final Amount','Base','Confidence','Optional','Details']];
             for (const c of (this.estimateV2.calculations || [])) {
               rows.push([
@@ -1187,21 +1160,21 @@
                 (c.details || '').replace(/\n/g, ' ')
               ]);
             }
-
+  
             const t = this.estimateV2?.totals || {};
             if (t && Object.keys(t).length) {
               rows.push(['', 'TOTAL MANDATORY', t.mandatory ?? '', '', '', '', '']);
               rows.push(['', 'TOTAL LOW', t.total_low ?? '', '', '', '', '']);
               rows.push(['', 'TOTAL HIGH', t.total_high ?? '', '', '', '', '']);
             }
-
+  
             const q = this.estimateV2?.quick_totals || {};
             if (q && Object.keys(q).length) {
               rows.push(['', 'QUICK MANDATORY', q.mandatory ?? '', '', '', '', '']);
               rows.push(['', 'QUICK WITH OPTIONAL LOW', q.with_optional_low ?? '', '', '', '', '']);
               rows.push(['', 'QUICK WITH OPTIONAL HIGH', q.with_optional_high ?? '', '', '', '', '']);
             }
-
+  
             const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
             const a = document.createElement('a');
@@ -1210,8 +1183,7 @@
             a.click();
             return;
           }
-
-          // v1 export
+  
           if (!this.estimate) return;
           if (format === 'json') {
             const blob = new Blob([JSON.stringify(this.estimate, null, 2)], { type: 'application/json' });
@@ -1233,7 +1205,7 @@
           a.download = `estimate_v1_${this.selectedPort}_${this.eta}.csv`;
           a.click();
         },
-
+  
         // Historical trends
         async loadTrends() {
           if (!this.trendsPort) return;
@@ -1244,7 +1216,7 @@
             const data = await r.json();
             const series = data.series || {};
             const labels = (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"] || []).map(p => p.month);
-
+  
             const mk = (key, color) => {
               const arr = (series[key] || []).map(p => p.value);
               return { label: key, data: arr, borderColor: color, backgroundColor: color, tension: .25, spanGaps: true };
@@ -1258,7 +1230,7 @@
             if (series["APHIS_COMMERCIAL_VESSEL"]) datasets.push(mk("APHIS_COMMERCIAL_VESSEL", palette.aphis));
             if (series["MX_VTS_PER_CALL"]) datasets.push(mk("MX_VTS_PER_CALL", palette.mx));
             if (series["TONNAGE_TAX_PER_TON"]) datasets.push(mk("TONNAGE_TAX_PER_TON", palette.ton));
-
+  
             const ctx = document.getElementById('trendsChart').getContext('2d');
             if (this.trendsChart) this.trendsChart.destroy();
             this.trendsChart = new Chart(ctx, {
@@ -1274,7 +1246,7 @@
             alert('Failed to load trends.');
           }
         },
-
+  
         // Multi-port methods
         addMpPort() {
           const code = (this.mpPortInput || '').trim().toUpperCase();
@@ -1286,7 +1258,7 @@
         removeMpPort(i) { this.mpPorts.splice(i, 1); },
         async submitMultiPort() {
           if (this.mpPorts.length < 2) { alert('Add at least two UN/LOCODE ports.'); return; }
-
+  
           const vessel = {
             name: this.mpVesselName || this.selectedVessel?.VesselName || 'Unknown Vessel',
             imo_number: this.selectedVessel?.IMONumber || null,
@@ -1304,7 +1276,7 @@
             days_between_ports: Number(this.mpDaysBetween) || 14,
             days_in_port: Number(this.mpDaysInPort) || 2,
           };
-
+  
           try {
             const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, {
               method: 'POST',
@@ -1318,7 +1290,7 @@
             alert('Failed to calculate multi-port voyage.');
           }
         },
-
+  
         async refreshAll() {
           await this.checkHealth();
           if (this.selectedPort && this.eta) {
@@ -1326,7 +1298,7 @@
             else await this.getEstimate();
           }
         },
-
+  
         async clearCache() {
           try {
             const r = await fetch(`${API_BASE}/admin/cache/clear`, { method: 'POST' });
@@ -1341,6 +1313,7 @@
       }
     }
   </script>
+
 
 </body>
 </html>
