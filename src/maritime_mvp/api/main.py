@@ -7,7 +7,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal
 
-from fastapi import FastAPI, HTTPException, Query, Response, Body
+from fastapi import FastAPI, HTTPException, Query, Response, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -235,6 +235,147 @@ app.add_middleware(
     allow_headers=["*"],
     allow_origin_regex=".*" if allow_all else None,
 )
+
+from fastapi import Depends
+
+def _first_nonempty(*vals):
+    for v in vals:
+        if v is None: continue
+        s = str(v).strip()
+        if s and s.lower() != "none":
+            return s
+    return None
+
+def _q(q, *keys):
+    # accept multiple casing/alias variants
+    for k in keys:
+        v = q.get(k)
+        if v is not None:
+            s = str(v).strip()
+            if s and s.lower() != "none":
+                return s
+    return None
+
+@app.get("/vessels/summary", tags=["Vessels"])
+def vessels_summary(
+    request: Request,
+    vessel_id: Optional[int] = Query(None),
+    callsign: Optional[str] = Query(None),        # keep for docs, but we’ll read raw query below
+    vessel_name: Optional[str] = Query(None),
+    flag: Optional[str] = Query(None),
+    service: Optional[str] = Query(None),
+    build_year: Optional[str] = Query(None),
+):
+    client = PsixClient()
+    if vessel_id:
+        return client.get_vessel_summary(vessel_id=vessel_id)
+
+    q = request.query_params
+    cs = _q(q, "callsign", "call_sign", "CallSign")
+    nm = _q(q, "vessel_name", "name", "VesselName")
+
+    return client.get_vessel_summary(
+        vessel_id=None,
+        vessel_name=nm or "",
+        call_sign=cs or "",
+        flag=flag or "",
+        service=service or "",
+        build_year=build_year or "",
+    )
+
+@app.get("/vessels/details", tags=["Vessels"])
+def vessels_details(
+    request: Request,
+    vessel_id: Optional[int] = Query(None),
+    callsign: Optional[str] = Query(None),
+    vessel_name: Optional[str] = Query(None),
+):
+    """
+    Resolve VesselID via summary, then fetch particulars, dimensions, tonnage, documents.
+    Returns {"rows":[{...}]} with LOA_m, Beam_m, Depth_m, GrossTonnage, NetTonnage.
+    """
+    client = PsixClient()
+    q = request.query_params
+    cs = _q(q, "callsign", "call_sign", "CallSign") or callsign
+    nm = _q(q, "vessel_name", "name", "VesselName") or vessel_name
+
+    vid = vessel_id
+    if not vid:
+        # Resolve by exact callsign if possible; else first match
+        summ = client.get_vessel_summary(
+            vessel_id=None,
+            vessel_name=nm or "",
+            call_sign=cs or "",
+        )
+        srows = (summ or {}).get("Table") or []
+        if not srows:
+            raise HTTPException(status_code=404, detail="Vessel not found in PSIX")
+        if cs:
+            csu = cs.strip().upper()
+            match = next(
+                (r for r in srows if str(r.get("CallSign","")).strip().upper() == csu
+                               or str(r.get("VesselCallSign","")).strip().upper() == csu),
+                None
+            )
+        else:
+            match = srows[0]
+        vid = int(_first_nonempty(match.get("VesselID"), match.get("vesselid")) or 0)
+        if not vid:
+            raise HTTPException(status_code=404, detail="PSIX vessel has no VesselID")
+
+    parts = client.get_vessel_particulars(vid).get("Table") or []
+    dims  = client.get_vessel_dimensions(vid).get("Table") or []
+    tons  = client.get_vessel_tonnage(vid).get("Table") or []
+    docs  = client.get_vessel_documents(vid).get("Table") or []
+    summ  = client.get_vessel_summary(vessel_id=vid).get("Table") or []
+
+    base = {}
+    if summ:
+        base.update(summ[0])
+    if parts:
+        base.update(parts[0])
+
+    # Pick best dimension record (prefer 'Overall' if present)
+    def ft_to_m(x):
+        try:
+            return float(x) * 0.3048
+        except Exception:
+            return None
+
+    pick = None
+    if dims:
+        preferred = [d for d in dims if str(d.get("DimensionTypeLookupName","")).lower().startswith("overall")]
+        pick = preferred[0] if preferred else dims[0]
+
+    extra = {}
+    if pick:
+        if pick.get("LengthInFeet") is not None:
+            extra["LengthInFeet"] = pick["LengthInFeet"]
+            extra["LOA_m"] = ft_to_m(pick["LengthInFeet"])
+        if pick.get("BreadthInFeet") is not None:
+            extra["BreadthInFeet"] = pick["BreadthInFeet"]
+            extra["Beam_m"] = ft_to_m(pick["BreadthInFeet"])
+        if pick.get("DepthInFeet") is not None:
+            extra["DepthInFeet"] = pick["DepthInFeet"]
+            extra["Depth_m"] = ft_to_m(pick["DepthInFeet"])  # Depth != Draft
+
+    # Tonnage rows vary; pick obvious gross/net
+    gross = next((t for t in tons if str(t.get("TonnageTypeLookupName","")).lower().startswith("gross")), None)
+    net   = next((t for t in tons if str(t.get("TonnageTypeLookupName","")).lower().startswith("net")), None)
+    if gross and gross.get("MeasureOfWeight") is not None:
+        extra["GrossTonnage"] = gross["MeasureOfWeight"]
+    if net and net.get("MeasureOfWeight") is not None:
+        extra["NetTonnage"] = net["MeasureOfWeight"]
+
+    merged = {
+        **base,
+        **extra,
+        "VesselID": vid,
+        "_documents": docs,
+        "_tonnage_rows": tons,
+        "_dimension_rows": dims
+    }
+    return {"rows": [merged]}
 
 # ----- Frontend mounting -----
 def find_frontend_dir() -> Optional[Path]:
