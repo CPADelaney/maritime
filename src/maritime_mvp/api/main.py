@@ -289,88 +289,142 @@ def vessels_details(
     vessel_id: Optional[int] = Query(None),
     callsign: Optional[str] = Query(None),
     vessel_name: Optional[str] = Query(None),
-):
+) -> Dict[str, Any]:
+    """
+    Resolve VesselID via summary (if needed), then fetch particulars, dimensions,
+    tonnage, and documents. Returns {"rows":[{...}]} with helpful fields:
+      LOA_m, Beam_m, Depth_m (feet → meters), GrossTonnage, NetTonnage,
+    plus raw PSIX rows under _dimension_rows, _tonnage_rows, _documents.
+    """
     client = PsixClient()
+
+    # Normalize query variants (callsign/CallSign/call_sign and vessel_name/VesselName/name)
     q = request.query_params
     cs = _q(q, "callsign", "call_sign", "CallSign") or callsign
     nm = _q(q, "vessel_name", "name", "VesselName") or vessel_name
 
-    vid = vessel_id
+    vid: Optional[int] = vessel_id
     summary_first: Dict[str, Any] = {}
 
+    # 1) If no VesselID provided, resolve it via getVesselSummary (prefer exact callsign match)
     if not vid:
-        summ = client.get_vessel_summary(vessel_id=None, vessel_name=nm or "", call_sign=cs or "")
+        summ = client.get_vessel_summary(
+            vessel_id=None,
+            vessel_name=nm or "",
+            call_sign=cs or "",
+        )
         srows = (summ or {}).get("Table") or []
         if not srows:
-            # Best-effort empty result
-            return {"rows": []}
+            return {"rows": []}  # best-effort empty
+
         summary_first = srows[0]
         if cs:
             csu = cs.strip().upper()
             match = next(
-                (r for r in srows if str(r.get("CallSign","")).strip().upper() == csu
-                               or str(r.get("VesselCallSign","")).strip().upper() == csu),
+                (
+                    r for r in srows
+                    if str(r.get("CallSign", "")).strip().upper() == csu
+                    or str(r.get("VesselCallSign", "")).strip().upper() == csu
+                ),
                 None
             )
             if match:
                 summary_first = match
-        # Try harder to extract an integer VesselID
+
         raw_id = _first_nonempty(
             summary_first.get("VesselID"),
-            summary_first.get("VesselId"),
+            summary_first.get("VesselId"),        # PSIX sometimes uses this casing
             summary_first.get("vesselid"),
             summary_first.get("VesselNumber"),
             summary_first.get("ID"),
             summary_first.get("id"),
         )
         try:
-            vid = int(str(raw_id))
+            vid = int(str(raw_id)) if raw_id is not None else None
         except Exception:
             vid = None
 
+    # If still no ID, return summary-only (UI can still use name/callsign/flag)
     if not vid:
-        # Return summary-only payload; UI can still use name/callsign/flag
         return {"rows": [summary_first] if summary_first else []}
 
-    # Continue with particulars/dimensions/tonnage/documents as you had
-    parts = client.get_vessel_particulars(vid).get("Table") or []
-    dims  = client.get_vessel_dimensions(vid).get("Table") or []
-    tons  = client.get_vessel_tonnage(vid).get("Table") or []
-    docs  = client.get_vessel_documents(vid).get("Table") or []
-    summ  = client.get_vessel_summary(vessel_id=vid).get("Table") or []
+    # 2) Safe PSIX calls (don’t let one failure 500 the whole route)
+    def _get_table(fn, _vid: int, label: str) -> List[Dict[str, Any]]:
+        try:
+            d = fn(_vid)  # each returns {"Table": [...]}
+            return (d or {}).get("Table") or []
+        except Exception:
+            logger.exception("PSIX %s failed for VesselID=%s", label, _vid)
+            return []
 
-    base = {}
-    if summ: base.update(summ[0])
-    if parts: base.update(parts[0])
+    parts = _get_table(client.get_vessel_particulars, vid, "particulars")
+    dims  = _get_table(client.get_vessel_dimensions,  vid, "dimensions")
+    tons  = _get_table(client.get_vessel_tonnage,     vid, "tonnage")
+    docs  = _get_table(client.get_vessel_documents,   vid, "documents")
+    summ  = _get_table(lambda v: client.get_vessel_summary(vessel_id=v), vid, "summary")
 
-    def ft_to_m(x):
-        try: return float(x) * 0.3048
-        except: return None
+    # 3) Merge base details (summary + particulars)
+    base: Dict[str, Any] = {}
+    if summ:
+        base.update(summ[0])
+    if parts:
+        base.update(parts[0])
 
-    pick = None
-    if dims:
-        preferred = [d for d in dims if str(d.get("DimensionTypeLookupName","")).lower().startswith("overall")]
-        pick = preferred[0] if preferred else dims[0]
+    # 4) Best-of selection for dimensions across all rows (feet → meters)
+    def to_float(x: Any) -> Optional[float]:
+        try:
+            return float(str(x).strip())
+        except Exception:
+            return None
 
-    extra = {}
-    if pick:
-        if pick.get("LengthInFeet") is not None:
-            extra["LengthInFeet"] = pick["LengthInFeet"]; extra["LOA_m"] = ft_to_m(pick["LengthInFeet"])
-        if pick.get("BreadthInFeet") is not None:
-            extra["BreadthInFeet"] = pick["BreadthInFeet"]; extra["Beam_m"] = ft_to_m(pick["BreadthInFeet"])
-        if pick.get("DepthInFeet") is not None:
-            extra["DepthInFeet"] = pick["DepthInFeet"]; extra["Depth_m"] = ft_to_m(pick["DepthInFeet"])
+    len_ft = [to_float(d.get("LengthInFeet"))  for d in dims if d.get("LengthInFeet")  is not None]
+    brd_ft = [to_float(d.get("BreadthInFeet")) for d in dims if d.get("BreadthInFeet") is not None]
+    dep_ft = [to_float(d.get("DepthInFeet"))   for d in dims if d.get("DepthInFeet")   is not None]
 
-    gross = next((t for t in tons if str(t.get("TonnageTypeLookupName","")).lower().startswith("gross")), None)
-    net   = next((t for t in tons if str(t.get("TonnageTypeLookupName","")).lower().startswith("net")), None)
-    if gross and gross.get("MeasureOfWeight") is not None:
-        extra["GrossTonnage"] = gross["MeasureOfWeight"]
-    if net and net.get("MeasureOfWeight") is not None:
-        extra["NetTonnage"] = net["MeasureOfWeight"]
+    extra: Dict[str, Any] = {}
+    if any(v is not None for v in len_ft):
+        L = max(v for v in len_ft if v is not None)
+        extra["LengthInFeet"] = L
+        extra["LOA_m"] = L * 0.3048
+    if any(v is not None for v in brd_ft):
+        B = max(v for v in brd_ft if v is not None)
+        extra["BreadthInFeet"] = B
+        extra["Beam_m"] = B * 0.3048
+    if any(v is not None for v in dep_ft):
+        D = max(v for v in dep_ft if v is not None)
+        extra["DepthInFeet"] = D
+        extra["Depth_m"] = D * 0.3048  # Depth is NOT Draft
 
-    merged = {**base, **extra, "VesselID": vid, "_documents": docs, "_tonnage_rows": tons, "_dimension_rows": dims}
+    # 5) Tonnage: prefer rows labeled Gross/Net; otherwise use highest numeric
+    def label(t: Dict[str, Any]) -> str:
+        return str(t.get("TonnageTypeLookupName", "")).lower()
+
+    gross_vals = [to_float(t.get("MeasureOfWeight")) for t in tons if "gross" in label(t)]
+    net_vals   = [to_float(t.get("MeasureOfWeight")) for t in tons if "net"   in label(t)]
+    if not any(v is not None for v in gross_vals):
+        gross_vals = [to_float(t.get("MeasureOfWeight")) for t in tons]
+    if not any(v is not None for v in net_vals):
+        net_vals   = [to_float(t.get("MeasureOfWeight")) for t in tons]
+
+    if any(v is not None for v in gross_vals):
+        extra["GrossTonnage"] = max(v for v in gross_vals if v is not None)
+    if any(v is not None for v in net_vals):
+        extra["NetTonnage"] = max(v for v in net_vals if v is not None)
+
+    logger.info(
+        "PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d",
+        vid, len(dims), len(tons), len(parts), len(docs)
+    )
+
+    merged = {
+        **base,
+        **extra,
+        "VesselID": vid,
+        "_documents": docs,
+        "_tonnage_rows": tons,
+        "_dimension_rows": dims,
+    }
     return {"rows": [merged]}
-
 # ----- Frontend mounting -----
 def find_frontend_dir() -> Optional[Path]:
     candidates = [
