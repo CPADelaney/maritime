@@ -8,6 +8,7 @@ import os, re, html as _html, logging, requests, warnings
 from typing import Any, Dict, List, Optional
 
 from lxml import etree as ET
+LET = ET
 
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 logger = logging.getLogger(__name__)
