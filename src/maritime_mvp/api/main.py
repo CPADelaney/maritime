@@ -317,6 +317,7 @@ def vessels_details(
         # Try harder to extract an integer VesselID
         raw_id = _first_nonempty(
             summary_first.get("VesselID"),
+            summary_first.get("VesselId"),
             summary_first.get("vesselid"),
             summary_first.get("VesselNumber"),
             summary_first.get("ID"),
