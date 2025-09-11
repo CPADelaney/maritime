@@ -731,10 +731,9 @@
 
         // Normalize/augment vessel row so UI keys always exist + parse dims
         augment(v) {
-          // Safe source clone
           const src = (v && typeof v === 'object') ? { ...v } : {};
         
-          // ---------- helpers (read-only over `src`) ----------
+          // helpers
           const scanDeep = (obj, keyRegex, accept = (val) => String(val).trim() !== '', depth = 0) => {
             if (!obj || depth > 4) return null;
             for (const [k, val] of Object.entries(obj)) {
@@ -751,7 +750,6 @@
             return null;
           };
           const scan = (re, accept) => scanDeep(src, re, accept);
-        
           const pick = (...cands) => {
             for (const c of cands) {
               if (c in src && src[c] != null) {
@@ -761,25 +759,22 @@
             }
             return null;
           };
-        
           const toNumber = (val) => {
             if (val == null) return null;
             const n = Number(String(val).replace(/[^0-9.+-]/g, ''));
             return Number.isFinite(n) ? n : null;
           };
-        
           const toMeters = (val) => {
             if (val == null) return null;
             const s = String(val).toLowerCase();
             const n = toNumber(s);
             if (n == null) return null;
             if (s.includes('ft') || s.includes('feet') || s.includes("'")) return n * 0.3048;
-            return n; // assume meters if unitless
+            return n;
           };
-        
           const num7 = (x) => (x ? String(x).match(/\b\d{6,7}\b/)?.[0] : null);
         
-          // ---------- compute normalized fields ----------
+          // identity
           const VesselID   = pick('VesselID','vesselid','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
           const VesselName = pick('VesselName','vesselname','Name','name') ?? scan(/vessel.*name|^name$/i);
           const CallSign   = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign')
@@ -790,14 +785,13 @@
                              ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
         
           // IDs
-          let imoRaw = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMONo','IMOShipNo','imo')
-                    || pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No')
-                    || scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
+          const imoRaw = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMONo','IMOShipNo','imo')
+                      || pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No')
+                      || scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
           const IMONumber = num7(imoRaw);
         
-          const OfficialNumber =
-            pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number')
-            ?? scan(/official.?number/i);
+          const OfficialNumber = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number')
+                              ?? scan(/official.?number/i);
         
           const YearBuilt = (() => {
             const y = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
@@ -821,7 +815,6 @@
                         ?? scan(/(beam|breadth|width)/i);
           const draftRaw = pick('Draft','SummerDraft','draft_m','Depth','Depth (ft)')
                         ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b|(^|\b)depth\b/i);
-        
           const LOA_m   = toMeters(lenRaw);
           const Beam_m  = toMeters(beamRaw);
           const Draft_m = toMeters(draftRaw);
@@ -829,15 +822,15 @@
           const PrimaryIdentification =
             pick('PrimaryIdentification') || (IMONumber ? `IMO ${IMONumber}` : (OfficialNumber || CallSign || null));
         
-          // ---------- build and return ----------
-          const out = {
+          // final object (created ONCE)
+          return {
             ...src,
             VesselID, VesselName, CallSign, Flag, VesselType,
             IMONumber, OfficialNumber, YearBuilt, PrimaryIdentification,
             GrossTonnage, NetTonnage, LOA_m, Beam_m, Draft_m,
           };
-          return out;
         },
+
 
 
         // --- Vessel search with server pagination + augmentation ---
@@ -860,12 +853,16 @@
             if (!r.ok) throw new Error('Search failed');
             const data = await r.json();
 
+            this._lastSearchPayload = data;
+
             const raw = Array.isArray(data?.Table) ? data.Table
                       : Array.isArray(data?.rows)  ? data.rows
                       : Array.isArray(data)        ? data
                       : [];
             
             const augmented = raw.map(this.augment.bind(this));
+
+            console.log('[search] first row keys:', raw[0] ? Object.keys(raw[0]) : '(no rows)');
 
             this.vesselTotal = (typeof data.total === 'number') ? data.total : augmented.length;
             this.vesselPages = (typeof data.pages === 'number')
@@ -900,6 +897,10 @@
         },
 
         async selectVessel(v) {
+          this._rawSelected = v;
+          console.log('[select] raw row:', v);
+          console.log('[select] normalized:', this.selectedVessel);
+          
           this.selectedVessel = this.augment(v);
         
           // reset badges
