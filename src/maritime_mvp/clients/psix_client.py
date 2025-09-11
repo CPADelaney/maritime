@@ -263,7 +263,7 @@ class PsixClient:
             return None
 
         # IDs & name
-        rec.setdefault("VesselID", first("VesselID", "VesselNumber", "ID", "id", "vesselid"))
+        rec.setdefault("VesselID", first("VesselID", "VesselId", "VesselNumber", "ID", "id", "vesselid"))
         rec.setdefault("VesselName", first("VesselName", "Name", "name", "vesselname", "Vessel_Name"))
 
         # Display fields
