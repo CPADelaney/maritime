@@ -1038,17 +1038,29 @@
           const needsTons = !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0);
           if (!needsDims && !needsTons) return;
         
-          // 🔑 Only use IMO; backend rejects name/callsign on these endpoints
-          const imo = (this.selectedVessel?.IMONumber || '').toString().match(/\b\d{6,7}\b/)?.[0] || '';
-          if (!imo) {
-            console.info('[enrich] No IMO available; skipping enrichment to avoid 422s.');
+          const sv = this.selectedVessel || {};
+        
+          // pull identifiers from the selected row
+          const vid   = sv.VesselID || sv.id || null;
+          const imo   = (sv.IMONumber || '').toString().match(/\b\d{6,7}\b/)?.[0] || null;
+          const offno = sv.OfficialNumber || sv.USOfficialNumber || null;
+          const cs    = (sv.CallSign || '').trim() || null;
+        
+          // prefer ID -> Official Number -> IMO -> (last) callsign
+          const attempts = [];
+          if (vid)   attempts.push({ label: 'id',         qs: { id: String(vid) } });
+          if (offno) attempts.push({ label: 'official',   qs: { official_number: String(offno) } });
+          if (imo)   attempts.push({ label: 'imo',        qs: { imo } });
+          if (cs)    attempts.push({ label: 'callsign',   qs: { callsign: cs }, only: ['/psix/summary'] }); // keep narrow to avoid 422s
+        
+          if (!attempts.length) {
+            console.info('[enrich] No id/official/imo/callsign available; skipping enrichment.');
             return;
           }
         
-          // If selection changes while we fetch, abort updates
-          const selectionToken = (this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + imo;
+          // abort if selection changes while fetching
+          const selectionToken = (sv.VesselID || sv.VesselName || '') + ':' + (imo || '');
         
-          // Helper: safe apply numeric value if current is empty/zero
           const setIfNeeded = (curr, next, flagKey, dp = 2) => {
             if (Number(curr) > 0) return curr;
             const n = Number(next);
@@ -1059,14 +1071,7 @@
             return curr;
           };
         
-          // Try these endpoints in order; stop on first success
-          const endpoints = [
-            '/vessels/details',
-            '/vessels/summary',
-            '/api/v2/vessels/details',
-            '/psix/summary',
-          ];
-          const qs = new URLSearchParams({ imo }).toString();
+          const pathsDefault = ['/vessels/details', '/vessels/summary', '/psix/summary', '/api/v2/vessels/details'];
         
           const withTimeout = (ms = 3500) => {
             const ctl = new AbortController();
@@ -1074,63 +1079,69 @@
             return { signal: ctl.signal, clear: () => clearTimeout(t) };
           };
         
-          for (const path of endpoints) {
-            try {
-              const { signal, clear } = withTimeout();
-              const res = await fetch(`${API_BASE}${path}?${qs}`, { signal });
-              clear();
-              if (!res.ok) continue;
+          for (const attempt of attempts) {
+            const paths = attempt.only || pathsDefault;
+            const qs = new URLSearchParams(attempt.qs).toString();
+            for (const p of paths) {
+              try {
+                const { signal, clear } = withTimeout();
+                const res = await fetch(`${API_BASE}${p}?${qs}`, { signal });
+                clear();
+                if (!res.ok) continue;
         
-              // Be forgiving about payload shapes
-              let payload = await res.json();
-              if (payload && typeof payload === 'object') {
-                if (Array.isArray(payload.Table) && payload.Table.length) payload = payload.Table[0];
-                else if (Array.isArray(payload) && payload.length) payload = payload[0];
-                else if (payload.data) payload = payload.data;
-                else if (payload.result) payload = payload.result;
+                // unify shapes
+                let payload = await res.json();
+                if (payload && typeof payload === 'object') {
+                  if (Array.isArray(payload.Table) && payload.Table.length) payload = payload.Table[0];
+                  else if (Array.isArray(payload) && payload.length) payload = payload[0];
+                  else if (payload.data) payload = payload.data;
+                  else if (payload.result) payload = payload.result;
+                }
+        
+                const stillSelected = ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + (imo || '')) === selectionToken;
+                if (!stillSelected) return;
+        
+                const aug = this.augment(payload || {});
+                let updated = false;
+        
+                if (needsTons) {
+                  if (!Number(this.grossTonnage) && aug.GrossTonnage != null) {
+                    this.grossTonnage = setIfNeeded(this.grossTonnage, aug.GrossTonnage, 'autoGT', 0);
+                    updated = true;
+                  }
+                  if (!Number(this.netTonnage) && aug.NetTonnage != null) {
+                    this.netTonnage = setIfNeeded(this.netTonnage, aug.NetTonnage, 'autoNT', 0);
+                    updated = true;
+                  }
+                }
+        
+                if (needsDims) {
+                  if (!Number(this.loaMeters) && aug.LOA_m != null) {
+                    this.loaMeters = setIfNeeded(this.loaMeters, aug.LOA_m, 'autoLOA', 2);
+                    updated = true;
+                  }
+                  if (!Number(this.beamMeters) && aug.Beam_m != null) {
+                    this.beamMeters = setIfNeeded(this.beamMeters, aug.Beam_m, 'autoBeam', 2);
+                    updated = true;
+                  }
+                  if (!Number(this.draftMeters) && aug.Draft_m != null) {
+                    this.draftMeters = setIfNeeded(this.draftMeters, aug.Draft_m, 'autoDraft', 2);
+                    updated = true;
+                  }
+                }
+        
+                if (updated) {
+                  console.info(`[enrich] Populated from ${p} via ${attempt.label}`);
+                  return; // ✅ stop after first success
+                }
+              } catch (err) {
+                // swallow 404/422/timeout and continue
               }
-        
-              // Reuse your normalizer to unify keys + parse units
-              const aug = this.augment(payload || {});
-              // If user changed selection while we waited, bail
-              const stillSelected = ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + imo) === selectionToken;
-              if (!stillSelected) return;
-        
-              let updated = false;
-        
-              if (needsTons) {
-                if (!Number(this.grossTonnage) && aug.GrossTonnage != null) {
-                  this.grossTonnage = setIfNeeded(this.grossTonnage, aug.GrossTonnage, 'autoGT', 0);
-                  updated = true;
-                }
-                if (!Number(this.netTonnage) && aug.NetTonnage != null) {
-                  this.netTonnage = setIfNeeded(this.netTonnage, aug.NetTonnage, 'autoNT', 0);
-                  updated = true;
-                }
-              }
-        
-              if (needsDims) {
-                if (!Number(this.loaMeters) && aug.LOA_m != null) {
-                  this.loaMeters = setIfNeeded(this.loaMeters, aug.LOA_m, 'autoLOA', 2);
-                  updated = true;
-                }
-                if (!Number(this.beamMeters) && aug.Beam_m != null) {
-                  this.beamMeters = setIfNeeded(this.beamMeters, aug.Beam_m, 'autoBeam', 2);
-                  updated = true;
-                }
-                if (!Number(this.draftMeters) && aug.Draft_m != null) {
-                  this.draftMeters = setIfNeeded(this.draftMeters, aug.Draft_m, 'autoDraft', 2);
-                  updated = true;
-                }
-              }
-        
-              if (updated) return; // ✅ stop after first successful enrichment
-            } catch (err) {
-              // swallow 404/422/timeout and try the next endpoint
             }
           }
+        
+          console.info('[enrich] No details endpoints succeeded (id/official/imo/callsign).');
         },
-
 
 
         // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
