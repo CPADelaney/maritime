@@ -586,74 +586,95 @@ def get_port(port_code: str) -> Dict[str, Any]:
         db.close()
 
 # ----- Vessels (PSIX) -----
+import time
+
+# simple in-process cache (key -> (exp_ts, payload))
+_SEARCH_CACHE: dict[str, tuple[float, dict]] = {}
+_SEARCH_TTL = 300  # 5 minutes
+
+def _search_cache_get(key: str) -> Optional[dict]:
+    v = _SEARCH_CACHE.get(key)
+    if not v:
+        return None
+    exp, data = v
+    if exp <= time.time():
+        _SEARCH_CACHE.pop(key, None)
+        return None
+    return data
+
+def _search_cache_set(key: str, data: dict, ttl: int = _SEARCH_TTL) -> None:
+    _SEARCH_CACHE[key] = (time.time() + ttl, data)
+
 @app.get("/vessels/search", tags=["Vessels"])
 def search_vessels(
     name: str = Query(..., description="Vessel name to search for"),
-    page: int = Query(1, ge=1, description="Page number (1-based)"),
-    limit: int = Query(25, ge=1, le=100, description="Rows per page (default 25)"),
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
 ) -> Any:
     """
     Search PSIX by name and return a paginated, trimmed list.
-
-    Response:
-    {
-      "Table": [...],
-      "total": <int>, "count": <int>, "page": <int>, "limit": <int>,
-      "pages": <int>, "has_prev": <bool>, "has_next": <bool>,
-      "start": <int>, "end": <int>
-    }
+    Hardened to fail fast if PSIX is slow/unavailable and to cache results briefly.
     """
-    client = PsixClient()
+    started = time.time()
+    cache_key = f"{name.strip().upper()}::{page}::{limit}"
+    cached = _search_cache_get(cache_key)
+    if cached is not None:
+        return cached
+
+    # Use a shorter timeout and no retries for interactive search
+    client = PsixClient(timeout=12, retries=0)  # keep this tight to avoid proxy timeouts
+
     try:
         raw = client.search_by_name(name)  # {"Table": [...]}
-        rows = (raw or {}).get("Table") or []
-
-        def _nm(r): return (r.get("VesselName") or r.get("vesselname") or "").upper()
-        def _cs(r): return (r.get("CallSign") or r.get("callsign") or "").upper()
-        rows.sort(key=lambda r: (_nm(r), _cs(r)))
-
-        total = len(rows)
-        pages = max((total + limit - 1) // limit, 1)
-        page_ = min(max(page, 1), pages)
-        start_idx = (page_ - 1) * limit
-        end_idx = start_idx + limit
-
-        page_rows = rows[start_idx:end_idx]
-
-        def pick(r):
-            return {
-                "VesselID": r.get("VesselID") or r.get("vesselid"),
-                "VesselName": r.get("VesselName") or r.get("vesselname"),
-                "CallSign": r.get("CallSign") or r.get("callsign"),
-                "Flag": r.get("Flag") or r.get("flag"),
-                "VesselType": r.get("VesselType") or r.get("vesseltype"),
-                "IMONumber": r.get("IMONumber") or r.get("imonumber"),
-                "OfficialNumber": r.get("OfficialNumber") or r.get("officialnumber"),
-                "GrossTonnage": r.get("GrossTonnage") or r.get("grosstonnage"),
-                "NetTonnage": r.get("NetTonnage") or r.get("nettonnage"),
-            }
-
-        trimmed = [pick(r) for r in page_rows if (r.get("VesselName") or r.get("vesselname"))]
-
-        start_human = (start_idx + 1) if total else 0
-        end_human = min(end_idx, total)
-
-        return {
-            "Table": trimmed,
-            "total": total,
-            "count": len(trimmed),
-            "page": page_,
-            "limit": limit,
-            "pages": pages,
-            "has_prev": page_ > 1,
-            "has_next": page_ < pages,
-            "start": start_human,
-            "end": end_human,
-        }
     except Exception as e:
-        logger.exception("PSIX search failed")
-        raise HTTPException(status_code=502, detail=f"PSIX search failed: {e!s}")
+        logger.exception("PSIX search failed for name=%r", name)
+        # Return a controlled 502 rather than letting the proxy time out
+        raise HTTPException(status_code=502, detail="upstream PSIX search failed")
 
+    rows = (raw or {}).get("Table") or []
+    def _nm(r): return (r.get("VesselName") or r.get("vesselname") or "").upper()
+    def _cs(r): return (r.get("CallSign") or r.get("callsign") or "").upper()
+    rows.sort(key=lambda r: (_nm(r), _cs(r)))
+
+    total = len(rows)
+    pages = max((total + limit - 1) // limit, 1)
+    page_ = min(max(page, 1), pages)
+    start_idx = (page_ - 1) * limit
+    end_idx = start_idx + limit
+    page_rows = rows[start_idx:end_idx]
+
+    def pick(r):
+        return {
+            "VesselID": r.get("VesselID") or r.get("vesselid"),
+            "VesselName": r.get("VesselName") or r.get("vesselname"),
+            "CallSign": r.get("CallSign") or r.get("callsign"),
+            "Flag": r.get("Flag") or r.get("flag"),
+            "VesselType": r.get("VesselType") or r.get("vesseltype"),
+            "IMONumber": r.get("IMONumber") or r.get("imonumber"),
+            "OfficialNumber": r.get("OfficialNumber") or r.get("officialnumber"),
+            "GrossTonnage": r.get("GrossTonnage") or r.get("grosstonnage"),
+            "NetTonnage": r.get("NetTonnage") or r.get("nettonnage"),
+        }
+
+    trimmed = [pick(r) for r in page_rows if (r.get("VesselName") or r.get("vesselname"))]
+    start_human = (start_idx + 1) if total else 0
+    end_human = min(end_idx, total)
+
+    payload = {
+        "Table": trimmed,
+        "total": total,
+        "count": len(trimmed),
+        "page": page_,
+        "limit": limit,
+        "pages": pages,
+        "has_prev": page_ > 1,
+        "has_next": page_ < pages,
+        "start": start_human,
+        "end": end_human,
+    }
+    _search_cache_set(cache_key, payload)
+    logger.info("PSIX search name=%r total=%d elapsed=%.2fs", name, total, time.time() - started)
+    return payload
 @app.get("/vessels/{vessel_id}", tags=["Vessels"])
 def get_vessel_by_id(vessel_id: int) -> Dict[str, Any]:
     client = PsixClient()
