@@ -290,26 +290,21 @@ def vessels_details(
     callsign: Optional[str] = Query(None),
     vessel_name: Optional[str] = Query(None),
 ):
-    """
-    Resolve VesselID via summary, then fetch particulars, dimensions, tonnage, documents.
-    Returns {"rows":[{...}]} with LOA_m, Beam_m, Depth_m, GrossTonnage, NetTonnage.
-    """
     client = PsixClient()
     q = request.query_params
     cs = _q(q, "callsign", "call_sign", "CallSign") or callsign
     nm = _q(q, "vessel_name", "name", "VesselName") or vessel_name
 
     vid = vessel_id
+    summary_first: Dict[str, Any] = {}
+
     if not vid:
-        # Resolve by exact callsign if possible; else first match
-        summ = client.get_vessel_summary(
-            vessel_id=None,
-            vessel_name=nm or "",
-            call_sign=cs or "",
-        )
+        summ = client.get_vessel_summary(vessel_id=None, vessel_name=nm or "", call_sign=cs or "")
         srows = (summ or {}).get("Table") or []
         if not srows:
-            raise HTTPException(status_code=404, detail="Vessel not found in PSIX")
+            # Best-effort empty result
+            return {"rows": []}
+        summary_first = srows[0]
         if cs:
             csu = cs.strip().upper()
             match = next(
@@ -317,12 +312,26 @@ def vessels_details(
                                or str(r.get("VesselCallSign","")).strip().upper() == csu),
                 None
             )
-        else:
-            match = srows[0]
-        vid = int(_first_nonempty(match.get("VesselID"), match.get("vesselid")) or 0)
-        if not vid:
-            raise HTTPException(status_code=404, detail="PSIX vessel has no VesselID")
+            if match:
+                summary_first = match
+        # Try harder to extract an integer VesselID
+        raw_id = _first_nonempty(
+            summary_first.get("VesselID"),
+            summary_first.get("vesselid"),
+            summary_first.get("VesselNumber"),
+            summary_first.get("ID"),
+            summary_first.get("id"),
+        )
+        try:
+            vid = int(str(raw_id))
+        except Exception:
+            vid = None
 
+    if not vid:
+        # Return summary-only payload; UI can still use name/callsign/flag
+        return {"rows": [summary_first] if summary_first else []}
+
+    # Continue with particulars/dimensions/tonnage/documents as you had
     parts = client.get_vessel_particulars(vid).get("Table") or []
     dims  = client.get_vessel_dimensions(vid).get("Table") or []
     tons  = client.get_vessel_tonnage(vid).get("Table") or []
@@ -330,17 +339,12 @@ def vessels_details(
     summ  = client.get_vessel_summary(vessel_id=vid).get("Table") or []
 
     base = {}
-    if summ:
-        base.update(summ[0])
-    if parts:
-        base.update(parts[0])
+    if summ: base.update(summ[0])
+    if parts: base.update(parts[0])
 
-    # Pick best dimension record (prefer 'Overall' if present)
     def ft_to_m(x):
-        try:
-            return float(x) * 0.3048
-        except Exception:
-            return None
+        try: return float(x) * 0.3048
+        except: return None
 
     pick = None
     if dims:
@@ -350,16 +354,12 @@ def vessels_details(
     extra = {}
     if pick:
         if pick.get("LengthInFeet") is not None:
-            extra["LengthInFeet"] = pick["LengthInFeet"]
-            extra["LOA_m"] = ft_to_m(pick["LengthInFeet"])
+            extra["LengthInFeet"] = pick["LengthInFeet"]; extra["LOA_m"] = ft_to_m(pick["LengthInFeet"])
         if pick.get("BreadthInFeet") is not None:
-            extra["BreadthInFeet"] = pick["BreadthInFeet"]
-            extra["Beam_m"] = ft_to_m(pick["BreadthInFeet"])
+            extra["BreadthInFeet"] = pick["BreadthInFeet"]; extra["Beam_m"] = ft_to_m(pick["BreadthInFeet"])
         if pick.get("DepthInFeet") is not None:
-            extra["DepthInFeet"] = pick["DepthInFeet"]
-            extra["Depth_m"] = ft_to_m(pick["DepthInFeet"])  # Depth != Draft
+            extra["DepthInFeet"] = pick["DepthInFeet"]; extra["Depth_m"] = ft_to_m(pick["DepthInFeet"])
 
-    # Tonnage rows vary; pick obvious gross/net
     gross = next((t for t in tons if str(t.get("TonnageTypeLookupName","")).lower().startswith("gross")), None)
     net   = next((t for t in tons if str(t.get("TonnageTypeLookupName","")).lower().startswith("net")), None)
     if gross and gross.get("MeasureOfWeight") is not None:
@@ -367,14 +367,7 @@ def vessels_details(
     if net and net.get("MeasureOfWeight") is not None:
         extra["NetTonnage"] = net["MeasureOfWeight"]
 
-    merged = {
-        **base,
-        **extra,
-        "VesselID": vid,
-        "_documents": docs,
-        "_tonnage_rows": tons,
-        "_dimension_rows": dims
-    }
+    merged = {**base, **extra, "VesselID": vid, "_documents": docs, "_tonnage_rows": tons, "_dimension_rows": dims}
     return {"rows": [merged]}
 
 # ----- Frontend mounting -----
@@ -395,6 +388,15 @@ def find_frontend_dir() -> Optional[Path]:
 frontend_dir = find_frontend_dir()
 if frontend_dir:
     app.mount("/static", StaticFiles(directory=str(frontend_dir), html=True), name="static")
+
+@app.get("/api/v2/vessels/details", tags=["Vessels"])
+def v2_vessels_details(
+    request: Request,
+    vessel_id: Optional[int] = Query(None),
+    callsign: Optional[str] = Query(None),
+    vessel_name: Optional[str] = Query(None),
+):
+    return vessels_details(request, vessel_id, callsign, vessel_name)
 
 # ----- Startup -----
 @app.on_event("startup")
