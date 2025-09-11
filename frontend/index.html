@@ -799,6 +799,20 @@
             }
             return val;
           };
+
+          // IDs (used by enrichment)
+          const num7 = (x) => (x ? String(x).match(/\b\d{6,7}\b/)?.[0] : null);
+          
+          // Try standard IMO fields first
+          let imoCand = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMOShipNo','imo');
+          // PSIX often sticks it in "PrimaryVesselNumber"
+          if (!imoCand) imoCand = pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No');
+          
+          out.IMONumber = num7(imoCand) || null;
+          
+          out.OfficialNumber =
+            pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number') || null;
+
         
           // ---------- build the normalized output ----------
           const out = { ...src };
