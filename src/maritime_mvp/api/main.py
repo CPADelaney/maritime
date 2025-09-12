@@ -294,13 +294,26 @@ def vessels_details(
     """
     Resolve VesselID via summary (if needed), then fetch particulars, dimensions,
     tonnage, and documents. Returns {"rows":[{...}]} with helpful fields:
-      LOA_m, Beam_m, Depth_m (feet → meters), Draft_m (if present),
-      GrossTonnage, NetTonnage, YearBuilt,
-    plus raw PSIX rows under _dimension_rows, _tonnage_rows, _documents.
+    LOA_m, Beam_m, Depth_m (feet → meters), Draft_m (if present),
+    GrossTonnage, NetTonnage, YearBuilt, plus raw rows in _dimension_rows/_tonnage_rows/_documents.
     """
     client = PsixClient()
 
-    # Normalize query variants (callsign/CallSign/call_sign and vessel_name/VesselName/name)
+    # local helpers
+    def _q(qm, *keys) -> Optional[str]:
+        for k in keys:
+            v = qm.get(k)
+            if v is not None and str(v).strip():
+                return str(v)
+        return None
+
+    def _first_nonempty(*vals):
+        for v in vals:
+            if v is not None and str(v).strip():
+                return v
+        return None
+
+    # accept aliases/casing from query
     q = request.query_params
     cs = _q(q, "callsign", "call_sign", "CallSign") or callsign
     nm = _q(q, "vessel_name", "name", "VesselName") or vessel_name
@@ -308,7 +321,7 @@ def vessels_details(
     vid: Optional[int] = vessel_id
     summary_first: Dict[str, Any] = {}
 
-    # 1) Resolve VesselID via getVesselSummary (prefer exact callsign match)
+    # 1) Resolve VesselID via summary (prefer exact callsign match)
     if not vid:
         summ = client.get_vessel_summary(
             vessel_id=None,
@@ -323,11 +336,9 @@ def vessels_details(
         if cs:
             csu = cs.strip().upper()
             match = next(
-                (
-                    r for r in srows
-                    if str(r.get("CallSign", "")).strip().upper() == csu
-                    or str(r.get("VesselCallSign", "")).strip().upper() == csu
-                ),
+                (r for r in srows
+                 if str(r.get("CallSign", "")).strip().upper() == csu
+                 or str(r.get("VesselCallSign", "")).strip().upper() == csu),
                 None
             )
             if match:
@@ -349,10 +360,10 @@ def vessels_details(
     if not vid:
         return {"rows": [summary_first] if summary_first else []}
 
-    # 2) Safe PSIX calls
+    # 2) Safe PSIX calls (each returns {"Table":[...]})
     def _get_table(fn, _vid: int, label: str) -> List[Dict[str, Any]]:
         try:
-            d = fn(_vid)  # each returns {"Table": [...]}
+            d = fn(_vid)
             return (d or {}).get("Table") or []
         except Exception:
             logger.exception("PSIX %s failed for VesselID=%s", label, _vid)
@@ -372,8 +383,7 @@ def vessels_details(
         base.update(parts[0])
 
     # 4) Dimensions (prefer meters, else convert feet). Tolerant number parse.
-    import re as _re
-    _num_re = _re.compile(r"[-+]?\d+(?:[,\d]*\d)?(?:\.\d+)?")
+    _num_re = re.compile(r"[-+]?\d+(?:[,\d]*\d)?(?:\.\d+)?")
 
     def to_float(x: Any) -> Optional[float]:
         if x is None:
@@ -405,15 +415,15 @@ def vessels_details(
     for d in dims:
         # Feet
         len_ft.append(to_float(pick_any(d, "LengthInFeet", "LOAInFeet", "OverallLengthInFeet", "Length_ft", "LengthFeet")))
-        brd_ft.append(to_float(pick_any(d,
-            "BreadthInFeet", "BeamInFeet", "Breadth_ft", "BeamFeet",
+        brd_ft.append(to_float(pick_any(
+            d, "BreadthInFeet", "BeamInFeet", "Breadth_ft", "BeamFeet",
             "OverallBreadthInFeet", "MouldedBreadthInFeet"
         )))
         dep_ft.append(to_float(pick_any(d, "DepthInFeet", "MouldedDepthInFeet", "Depth_ft", "DepthFeet")))
         # Meters
         len_m.append(to_float(pick_any(d, "LengthInMeters", "LOAInMeters", "OverallLengthInMeters", "Length_m")))
-        brd_m.append(to_float(pick_any(d,
-            "BreadthInMeters", "BeamInMeters", "Breadth_m", "Beam_m",
+        brd_m.append(to_float(pick_any(
+            d, "BreadthInMeters", "BeamInMeters", "Breadth_m", "Beam_m",
             "OverallBreadthInMeters", "MouldedBreadthInMeters"
         )))
         dep_m.append(to_float(pick_any(d, "DepthInMeters", "MouldedDepthInMeters", "Depth_m")))
@@ -464,7 +474,7 @@ def vessels_details(
         if Df_txt is not None:
             extra["Depth_m"] = Df_txt * 0.3048
 
-    # 5) Tonnage (rank common labels; fallback to summary/particulars)
+    # 5) Tonnage: prefer recognized labels, else max numeric
     def label(t: Dict[str, Any]) -> str:
         return str(t.get("TonnageTypeLookupName", "")).strip().lower()
     def mw(t: Dict[str, Any]) -> Optional[float]:
@@ -517,7 +527,7 @@ def vessels_details(
             or to_float(base.get("NT"))
         )
 
-    # YearBuilt from known fields (avoid zero)
+    # YearBuilt (avoid zero)
     yb = None
     for key in ("ConstructionCompletedYear", "YearBuilt", "BuildYear"):
         try:
@@ -530,10 +540,8 @@ def vessels_details(
     if yb:
         extra["YearBuilt"] = yb
 
-    logger.info(
-        "PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d",
-        vid, len(dims), len(tons), len(parts), len(docs)
-    )
+    logger.info("PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d",
+                vid, len(dims), len(tons), len(parts), len(docs))
 
     merged = {
         **base,
