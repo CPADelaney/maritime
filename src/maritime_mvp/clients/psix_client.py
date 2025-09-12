@@ -186,10 +186,9 @@ class PsixClient:
     ) -> Dict[str, Any]:
         """
         Wrapper for getVesselSummary.
-        Note: When not looking up a specific ID, PSIX requires <VesselID>0</VesselID> in the request.
+        Note: When not looking up a specific ID, PSIX requires <VesselID>0</VesselID>.
         """
         vid = int(vessel_id) if vessel_id is not None else 0
-        # Minimal XML; values may be empty strings
         inner = (
             f"<VesselID>{vid}</VesselID>"
             f"<VesselName>{_html.escape(vessel_name or '')}</VesselName>"
