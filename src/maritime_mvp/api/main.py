@@ -619,11 +619,15 @@ def search_vessels(
     page: int = Query(1, ge=1, description="Page number (1-based)"),
     limit: int = Query(25, ge=1, le=100, description="Rows per page (default 25)"),
 ) -> Any:
-    client = PsixClient(timeout=30, retries=1)  # sane defaults; PSIX can be slow intermittently
+    """
+    Search PSIX by name and return a paginated, trimmed list.
+    Uses getVesselSummary with <VesselID>0</VesselID> for attribute search.
+    """
+    client = PsixClient(timeout=30, retries=1)  # PSIX can be slow intermittently
     try:
-        raw = client.search_by_name(name)  # <— back to the prior behavior
+        raw = client.get_vessel_summary(vessel_id=None, vessel_name=name)
     except Exception:
-        logger.exception("PSIX search failed")
+        logger.exception("PSIX search failed for name=%r", name)
         raise HTTPException(status_code=502, detail="PSIX search failed")
 
     rows = (raw or {}).get("Table") or []
