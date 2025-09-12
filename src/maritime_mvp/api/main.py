@@ -371,46 +371,118 @@ def vessels_details(
     if parts:
         base.update(parts[0])
 
-    # 4) Best-of selection for dimensions across all rows (feet → meters)
+    # 4) Best-of dimensions (feet → meters), accept common variants
     def to_float(x: Any) -> Optional[float]:
         try:
             return float(str(x).strip())
         except Exception:
             return None
 
-    len_ft = [to_float(d.get("LengthInFeet"))  for d in dims if d.get("LengthInFeet")  is not None]
-    brd_ft = [to_float(d.get("BreadthInFeet")) for d in dims if d.get("BreadthInFeet") is not None]
-    dep_ft = [to_float(d.get("DepthInFeet"))   for d in dims if d.get("DepthInFeet")   is not None]
+    def pick_any(d: Dict[str, Any], *keys: str) -> Optional[Any]:
+        for k in keys:
+            v = d.get(k)
+            if v is not None and str(v).strip().lower() != "none":
+                return v
+        return None
+
+    len_candidates_ft = []
+    brd_candidates_ft = []
+    dep_candidates_ft = []
+    len_candidates_m  = []
+    brd_candidates_m  = []
+    dep_candidates_m  = []
+
+    for d in dims:
+        # Feet
+        len_candidates_ft.append(to_float(pick_any(d, "LengthInFeet", "LOAInFeet", "OverallLengthInFeet", "Length_ft", "LengthFeet")))
+        brd_candidates_ft.append(to_float(pick_any(d, "BreadthInFeet", "BeamInFeet", "Breadth_ft", "BeamFeet")))
+        dep_candidates_ft.append(to_float(pick_any(d, "DepthInFeet", "MouldedDepthInFeet", "Depth_ft", "DepthFeet")))
+        # Meters
+        len_candidates_m.append(to_float(pick_any(d, "LengthInMeters", "LOAInMeters", "OverallLengthInMeters", "Length_m")))
+        brd_candidates_m.append(to_float(pick_any(d, "BreadthInMeters", "BeamInMeters", "Breadth_m", "Beam_m")))
+        dep_candidates_m.append(to_float(pick_any(d, "DepthInMeters", "MouldedDepthInMeters", "Depth_m")))
 
     extra: Dict[str, Any] = {}
-    if any(v is not None for v in len_ft):
-        L = max(v for v in len_ft if v is not None)
-        extra["LengthInFeet"] = L
-        extra["LOA_m"] = L * 0.3048
-    if any(v is not None for v in brd_ft):
-        B = max(v for v in brd_ft if v is not None)
-        extra["BreadthInFeet"] = B
-        extra["Beam_m"] = B * 0.3048
-    if any(v is not None for v in dep_ft):
-        D = max(v for v in dep_ft if v is not None)
-        extra["DepthInFeet"] = D
-        extra["Depth_m"] = D * 0.3048  # Depth is NOT Draft
 
-    # 5) Tonnage: prefer rows labeled Gross/Net; otherwise use highest numeric
+    # Prefer meters if we have them; otherwise convert max of available feet
+    if any(v is not None for v in len_candidates_m):
+        Lm = max(v for v in len_candidates_m if v is not None)
+        extra["LOA_m"] = Lm
+    elif any(v is not None for v in len_candidates_ft):
+        Lf = max(v for v in len_candidates_ft if v is not None)
+        extra["LengthInFeet"] = Lf
+        extra["LOA_m"] = Lf * 0.3048
+
+    if any(v is not None for v in brd_candidates_m):
+        Bm = max(v for v in brd_candidates_m if v is not None)
+        extra["Beam_m"] = Bm
+    elif any(v is not None for v in brd_candidates_ft):
+        Bf = max(v for v in brd_candidates_ft if v is not None)
+        extra["BreadthInFeet"] = Bf
+        extra["Beam_m"] = Bf * 0.3048
+
+    if any(v is not None for v in dep_candidates_m):
+        Dm = max(v for v in dep_candidates_m if v is not None)
+        extra["Depth_m"] = Dm
+    elif any(v is not None for v in dep_candidates_ft):
+        Df = max(v for v in dep_candidates_ft if v is not None)
+        extra["DepthInFeet"] = Df
+        extra["Depth_m"] = Df * 0.3048
+
+    # Draft is not in the published Dimensions list, but handle if present
+    draft_ft_vals = [to_float(pick_any(d, "DraftInFeet", "MaxDraftInFeet", "Draft_ft")) for d in dims]
+    draft_m_vals  = [to_float(pick_any(d, "DraftInMeters", "MaxDraftInMeters", "Draft_m")) for d in dims]
+    if any(v is not None for v in draft_m_vals):
+        extra["Draft_m"] = max(v for v in draft_m_vals if v is not None)
+    elif any(v is not None for v in draft_ft_vals):
+        Df = max(v for v in draft_ft_vals if v is not None)
+        extra["Draft_m"] = Df * 0.3048
+
+    # 5) Tonnage: prefer explicit Gross/Net from getVesselTonnage, else fallback
     def label(t: Dict[str, Any]) -> str:
         return str(t.get("TonnageTypeLookupName", "")).lower()
 
-    gross_vals = [to_float(t.get("MeasureOfWeight")) for t in tons if "gross" in label(t)]
-    net_vals   = [to_float(t.get("MeasureOfWeight")) for t in tons if "net"   in label(t)]
+    # Accept a few synonyms
+    def is_gross(t: Dict[str, Any]) -> bool:
+        l = label(t)
+        return ("gross" in l) or ("grt" in l)
+    def is_net(t: Dict[str, Any]) -> bool:
+        l = label(t)
+        return ("net" in l) or ("nrt" in l)
+
+    mw = lambda t: to_float(t.get("MeasureOfWeight"))
+
+    gross_vals = [mw(t) for t in tons if is_gross(t)]
+    net_vals   = [mw(t) for t in tons if is_net(t)]
+
     if not any(v is not None for v in gross_vals):
-        gross_vals = [to_float(t.get("MeasureOfWeight")) for t in tons]
+        gross_vals = [mw(t) for t in tons]
     if not any(v is not None for v in net_vals):
-        net_vals   = [to_float(t.get("MeasureOfWeight")) for t in tons]
+        net_vals   = [mw(t) for t in tons]
 
     if any(v is not None for v in gross_vals):
         extra["GrossTonnage"] = max(v for v in gross_vals if v is not None)
     if any(v is not None for v in net_vals):
         extra["NetTonnage"] = max(v for v in net_vals if v is not None)
+
+    # Fallback to any tonnage fields present in summary/particulars if tonnage rows were empty
+    if "GrossTonnage" not in extra:
+        extra["GrossTonnage"] = to_float(base.get("GrossTonnage"))
+    if "NetTonnage" not in extra:
+        extra["NetTonnage"] = to_float(base.get("NetTonnage"))
+
+    # YearBuilt as int (avoid 0)
+    yb = None
+    for key in ("ConstructionCompletedYear", "YearBuilt", "BuildYear"):
+        try:
+            v = int(str(base.get(key, "")).strip())
+            if v > 0:
+                yb = v
+                break
+        except Exception:
+            continue
+    if yb:
+        extra["YearBuilt"] = yb
 
     logger.info(
         "PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d",
