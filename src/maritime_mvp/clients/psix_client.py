@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import os
 import re
+re = _re
 import time
 import html as _html
 import logging
@@ -102,6 +103,18 @@ class PsixClient:
         })
 
         logger.info("PSIX client initialized url=%s verify_ssl=%s timeout=%ss", self.url, self.verify_ssl, self.timeout)
+
+    @staticmethod
+    def _digits(s: str) -> str:
+        return _re.sub(r"\D", "", s or "")
+
+    @staticmethod
+    def _looks_like_imo(num: str) -> bool:
+        s = PsixClient._digits(num)
+        if len(s) != 7:
+            return False
+        chk = sum(int(s[i]) * (7 - i) for i in range(6)) % 10
+        return chk == int(s[6])
 
     # ---------------- SOAP core ----------------
 
@@ -336,7 +349,6 @@ class PsixClient:
         return rec
 
     def _normalize_row(self, rec: Dict[str, Any]) -> None:
-        """Populate common display keys if missing (case/alias tolerant)."""
         def first(*keys: str) -> Optional[str]:
             for k in keys:
                 v = rec.get(k)
@@ -359,10 +371,25 @@ class PsixClient:
         rec.setdefault("YearBuilt", first("YearBuilt", "ConstructionCompletedYear", "BuildYear", "YearOfBuild"))
         rec.setdefault("Status", first("Status", "StatusLookupName", "VesselStatus"))
 
+        # Common identifiers
         rec.setdefault("IMONumber", first("IMONumber", "IMO", "IMO_Number"))
         rec.setdefault("OfficialNumber", first("OfficialNumber", "USOfficialNumber", "US_Official_Number"))
-        rec.setdefault("PrimaryIdentification", first("PrimaryIdentification", "OfficialNumber", "IMONumber"))
 
+        # Primary Identification: make sure we capture PSIX 'Identification'
+        pid = first("PrimaryIdentification", "Identification", "Primary_ID", "PrimaryId")
+        if pid:
+            rec.setdefault("PrimaryIdentification", pid)
+
+            # If IMO missing, infer from PID when valid
+            if not rec.get("IMONumber") and self._looks_like_imo(pid):
+                rec["IMONumber"] = self._digits(pid)
+
+            # If Official missing and PID is a 6–7 digit number different from the IMO, use it
+            if not rec.get("OfficialNumber"):
+                d = self._digits(pid)
+                if d and (len(d) in (6, 7)) and (rec.get("IMONumber") != d):
+                    rec["OfficialNumber"] = d
+                    
     def _extract_rows(self, xml_payload: str) -> List[Dict[str, Any]]:
         """
         Accepts:
