@@ -152,7 +152,7 @@ class PsixClient:
         Post SOAP for `op` and parse the DataSet rows robustly:
         - Prefer embedded XML (diffgram/NewDataSet) under <*Result>.
         - Fallback to unescaping string payloads.
-        - Optional retry using the *XMLString op if no rows found.
+        - If the dataset op returns zero rows, try the *XMLString variant once.
         Returns {'Table': [...]} or {'Table': []}.
         """
         # Cache
@@ -160,88 +160,85 @@ class PsixClient:
         cached = _cache_get(ck)
         if cached is not None:
             return cached
-
+    
         attempts = max(1, self.retries + 1)
         last_err: Optional[str] = None
-
+    
         for attempt in range(attempts):
             try:
                 raw = self._post_soap_once(op, body_xml)
                 if not raw:
                     last_err = "no HTTP response or all SOAPAction variants failed"
                     raise RuntimeError(last_err)
-
+    
                 root = ET.fromstring(raw.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
                 result_nodes = root.xpath(f".//*[local-name()='{op}Result']")
                 if not result_nodes:
                     last_err = f"{op}Result node not found"
                     raise RuntimeError(last_err)
-
+    
                 result_node = result_nodes[0]
-
+    
                 # 1) Embedded XML dataset under Result?
                 ds_node = None
-                # Prefer diffgram, then NewDataSet
                 diff_nodes = result_node.xpath(".//*[local-name()='diffgram']")
                 nds_nodes = result_node.xpath(".//*[local-name()='NewDataSet']")
                 if diff_nodes:
                     ds_node = diff_nodes[0]
                 elif nds_nodes:
                     ds_node = nds_nodes[0]
-
+    
                 if ds_node is not None:
                     payload = ET.tostring(ds_node, encoding="unicode")
                 else:
                     # 2) String content variant (unescape)
-                    # Some ASMXs wrap it in <string> or put text directly in *Result
                     str_nodes = result_node.xpath(".//*[local-name()='string']") or [result_node]
                     payload = "".join(str_nodes[0].itertext()) if str_nodes else "".join(result_node.itertext())
                     if payload and ("&lt;" in payload or "&amp;lt;" in payload):
                         payload = _html.unescape(payload)
-
+    
                 rows = self._extract_rows(payload)
-                data = {"Table": rows}
                 if rows:
+                    data = {"Table": rows}
                     _cache_set(ck, data)
-                else:
-                    # Helpful debug
-                    snippet = (payload or "")[:240].replace("\n", " ").strip()
-                    logger.debug("PSIX %s returned no rows; payload head=%r", op, snippet)
-                return data
-
+                    return data
+    
+                # No rows from dataset op → try XMLString variant once
+                snippet = (payload or "")[:240].replace("\n", " ").strip()
+                logger.debug("PSIX %s returned no rows; payload head=%r", op, snippet)
+    
+                if self.try_xmlstring_fallback and not op.endswith("XMLString"):
+                    try_op = f"{op}XMLString"
+                    try_ck = f"psix::{try_op}::{body_xml}"
+                    cached2 = _cache_get(try_ck)
+                    if cached2 is not None:
+                        return cached2
+    
+                    raw2 = self._post_soap_once(try_op, body_xml)
+                    if raw2:
+                        root2 = ET.fromstring(raw2.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
+                        result_nodes2 = root2.xpath(f".//*[local-name()='{try_op}Result']")
+                        if result_nodes2:
+                            txt = "".join(result_nodes2[0].itertext())
+                            if txt and ("&lt;" in txt or "&amp;lt;" in txt):
+                                txt = _html.unescape(txt)
+                            rows2 = self._extract_rows(txt)
+                            data2 = {"Table": rows2}
+                            if rows2:
+                                _cache_set(try_ck, data2)
+                                return data2
+                            else:
+                                snippet2 = (txt or "")[:240].replace("\n", " ").strip()
+                                logger.debug("PSIX %s fallback returned no rows; head=%r", try_op, snippet2)
+    
+                # Still nothing; return empty
+                return {"Table": []}
+    
             except Exception as e:
                 last_err = f"{type(e).__name__}: {e!s}"
                 if attempt < attempts - 1:
                     time.sleep(self.backoff_s * (attempt + 1))
-
-        # Primary op failed or produced no rows; optionally try *XMLString variant once
-        if self.try_xmlstring_fallback and not op.endswith("XMLString"):
-            try_op = f"{op}XMLString"
-            try_ck = f"psix::{try_op}::{body_xml}"
-            cached2 = _cache_get(try_ck)
-            if cached2 is not None:
-                return cached2
-
-            try:
-                raw = self._post_soap_once(try_op, body_xml)
-                if raw:
-                    root = ET.fromstring(raw.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
-                    result_nodes = root.xpath(f".//*[local-name()='{try_op}Result']")
-                    if result_nodes:
-                        txt = "".join(result_nodes[0].itertext())
-                        if txt and ("&lt;" in txt or "&amp;lt;" in txt):
-                            txt = _html.unescape(txt)
-                        rows = self._extract_rows(txt)
-                        data = {"Table": rows}
-                        if rows:
-                            _cache_set(try_ck, data)
-                        else:
-                            snippet = (txt or "")[:240].replace("\n", " ").strip()
-                            logger.debug("PSIX %s fallback returned no rows; payload head=%r", try_op, snippet)
-                        return data
-            except Exception as e:  # pragma: no cover
-                logger.debug("PSIX %s XMLString fallback failed: %s", op, e)
-
+    
         if last_err:
             logger.debug("PSIX _post_soap(%s) failed: %s", op, last_err)
         return {"Table": []}
