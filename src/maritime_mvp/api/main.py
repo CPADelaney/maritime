@@ -438,38 +438,64 @@ def vessels_details(
         Df = max(v for v in draft_ft_vals if v is not None)
         extra["Draft_m"] = Df * 0.3048
 
-    # 5) Tonnage: prefer explicit Gross/Net from getVesselTonnage, else fallback
+    # 5) Tonnage: prefer explicit Gross/Net, rank by label quality
+    def to_float(x: Any) -> Optional[float]:
+        try: return float(str(x).strip())
+        except Exception: return None
+    
     def label(t: Dict[str, Any]) -> str:
-        return str(t.get("TonnageTypeLookupName", "")).lower()
-
-    # Accept a few synonyms
-    def is_gross(t: Dict[str, Any]) -> bool:
-        l = label(t)
-        return ("gross" in l) or ("grt" in l)
-    def is_net(t: Dict[str, Any]) -> bool:
-        l = label(t)
-        return ("net" in l) or ("nrt" in l)
-
-    mw = lambda t: to_float(t.get("MeasureOfWeight"))
-
-    gross_vals = [mw(t) for t in tons if is_gross(t)]
-    net_vals   = [mw(t) for t in tons if is_net(t)]
-
-    if not any(v is not None for v in gross_vals):
-        gross_vals = [mw(t) for t in tons]
-    if not any(v is not None for v in net_vals):
-        net_vals   = [mw(t) for t in tons]
-
-    if any(v is not None for v in gross_vals):
-        extra["GrossTonnage"] = max(v for v in gross_vals if v is not None)
-    if any(v is not None for v in net_vals):
-        extra["NetTonnage"] = max(v for v in net_vals if v is not None)
-
-    # Fallback to any tonnage fields present in summary/particulars if tonnage rows were empty
-    if "GrossTonnage" not in extra:
-        extra["GrossTonnage"] = to_float(base.get("GrossTonnage"))
-    if "NetTonnage" not in extra:
-        extra["NetTonnage"] = to_float(base.get("NetTonnage"))
+        return str(t.get("TonnageTypeLookupName", "")).strip().lower()
+    
+    def mw(t: Dict[str, Any]) -> Optional[float]:
+        return to_float(t.get("MeasureOfWeight"))
+    
+    def best_by_labels(rows: List[Dict[str, Any]], prefs: List[str]) -> Optional[float]:
+        # Return the amount from the first preference that has any values, else None
+        for p in prefs:
+            vals = [mw(r) for r in rows if p in label(r)]
+            vals = [v for v in vals if v is not None]
+            if vals:
+                return max(vals)
+        return None
+    
+    gross_prefs = [
+        "gross tonnage (itc)", "gross tonnage",
+        "gross registered tonnage", "grt", "gt"
+    ]
+    net_prefs = [
+        "net tonnage (itc)", "net tonnage",
+        "net registered tonnage", "nrt", "nt"
+    ]
+    
+    gross = best_by_labels(tons, gross_prefs)
+    net   = best_by_labels(tons, net_prefs)
+    
+    # Fallback: any numeric if label matching didn’t hit
+    if gross is None:
+        gross = max((v for v in (mw(t) for t in tons) if v is not None), default=None)
+    if net is None:
+        net = max((v for v in (mw(t) for t in tons) if v is not None), default=None)
+    
+    if gross is not None:
+        extra["GrossTonnage"] = gross
+    if net is not None:
+        extra["NetTonnage"] = net
+    
+    # Final fallback to summary/particulars if tonnage dataset was sparse
+    if "GrossTonnage" not in extra or extra["GrossTonnage"] is None:
+        extra["GrossTonnage"] = (
+            to_float(base.get("GrossTonnage"))
+            or to_float(base.get("GrossRegisteredTonnage"))
+            or to_float(base.get("GrossTons"))
+            or to_float(base.get("GT"))
+        )
+    if "NetTonnage" not in extra or extra["NetTonnage"] is None:
+        extra["NetTonnage"] = (
+            to_float(base.get("NetTonnage"))
+            or to_float(base.get("NetRegisteredTonnage"))
+            or to_float(base.get("NetTons"))
+            or to_float(base.get("NT"))
+        )
 
     # YearBuilt as int (avoid 0)
     yb = None
