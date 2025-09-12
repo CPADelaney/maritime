@@ -1,3 +1,4 @@
+# src/maritime_mvp/clients/psix_client.py
 """
 PSIX client — resilient SOAP wrapper + robust XML parser.
 
