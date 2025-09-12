@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import os
 import re
-re = _re
 import time
 import html as _html
 import logging
@@ -106,7 +105,7 @@ class PsixClient:
 
     @staticmethod
     def _digits(s: str) -> str:
-        return _re.sub(r"\D", "", s or "")
+        return re.sub(r"\D", "", s or "")
 
     @staticmethod
     def _looks_like_imo(num: str) -> bool:
