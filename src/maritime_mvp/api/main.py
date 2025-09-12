@@ -294,7 +294,8 @@ def vessels_details(
     """
     Resolve VesselID via summary (if needed), then fetch particulars, dimensions,
     tonnage, and documents. Returns {"rows":[{...}]} with helpful fields:
-      LOA_m, Beam_m, Depth_m (feet → meters), GrossTonnage, NetTonnage,
+      LOA_m, Beam_m, Depth_m (feet → meters), Draft_m (if present),
+      GrossTonnage, NetTonnage, YearBuilt,
     plus raw PSIX rows under _dimension_rows, _tonnage_rows, _documents.
     """
     client = PsixClient()
@@ -307,7 +308,7 @@ def vessels_details(
     vid: Optional[int] = vessel_id
     summary_first: Dict[str, Any] = {}
 
-    # 1) If no VesselID provided, resolve it via getVesselSummary (prefer exact callsign match)
+    # 1) Resolve VesselID via getVesselSummary (prefer exact callsign match)
     if not vid:
         summ = client.get_vessel_summary(
             vessel_id=None,
@@ -316,7 +317,7 @@ def vessels_details(
         )
         srows = (summ or {}).get("Table") or []
         if not srows:
-            return {"rows": []}  # best-effort empty
+            return {"rows": []}
 
         summary_first = srows[0]
         if cs:
@@ -334,7 +335,7 @@ def vessels_details(
 
         raw_id = _first_nonempty(
             summary_first.get("VesselID"),
-            summary_first.get("VesselId"),        # PSIX sometimes uses this casing
+            summary_first.get("VesselId"),
             summary_first.get("vesselid"),
             summary_first.get("VesselNumber"),
             summary_first.get("ID"),
@@ -345,11 +346,10 @@ def vessels_details(
         except Exception:
             vid = None
 
-    # If still no ID, return summary-only (UI can still use name/callsign/flag)
     if not vid:
         return {"rows": [summary_first] if summary_first else []}
 
-    # 2) Safe PSIX calls (don’t let one failure 500 the whole route)
+    # 2) Safe PSIX calls
     def _get_table(fn, _vid: int, label: str) -> List[Dict[str, Any]]:
         try:
             d = fn(_vid)  # each returns {"Table": [...]}
@@ -371,11 +371,25 @@ def vessels_details(
     if parts:
         base.update(parts[0])
 
-    # 4) Best-of dimensions (feet → meters), accept common variants
+    # 4) Dimensions (prefer meters, else convert feet). Tolerant number parse.
+    import re as _re
+    _num_re = _re.compile(r"[-+]?\d+(?:[,\d]*\d)?(?:\.\d+)?")
+
     def to_float(x: Any) -> Optional[float]:
+        if x is None:
+            return None
+        s = str(x).strip()
+        if not s:
+            return None
         try:
-            return float(str(x).strip())
+            return float(s.replace(",", ""))
         except Exception:
+            m = _num_re.search(s)
+            if m:
+                try:
+                    return float(m.group(0).replace(",", ""))
+                except Exception:
+                    return None
             return None
 
     def pick_any(d: Dict[str, Any], *keys: str) -> Optional[Any]:
@@ -385,103 +399,109 @@ def vessels_details(
                 return v
         return None
 
-    len_candidates_ft = []
-    brd_candidates_ft = []
-    dep_candidates_ft = []
-    len_candidates_m  = []
-    brd_candidates_m  = []
-    dep_candidates_m  = []
+    len_ft, brd_ft, dep_ft = [], [], []
+    len_m,  brd_m,  dep_m  = [], [], []
 
     for d in dims:
         # Feet
-        len_candidates_ft.append(to_float(pick_any(d, "LengthInFeet", "LOAInFeet", "OverallLengthInFeet", "Length_ft", "LengthFeet")))
-        brd_candidates_ft.append(to_float(pick_any(d, "BreadthInFeet", "BeamInFeet", "Breadth_ft", "BeamFeet")))
-        dep_candidates_ft.append(to_float(pick_any(d, "DepthInFeet", "MouldedDepthInFeet", "Depth_ft", "DepthFeet")))
+        len_ft.append(to_float(pick_any(d, "LengthInFeet", "LOAInFeet", "OverallLengthInFeet", "Length_ft", "LengthFeet")))
+        brd_ft.append(to_float(pick_any(d,
+            "BreadthInFeet", "BeamInFeet", "Breadth_ft", "BeamFeet",
+            "OverallBreadthInFeet", "MouldedBreadthInFeet"
+        )))
+        dep_ft.append(to_float(pick_any(d, "DepthInFeet", "MouldedDepthInFeet", "Depth_ft", "DepthFeet")))
         # Meters
-        len_candidates_m.append(to_float(pick_any(d, "LengthInMeters", "LOAInMeters", "OverallLengthInMeters", "Length_m")))
-        brd_candidates_m.append(to_float(pick_any(d, "BreadthInMeters", "BeamInMeters", "Breadth_m", "Beam_m")))
-        dep_candidates_m.append(to_float(pick_any(d, "DepthInMeters", "MouldedDepthInMeters", "Depth_m")))
+        len_m.append(to_float(pick_any(d, "LengthInMeters", "LOAInMeters", "OverallLengthInMeters", "Length_m")))
+        brd_m.append(to_float(pick_any(d,
+            "BreadthInMeters", "BeamInMeters", "Breadth_m", "Beam_m",
+            "OverallBreadthInMeters", "MouldedBreadthInMeters"
+        )))
+        dep_m.append(to_float(pick_any(d, "DepthInMeters", "MouldedDepthInMeters", "Depth_m")))
 
     extra: Dict[str, Any] = {}
 
-    # Prefer meters if we have them; otherwise convert max of available feet
-    if any(v is not None for v in len_candidates_m):
-        Lm = max(v for v in len_candidates_m if v is not None)
-        extra["LOA_m"] = Lm
-    elif any(v is not None for v in len_candidates_ft):
-        Lf = max(v for v in len_candidates_ft if v is not None)
+    if any(v is not None for v in len_m):
+        extra["LOA_m"] = max(v for v in len_m if v is not None)
+    elif any(v is not None for v in len_ft):
+        Lf = max(v for v in len_ft if v is not None)
         extra["LengthInFeet"] = Lf
         extra["LOA_m"] = Lf * 0.3048
 
-    if any(v is not None for v in brd_candidates_m):
-        Bm = max(v for v in brd_candidates_m if v is not None)
-        extra["Beam_m"] = Bm
-    elif any(v is not None for v in brd_candidates_ft):
-        Bf = max(v for v in brd_candidates_ft if v is not None)
+    if any(v is not None for v in brd_m):
+        extra["Beam_m"] = max(v for v in brd_m if v is not None)
+    elif any(v is not None for v in brd_ft):
+        Bf = max(v for v in brd_ft if v is not None)
         extra["BreadthInFeet"] = Bf
         extra["Beam_m"] = Bf * 0.3048
 
-    if any(v is not None for v in dep_candidates_m):
-        Dm = max(v for v in dep_candidates_m if v is not None)
-        extra["Depth_m"] = Dm
-    elif any(v is not None for v in dep_candidates_ft):
-        Df = max(v for v in dep_candidates_ft if v is not None)
+    if any(v is not None for v in dep_m):
+        extra["Depth_m"] = max(v for v in dep_m if v is not None)
+    elif any(v is not None for v in dep_ft):
+        Df = max(v for v in dep_ft if v is not None)
         extra["DepthInFeet"] = Df
         extra["Depth_m"] = Df * 0.3048
 
-    # Draft is not in the published Dimensions list, but handle if present
+    # Optional Draft if present
     draft_ft_vals = [to_float(pick_any(d, "DraftInFeet", "MaxDraftInFeet", "Draft_ft")) for d in dims]
     draft_m_vals  = [to_float(pick_any(d, "DraftInMeters", "MaxDraftInMeters", "Draft_m")) for d in dims]
     if any(v is not None for v in draft_m_vals):
         extra["Draft_m"] = max(v for v in draft_m_vals if v is not None)
     elif any(v is not None for v in draft_ft_vals):
-        Df = max(v for v in draft_ft_vals if v is not None)
-        extra["Draft_m"] = Df * 0.3048
+        df = max(v for v in draft_ft_vals if v is not None)
+        extra["Draft_m"] = df * 0.3048
 
-    # 5) Tonnage: prefer explicit Gross/Net, rank by label quality
-    def to_float(x: Any) -> Optional[float]:
-        try: return float(str(x).strip())
-        except Exception: return None
-    
+    # If dimensions dataset empty, try textual fields in base (e.g., "1103.30 ft")
+    if "LOA_m" not in extra or extra["LOA_m"] is None:
+        Lf_txt = to_float(base.get("Length"))
+        if Lf_txt is not None:
+            extra["LOA_m"] = Lf_txt * 0.3048
+    if "Beam_m" not in extra or extra["Beam_m"] is None:
+        Bf_txt = to_float(base.get("Breadth"))
+        if Bf_txt is not None:
+            extra["Beam_m"] = Bf_txt * 0.3048
+    if "Depth_m" not in extra or extra["Depth_m"] is None:
+        Df_txt = to_float(base.get("Depth"))
+        if Df_txt is not None:
+            extra["Depth_m"] = Df_txt * 0.3048
+
+    # 5) Tonnage (rank common labels; fallback to summary/particulars)
     def label(t: Dict[str, Any]) -> str:
         return str(t.get("TonnageTypeLookupName", "")).strip().lower()
-    
     def mw(t: Dict[str, Any]) -> Optional[float]:
         return to_float(t.get("MeasureOfWeight"))
-    
     def best_by_labels(rows: List[Dict[str, Any]], prefs: List[str]) -> Optional[float]:
-        # Return the amount from the first preference that has any values, else None
         for p in prefs:
             vals = [mw(r) for r in rows if p in label(r)]
             vals = [v for v in vals if v is not None]
             if vals:
                 return max(vals)
         return None
-    
+
     gross_prefs = [
         "gross tonnage (itc)", "gross tonnage",
-        "gross registered tonnage", "grt", "gt"
+        "gross registered tonnage", "gross ton", "grt", "gt",
+        "convention (subpart b), gross ton",
     ]
     net_prefs = [
         "net tonnage (itc)", "net tonnage",
-        "net registered tonnage", "nrt", "nt"
+        "net registered tonnage", "net ton", "nrt", "nt",
+        "convention (subpart b), net ton",
     ]
-    
+
     gross = best_by_labels(tons, gross_prefs)
     net   = best_by_labels(tons, net_prefs)
-    
-    # Fallback: any numeric if label matching didn’t hit
+
     if gross is None:
         gross = max((v for v in (mw(t) for t in tons) if v is not None), default=None)
     if net is None:
         net = max((v for v in (mw(t) for t in tons) if v is not None), default=None)
-    
+
     if gross is not None:
         extra["GrossTonnage"] = gross
     if net is not None:
         extra["NetTonnage"] = net
-    
-    # Final fallback to summary/particulars if tonnage dataset was sparse
+
+    # Final fallback to base
     if "GrossTonnage" not in extra or extra["GrossTonnage"] is None:
         extra["GrossTonnage"] = (
             to_float(base.get("GrossTonnage"))
@@ -497,7 +517,7 @@ def vessels_details(
             or to_float(base.get("NT"))
         )
 
-    # YearBuilt as int (avoid 0)
+    # YearBuilt from known fields (avoid zero)
     yb = None
     for key in ("ConstructionCompletedYear", "YearBuilt", "BuildYear"):
         try:
