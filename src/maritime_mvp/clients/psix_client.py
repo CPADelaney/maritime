@@ -1,26 +1,15 @@
-# src/maritime_mvp/clients/psix_client.py
 """
 PSIX client — resilient SOAP wrapper + robust XML parser.
 
-Features:
-- Namespace-agnostic SOAP result parsing (handles https/http namespaces and prefixes).
-- Unescapes embedded DataSet payloads (diffgram/NewDataSet/TableN).
-- Normalizes common columns (VesselID/Name/CallSign/Flag/Type/IMO/etc.).
-- Exposes core ops used by the app:
-  * getVesselSummary (with <VesselID>0</VesselID> when searching)
-  * getVesselParticulars
-  * getVesselDimensions
-  * getVesselTonnage
-  * getVesselDocuments
+- Preserves embedded diffgram/NewDataSet XML inside <*Result> when present.
+- Falls back to unescaped XML string payloads.
+- Optional fallback to *XMLString operations.
+- Namespace-agnostic parsing and Table/TableN extraction.
 
-References:
-- PSIX SOAP ops and request/response examples: getVesselTonnage, getVesselDocuments
-  [cgmix.uscg.mil](https://cgmix.uscg.mil/xml/PSIXData.asmx?op=getVesselTonnage),
-  [cgmix.uscg.mil](https://cgmix.uscg.mil/xml/PSIXData.asmx?op=getVesselDocuments)
-- PSIX Vessel Search UI (for manual verification)
-  [cgmix.uscg.mil](https://cgmix.uscg.mil/PSIX/PSIXSearch.aspx)
-- PSIX search behavior (wildcards, max rows)
-  [cgmix.uscg.mil](https://cgmix.uscg.mil/PSIX/Definitions.aspx)
+USCG PSIX web service returns .NET DataSets from the * dataset ops, and an XML
+string from the *XMLString ops (documented on cgmix.uscg.mil) — behavior can vary
+by operation and server patch level. See e.g. getOperationControls docs:
+https://cgmix.uscg.mil/xml/PSIXData.asmx?op=getOperationControls
 """
 from __future__ import annotations
 
@@ -47,12 +36,21 @@ REQUEST_TIMEOUT = int(os.getenv("REQUEST_TIMEOUT", "30"))
 _CACHE_TTL = int(os.getenv("PSIX_CACHE_TTL", "600"))  # seconds
 _CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 
-# Namespaces PSIX commonly uses; try https first, then http
-_NS_TRY = ["https://cgmix.uscg.mil", "http://cgmix.uscg.mil"]
+# Namespaces/roots to try (asmx servers can be picky about SOAPAction)
+_NS_TRY = [
+    "https://cgmix.uscg.mil",
+    "http://cgmix.uscg.mil",
+]
+# SOAPAction variants to try for each ns/op
+def _soap_actions(ns: str, op: str) -> List[str]:
+    return [
+        f"{ns}/{op}",
+        f"{ns}/xml/PSIXData.asmx/{op}",
+        f"{ns}/PSIXData.asmx/{op}",
+    ]
 
 
 def _ln(tag: str) -> str:
-    """XPath helper for local-name() matching."""
     return f"local-name()='{tag}'"
 
 
@@ -85,19 +83,21 @@ class PsixClient:
         timeout: int | None = None,
         retries: int = 1,
         backoff_s: float = 0.5,
+        try_xmlstring_fallback: bool = True,
     ) -> None:
         self.url = url or PSIX_URL
         self.verify_ssl = VERIFY_SSL if verify_ssl is None else verify_ssl
         self.timeout = REQUEST_TIMEOUT if timeout is None else timeout
         self.retries = max(0, retries)
         self.backoff_s = max(0.0, backoff_s)
+        self.try_xmlstring_fallback = bool(try_xmlstring_fallback)
 
         self.session = requests.Session()
         self.session.verify = self.verify_ssl
         self.session.headers.update({
             "Content-Type": "text/xml; charset=utf-8",
             "Accept": "text/xml, application/soap+xml",
-            "User-Agent": "MaritimeMVP/0.4 (+PSIX)",
+            "User-Agent": "MaritimeMVP/0.5 (+PSIX)",
         })
 
         logger.info("PSIX client initialized url=%s verify_ssl=%s timeout=%ss", self.url, self.verify_ssl, self.timeout)
@@ -114,57 +114,120 @@ class PsixClient:
   </soap:Body>
 </soap:Envelope>"""
 
+    def _post_soap_once(self, op: str, body_xml: str) -> Optional[str]:
+        """
+        Try posting a SOAP request once per ns/action combo; return raw response text on success, else None.
+        """
+        for ns in _NS_TRY:
+            envelope = self._soap_envelope(ns, op, body_xml)
+            for action in _soap_actions(ns, op):
+                try:
+                    resp = self.session.post(
+                        self.url,
+                        data=envelope,
+                        headers={"SOAPAction": f'"{action}"'},
+                        timeout=self.timeout,
+                    )
+                    resp.raise_for_status()
+                    return resp.text or ""
+                except requests.RequestException:
+                    continue
+        return None
+
     def _post_soap(self, op: str, body_xml: str) -> Dict[str, Any]:
         """
-        Post a SOAP request for `op` with `body_xml` content under the op node.
-        - Tries https/http namespaces.
-        - Returns {'Table': [...]} or {'Table': []} on failure.
+        Post SOAP for `op` and parse the DataSet rows robustly:
+        - Prefer embedded XML (diffgram/NewDataSet) under <*Result>.
+        - Fallback to unescaping string payloads.
+        - Optional retry using the *XMLString op if no rows found.
+        Returns {'Table': [...]} or {'Table': []}.
         """
-        # Cache key
+        # Cache
         ck = f"psix::{op}::{body_xml}"
         cached = _cache_get(ck)
         if cached is not None:
             return cached
 
+        attempts = max(1, self.retries + 1)
         last_err: Optional[str] = None
-        for ns in _NS_TRY:
-            soap_action = f'"{ns}/{op}"'
-            envelope = self._soap_envelope(ns, op, body_xml)
 
-            attempt = 0
-            while True:
-                try:
-                    resp = self.session.post(self.url, data=envelope, headers={"SOAPAction": soap_action}, timeout=self.timeout)
-                    resp.raise_for_status()
-                    txt = resp.text or ""
+        for attempt in range(attempts):
+            try:
+                raw = self._post_soap_once(op, body_xml)
+                if not raw:
+                    last_err = "no HTTP response or all SOAPAction variants failed"
+                    raise RuntimeError(last_err)
 
-                    # Parse XML; find <*Result> by local-name
-                    root = ET.fromstring(txt.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
-                    result_nodes = root.xpath(f".//*[local-name()='{op}Result']")
-                    if not result_nodes:
-                        last_err = f"{op}Result node not found (ns={ns})"
-                        break
+                root = ET.fromstring(raw.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
+                result_nodes = root.xpath(f".//*[local-name()='{op}Result']")
+                if not result_nodes:
+                    last_err = f"{op}Result node not found"
+                    raise RuntimeError(last_err)
 
-                    payload = "".join(result_nodes[0].itertext())
-                    if "&lt;" in payload or "&amp;lt;" in payload:
+                result_node = result_nodes[0]
+
+                # 1) Embedded XML dataset under Result?
+                ds_node = None
+                # Prefer diffgram, then NewDataSet
+                diff_nodes = result_node.xpath(".//*[local-name()='diffgram']")
+                nds_nodes = result_node.xpath(".//*[local-name()='NewDataSet']")
+                if diff_nodes:
+                    ds_node = diff_nodes[0]
+                elif nds_nodes:
+                    ds_node = nds_nodes[0]
+
+                if ds_node is not None:
+                    payload = ET.tostring(ds_node, encoding="unicode")
+                else:
+                    # 2) String content variant (unescape)
+                    # Some ASMXs wrap it in <string> or put text directly in *Result
+                    str_nodes = result_node.xpath(".//*[local-name()='string']") or [result_node]
+                    payload = "".join(str_nodes[0].itertext()) if str_nodes else "".join(result_node.itertext())
+                    if payload and ("&lt;" in payload or "&amp;lt;" in payload):
                         payload = _html.unescape(payload)
 
-                    rows = self._extract_rows(payload)
-                    data = {"Table": rows}
-                    if rows:
-                        _cache_set(ck, data)        # cache only non-empty
-                    # else: don't cache empties (or cache briefly if you prefer)
-                    return data
+                rows = self._extract_rows(payload)
+                data = {"Table": rows}
+                if rows:
+                    _cache_set(ck, data)
+                else:
+                    # Helpful debug
+                    snippet = (payload or "")[:240].replace("\n", " ").strip()
+                    logger.debug("PSIX %s returned no rows; payload head=%r", op, snippet)
+                return data
 
-                except requests.RequestException as e:
-                    last_err = f"HTTP error: {e!s}"
-                except Exception as e:
-                    last_err = f"Parse error: {e!s}"
+            except Exception as e:
+                last_err = f"{type(e).__name__}: {e!s}"
+                if attempt < attempts - 1:
+                    time.sleep(self.backoff_s * (attempt + 1))
 
-                if attempt >= self.retries:
-                    break
-                attempt += 1
-                time.sleep(self.backoff_s * attempt)
+        # Primary op failed or produced no rows; optionally try *XMLString variant once
+        if self.try_xmlstring_fallback and not op.endswith("XMLString"):
+            try_op = f"{op}XMLString"
+            try_ck = f"psix::{try_op}::{body_xml}"
+            cached2 = _cache_get(try_ck)
+            if cached2 is not None:
+                return cached2
+
+            try:
+                raw = self._post_soap_once(try_op, body_xml)
+                if raw:
+                    root = ET.fromstring(raw.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
+                    result_nodes = root.xpath(f".//*[local-name()='{try_op}Result']")
+                    if result_nodes:
+                        txt = "".join(result_nodes[0].itertext())
+                        if txt and ("&lt;" in txt or "&amp;lt;" in txt):
+                            txt = _html.unescape(txt)
+                        rows = self._extract_rows(txt)
+                        data = {"Table": rows}
+                        if rows:
+                            _cache_set(try_ck, data)
+                        else:
+                            snippet = (txt or "")[:240].replace("\n", " ").strip()
+                            logger.debug("PSIX %s fallback returned no rows; payload head=%r", try_op, snippet)
+                        return data
+            except Exception as e:  # pragma: no cover
+                logger.debug("PSIX %s XMLString fallback failed: %s", op, e)
 
         if last_err:
             logger.debug("PSIX _post_soap(%s) failed: %s", op, last_err)
@@ -185,8 +248,9 @@ class PsixClient:
         build_year: str = "",
     ) -> Dict[str, Any]:
         """
-        Wrapper for getVesselSummary.
-        Note: When not looking up a specific ID, PSIX requires <VesselID>0</VesselID>.
+        getVesselSummary (dataset), with <VesselID>0</VesselID> when searching by attributes.
+        Service docs and field list are published by USCG PSIX (returns .NET DataSet)
+        on cgmix.uscg.mil.
         """
         vid = int(vessel_id) if vessel_id is not None else 0
         inner = (
@@ -217,22 +281,97 @@ class PsixClient:
         inner = f"<VesselID>{int(vessel_id)}</VesselID>"
         return self._post_soap("getVesselDocuments", inner)
 
-    # Stubs for other PSIX ops you may add later:
-    # def get_vessel_cases(self, vessel_id: int) -> Dict[str, Any]: ...
-    # def get_operation_controls(self, activity_id: int) -> Dict[str, Any]: ...
-    # def get_vessel_deficiencies(self, vessel_id: int) -> Dict[str, Any]: ...
-
     # ---------------- Parsing helpers ----------------
+
+    @staticmethod
+    def _local(tag: str) -> str:
+        if not tag:
+            return ""
+        return re.sub(r"^\{.*\}", "", tag)
+
+    def _slice_to_dataset(self, s: str) -> str:
+        """
+        Pull the inner dataset-like fragment:
+        - diffgr:diffgram ... /diffgr:diffgram
+        - NewDataSet ... /NewDataSet
+        - Concatenated TableN rows
+        """
+        m = re.search(r"<diffgr:diffgram[^>]*>.*?</diffgr:diffgram>", s, re.IGNORECASE | re.DOTALL)
+        if m:
+            return m.group(0)
+        m = re.search(r"<NewDataSet[^>]*>.*?</NewDataSet>", s, re.IGNORECASE | re.DOTALL)
+        if m:
+            return m.group(0)
+        m = re.search(r"(?:<Table\d?[^>]*>.*?</Table\d?>)+", s, re.IGNORECASE | re.DOTALL)
+        if m:
+            return f"<NewDataSet>{m.group(0)}</NewDataSet>"
+        return s
+
+    def _elem_to_record(self, elem: ET._Element) -> Dict[str, Any]:
+        rec: Dict[str, Any] = {}
+
+        # Direct children -> columns
+        for child in elem:
+            tag = self._local(child.tag)
+            if not tag:
+                continue
+            val = "".join(child.itertext()).strip()
+            if not val or val.lower() == "none":
+                continue
+            # Strip CDATA wrapper if present
+            if val.startswith("<![CDATA[") and val.endswith("]]>"):
+                val = val[9:-3]
+            rec[tag] = val
+
+        # Non-clobbering descendants (fill gaps only)
+        for sub in elem.xpath(".//*"):
+            tag = self._local(sub.tag)
+            if not tag or tag in rec:
+                continue
+            val = "".join(sub.itertext()).strip()
+            if val and val.lower() != "none":
+                rec[tag] = val
+
+        return rec
+
+    def _normalize_row(self, rec: Dict[str, Any]) -> None:
+        """Populate common display keys if missing (case/alias tolerant)."""
+        def first(*keys: str) -> Optional[str]:
+            for k in keys:
+                v = rec.get(k)
+                if v:
+                    return v
+            return None
+
+        rec.setdefault("VesselID", first("VesselID", "VesselId", "VesselNumber", "ID", "id", "vesselid"))
+        rec.setdefault("VesselName", first("VesselName", "Name", "name", "vesselname", "Vessel_Name"))
+
+        rec.setdefault("CallSign", first("CallSign", "VesselCallSign", "RadioCallSign", "Call_Sign", "callsign", "radio_callsign"))
+        rec.setdefault("Flag", first(
+            "Flag", "CountryLookupName", "CountryOfRegistry", "FlagName",
+            "FlagOfRegistry", "FlagState", "FlagCountry", "Country", "FlagCode", "flag"
+        ))
+        rec.setdefault("VesselType", first(
+            "VesselType", "ServiceType", "VesselService", "VesselTypeDescription", "ShipType", "Type", "vesseltype"
+        ))
+        rec.setdefault("GrossTonnage", first("GrossTonnage", "GrossTons", "GT", "Gross_Tonnage", "grosstonnage", "GrossRegisteredTonnage"))
+        rec.setdefault("YearBuilt", first("YearBuilt", "ConstructionCompletedYear", "BuildYear", "YearOfBuild"))
+        rec.setdefault("Status", first("Status", "StatusLookupName", "VesselStatus"))
+
+        rec.setdefault("IMONumber", first("IMONumber", "IMO", "IMO_Number"))
+        rec.setdefault("OfficialNumber", first("OfficialNumber", "USOfficialNumber", "US_Official_Number"))
+        rec.setdefault("PrimaryIdentification", first("PrimaryIdentification", "OfficialNumber", "IMONumber"))
 
     def _extract_rows(self, xml_payload: str) -> List[Dict[str, Any]]:
         """
         Accepts:
-          - diffgram/NewDataSet
+          - diffgram/NewDataSet subtree
           - plain NewDataSet
-          - inline Table/TableN fragments
-        Returns a list of dicts; all raw fields preserved; common display fields normalized.
+          - concatenated Table/TableN fragments
+          - or an outer wrapper with those inside
+        Returns a list of dicts with normalized display fields.
         """
-        frag = self._slice_to_dataset(xml_payload)
+        frag = self._slice_to_dataset(xml_payload or "")
 
         parser = ET.XMLParser(recover=True, huge_tree=True)
         try:
@@ -263,88 +402,5 @@ class PsixClient:
                     self._normalize_row(rec)
                     rows.append(rec)
 
-        # Keep rows with at least a name or id
         rows = [r for r in rows if r.get("VesselName") or r.get("VesselID")]
         return rows
-
-    def _elem_to_record(self, elem: ET._Element) -> Dict[str, Any]:
-        rec: Dict[str, Any] = {}
-
-        # Direct children as columns
-        for child in elem:
-            tag = self._local(child.tag)
-            if not tag:
-                continue
-            val = "".join(child.itertext()).strip()
-            if not val or val.lower() == "none":
-                continue
-            # Strip CDATA
-            if val.startswith("<![CDATA[") and val.endswith("]]>"):
-                val = val[9:-3]
-            rec[tag] = val
-
-        # Deeper descendants (without clobbering existing)
-        for sub in elem.xpath(".//*"):
-            tag = self._local(sub.tag)
-            if not tag or tag in rec:
-                continue
-            val = "".join(sub.itertext()).strip()
-            if val and val.lower() != "none":
-                rec[tag] = val
-
-        return rec
-
-    def _normalize_row(self, rec: Dict[str, Any]) -> None:
-        """Populate common display keys if missing."""
-        def first(*keys: str) -> Optional[str]:
-            for k in keys:
-                v = rec.get(k)
-                if v:
-                    return v
-            return None
-
-        # IDs & name
-        rec.setdefault("VesselID", first("VesselID", "VesselId", "VesselNumber", "ID", "id", "vesselid"))
-        rec.setdefault("VesselName", first("VesselName", "Name", "name", "vesselname", "Vessel_Name"))
-
-        # Display fields
-        rec.setdefault("CallSign", first("CallSign", "VesselCallSign", "RadioCallSign", "Call_Sign", "callsign", "radio_callsign"))
-        rec.setdefault("Flag", first(
-            "Flag", "CountryLookupName", "CountryOfRegistry", "FlagName",
-            "FlagOfRegistry", "FlagState", "FlagCountry", "Country", "FlagCode", "flag"
-        ))
-        rec.setdefault("VesselType", first(
-            "VesselType", "ServiceType", "VesselService", "VesselTypeDescription", "ShipType", "Type", "vesseltype"
-        ))
-        rec.setdefault("GrossTonnage", first("GrossTonnage", "GrossTons", "GT", "Gross_Tonnage", "grosstonnage", "GrossRegisteredTonnage"))
-        rec.setdefault("YearBuilt", first("YearBuilt", "ConstructionCompletedYear", "BuildYear", "YearOfBuild"))
-        rec.setdefault("Status", first("Status", "StatusLookupName", "VesselStatus"))
-
-        # Common identifiers
-        rec.setdefault("IMONumber", first("IMONumber", "IMO", "IMO_Number"))
-        rec.setdefault("OfficialNumber", first("OfficialNumber", "USOfficialNumber", "US_Official_Number"))
-        rec.setdefault("PrimaryIdentification", first("PrimaryIdentification", "OfficialNumber", "IMONumber"))
-
-    @staticmethod
-    def _local(tag: str) -> str:
-        if not tag:
-            return ""
-        return re.sub(r"^\{.*\}", "", tag)
-
-    def _slice_to_dataset(self, s: str) -> str:
-        """
-        Pull the inner dataset-like fragment:
-        - diffgr:diffgram ... /diffgr:diffgram
-        - NewDataSet ... /NewDataSet
-        - Concatenated TableN rows
-        """
-        m = re.search(r"<diffgr:diffgram[^>]*>.*?</diffgr:diffgram>", s, re.IGNORECASE | re.DOTALL)
-        if m:
-            return m.group(0)
-        m = re.search(r"<NewDataSet[^>]*>.*?</NewDataSet>", s, re.IGNORECASE | re.DOTALL)
-        if m:
-            return m.group(0)
-        m = re.search(r"(?:<Table\d?[^>]*>.*?</Table\d?>)+", s, re.IGNORECASE | re.DOTALL)
-        if m:
-            return f"<NewDataSet>{m.group(0)}</NewDataSet>"
-        return s
