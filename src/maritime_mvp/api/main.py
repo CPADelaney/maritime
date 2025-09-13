@@ -519,14 +519,14 @@ def vessels_details(
     ]
     
     # Soft-match regexes (use word boundaries; DO NOT use bare 'nt')
-    G_INCLUDE_RE = _re.compile(r"\b(gross|gt|grt)\b")
-    N_INCLUDE_RE = _re.compile(r"\b(net|nrt|net(?:[\s.-]*reg(?:istered)?)[\s.-]*ton(?:nage)?)\b")
+    G_INCLUDE_RE = re.compile(r"\b(gross|gt|grt)\b")
+    N_INCLUDE_RE = re.compile(r"\b(net|nrt|net(?:[\s.-]*reg(?:istered)?)[\s.-]*ton(?:nage)?)\b")
     
-    EXCLUDE_RE   = _re.compile(r"\b(deadweight|dwt|displacement|light\s*ship|lts|summer|suez|panama)\b")
+    EXCLUDE_RE   = re.compile(r"\b(deadweight|dwt|displacement|light\s*ship|lts|summer|suez|panama)\b")
     
     def pick_tonnage(rows: List[Dict[str, Any]],
                      aliases: List[str],
-                     include_re: _re.Pattern[str]) -> Optional[float]:
+                     include_re: re.Pattern[str]) -> Optional[float]:
         # 1) Strict alias match, in order
         for a in aliases:
             vals = [mw(t) for t in rows if _label(t.get("TonnageTypeLookupName")) == a]
