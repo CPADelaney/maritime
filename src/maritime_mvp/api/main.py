@@ -397,7 +397,7 @@ def vessels_details(
     if parts:
         base.update(parts[0])
 
-    # 4) Dimensions (prefer meters, else convert feet)
+    # 4) Dimensions (prefer meters, else convert feet). Tolerant parse.
     _num_re = re.compile(r"[-+]?\d+(?:[,\d]*\d)?(?:\.\d+)?")
 
     def to_float(x: Any) -> Optional[float]:
@@ -547,6 +547,25 @@ def vessels_details(
     if net is not None:
         extra["NetTonnage"] = net
 
+    # --- Fallback tonnage from summary/particulars if tonnage rows didn't yield a match ---
+    if extra.get("GrossTonnage") is None:
+        extra["GrossTonnage"] = (
+            to_float(base.get("GrossTonnage"))
+            or to_float(base.get("GrossRegisteredTonnage"))
+            or to_float(base.get("GrossTons"))
+            or to_float(base.get("GT"))
+        )
+
+    if extra.get("NetTonnage") is None:
+        extra["NetTonnage"] = (
+            to_float(base.get("NetTonnage"))
+            or to_float(base.get("NetRegisteredTonnage"))
+            or to_float(base.get("NetTons"))
+            or to_float(base.get("NT"))
+        )
+
+    logger.debug("Chosen tonnage fallback: GT=%s NT=%s", extra.get("GrossTonnage"), extra.get("NetTonnage"))
+
     # 6) YearBuilt from common fields (avoid zero)
     yb = None
     for key in ("ConstructionCompletedYear", "YearBuilt", "BuildYear"):
@@ -575,6 +594,7 @@ def vessels_details(
         "_dimension_rows": dims,
     }
     return {"rows": [merged]}
+
 
 
 
