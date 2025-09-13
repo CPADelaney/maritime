@@ -23,7 +23,7 @@ import warnings
 from typing import Any, Dict, List, Optional, Tuple
 
 import requests
-import xml.etree.ElementTree as ET  # <- stdlib only
+from lxml import etree as ET
 
 warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 logger = logging.getLogger(__name__)
@@ -49,6 +49,10 @@ def _soap_actions(ns: str, op: str) -> List[str]:
         f"{ns}/xml/PSIXData.asmx/{op}",
         f"{ns}/PSIXData.asmx/{op}",
     ]
+
+
+def _ln(tag: str) -> str:
+    return f"local-name()='{tag}'"
 
 
 def _cache_get(key: str) -> Optional[Dict[str, Any]]:
@@ -97,14 +101,8 @@ class PsixClient:
             "User-Agent": "MaritimeMVP/0.5 (+PSIX)",
         })
 
-        # targeted debug of raw SOAP payloads by callsign / VesselID
-        self.debug_callsign = (os.getenv("PSIX_DEBUG_CALLSIGN") or "").strip().upper() or None
-        self.debug_dir = os.getenv("PSIX_DEBUG_DIR") or None
-        self._debug_vids: set[int] = set()
-
         logger.info("PSIX client initialized url=%s verify_ssl=%s timeout=%ss", self.url, self.verify_ssl, self.timeout)
 
-    # ---------- small utils ----------
     @staticmethod
     def _digits(s: str) -> str:
         return re.sub(r"\D", "", s or "")
@@ -116,35 +114,6 @@ class PsixClient:
             return False
         chk = sum(int(s[i]) * (7 - i) for i in range(6)) % 10
         return chk == int(s[6])
-
-    @staticmethod
-    def _local(tag: str) -> str:
-        if not tag:
-            return ""
-        return tag.rsplit("}", 1)[-1] if "}" in tag else tag
-
-    def debug_write(self, op: str, payload: str, vid: Optional[int] = None, tag: Optional[str] = None) -> None:
-        if not payload:
-            return
-        try:
-            if self.debug_dir:
-                os.makedirs(self.debug_dir, exist_ok=True)
-                ts = time.strftime("%Y%m%d-%H%M%S")
-                vid_part = f"vid{vid}_" if vid is not None else ""
-                tag_part = f"{tag}_" if tag else ""
-                fn = os.path.join(self.debug_dir, f"psix_raw_{op}_{vid_part}{tag_part}{ts}.xml")
-                with open(fn, "w", encoding="utf-8") as f:
-                    f.write(payload)
-                logger.info("PSIX raw saved: %s", fn)
-            else:
-                snippet = (payload[:1000]).replace("\n", " ")
-                logger.debug("PSIX RAW %s %s%s: %s",
-                             op,
-                             f"vid={vid} " if vid is not None else "",
-                             f"[{tag}] " if tag else "",
-                             snippet)
-        except Exception:
-            logger.exception("Failed to write PSIX raw payload for %s", op)
 
     # ---------------- SOAP core ----------------
 
@@ -184,163 +153,92 @@ class PsixClient:
         - Prefer embedded XML (diffgram/NewDataSet) under <*Result>.
         - Fallback to unescaping string payloads.
         - If the dataset op returns zero rows, try the *XMLString variant once.
-        - Cache only non-empty rowsets.
-        - Optional targeted debug dumps via PSIX_DEBUG_CALLSIGN / PSIX_DEBUG_DIR.
         Returns {'Table': [...]} or {'Table': []}.
         """
+        # Cache
         ck = f"psix::{op}::{body_xml}"
         cached = _cache_get(ck)
         if cached is not None:
             return cached
-
-        # detect VesselID in the request body for debug routing
-        vid_in_body: Optional[int] = None
-        try:
-            mvid = re.search(r"<\s*VesselID\s*>\s*(\d+)\s*<\s*/\s*VesselID\s*>", body_xml, re.I)
-            if mvid:
-                vid_in_body = int(mvid.group(1))
-        except Exception:
-            vid_in_body = None
-
+    
         attempts = max(1, self.retries + 1)
         last_err: Optional[str] = None
-
+    
         for attempt in range(attempts):
             try:
                 raw = self._post_soap_once(op, body_xml)
                 if not raw:
                     last_err = "no HTTP response or all SOAPAction variants failed"
                     raise RuntimeError(last_err)
-
-                root = ET.fromstring(raw)
-
-                # find <opResult> regardless of namespaces
-                result_node = None
-                want = f"{op}Result"
-                for el in root.iter():
-                    if self._local(el.tag) == want:
-                        result_node = el
-                        break
-                if result_node is None:
+    
+                root = ET.fromstring(raw.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
+                result_nodes = root.xpath(f".//*[local-name()='{op}Result']")
+                if not result_nodes:
                     last_err = f"{op}Result node not found"
                     raise RuntimeError(last_err)
-
-                # Prefer embedded diffgram/NewDataSet
+    
+                result_node = result_nodes[0]
+    
+                # 1) Embedded XML dataset under Result?
                 ds_node = None
-                for el in result_node.iter():
-                    ln = self._local(el.tag).lower()
-                    if ln in ("diffgram", "newdataset"):
-                        ds_node = el
-                        break
-
+                diff_nodes = result_node.xpath(".//*[local-name()='diffgram']")
+                nds_nodes = result_node.xpath(".//*[local-name()='NewDataSet']")
+                if diff_nodes:
+                    ds_node = diff_nodes[0]
+                elif nds_nodes:
+                    ds_node = nds_nodes[0]
+    
                 if ds_node is not None:
                     payload = ET.tostring(ds_node, encoding="unicode")
                 else:
-                    # Fallback to text content (possibly escaped XML)
-                    parts: List[str] = []
-                    for el in result_node.iter():
-                        if el.text:
-                            parts.append(el.text)
-                    payload = "".join(parts)
+                    # 2) String content variant (unescape)
+                    str_nodes = result_node.xpath(".//*[local-name()='string']") or [result_node]
+                    payload = "".join(str_nodes[0].itertext()) if str_nodes else "".join(result_node.itertext())
                     if payload and ("&lt;" in payload or "&amp;lt;" in payload):
                         payload = _html.unescape(payload)
-
-                # ---- callsign-targeted debug on summary; vid-targeted on others
-                # (do before row extraction too)
-                # NOTE: we dump after extraction as well; this early point keeps a copy even if parsing fails.
-
+    
                 rows = self._extract_rows(payload)
-
-                # Debug: if this is a summary and callsign matches, dump and remember VesselID(s)
-                if op == "getVesselSummary" and self.debug_callsign and rows:
-                    csu = self.debug_callsign
-                    matched_vids: set[int] = set()
-                    for r in rows:
-                        rcs = str(r.get("CallSign") or r.get("VesselCallSign") or "").strip().upper()
-                        if rcs and rcs == csu:
-                            rid = r.get("VesselID") or r.get("VesselId") or r.get("vesselid")
-                            try:
-                                matched_vids.add(int(str(rid)))
-                            except Exception:
-                                pass
-                    if matched_vids:
-                        self._debug_vids.update(matched_vids)
-                        self.debug_write(op, payload, None, tag=f"callsign_{csu}")
-
-                # Debug: if this op targets a tracked VesselID, dump raw
-                if vid_in_body is not None and vid_in_body in self._debug_vids:
-                    self.debug_write(op, payload, vid_in_body)
-
                 if rows:
                     data = {"Table": rows}
-                    _cache_set(ck, data)  # cache only non-empty
+                    _cache_set(ck, data)
                     return data
-
+    
                 # No rows from dataset op → try XMLString variant once
                 snippet = (payload or "")[:240].replace("\n", " ").strip()
                 logger.debug("PSIX %s returned no rows; payload head=%r", op, snippet)
-
+    
                 if self.try_xmlstring_fallback and not op.endswith("XMLString"):
                     try_op = f"{op}XMLString"
                     try_ck = f"psix::{try_op}::{body_xml}"
                     cached2 = _cache_get(try_ck)
                     if cached2 is not None:
                         return cached2
-
+    
                     raw2 = self._post_soap_once(try_op, body_xml)
                     if raw2:
-                        root2 = ET.fromstring(raw2)
-                        result_node2 = None
-                        want2 = f"{try_op}Result"
-                        for el in root2.iter():
-                            if self._local(el.tag) == want2:
-                                result_node2 = el
-                                break
-                        if result_node2 is not None:
-                            parts2: List[str] = []
-                            for el in result_node2.iter():
-                                if el.text:
-                                    parts2.append(el.text)
-                            txt = "".join(parts2)
+                        root2 = ET.fromstring(raw2.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
+                        result_nodes2 = root2.xpath(f".//*[local-name()='{try_op}Result']")
+                        if result_nodes2:
+                            txt = "".join(result_nodes2[0].itertext())
                             if txt and ("&lt;" in txt or "&amp;lt;" in txt):
                                 txt = _html.unescape(txt)
                             rows2 = self._extract_rows(txt)
-
-                            # Debug on fallback too
-                            if op == "getVesselSummary" and self.debug_callsign and rows2:
-                                csu = self.debug_callsign
-                                matched_vids2: set[int] = set()
-                                for r in rows2:
-                                    rcs = str(r.get("CallSign") or r.get("VesselCallSign") or "").strip().upper()
-                                    if rcs and rcs == csu:
-                                        rid = r.get("VesselID") or r.get("VesselId") or r.get("vesselid")
-                                        try:
-                                            matched_vids2.add(int(str(rid)))
-                                        except Exception:
-                                            pass
-                                if matched_vids2:
-                                    self._debug_vids.update(matched_vids2)
-                                    self.debug_write(try_op, txt, None, tag=f"callsign_{csu}")
-
-                            if vid_in_body is not None and vid_in_body in self._debug_vids:
-                                self.debug_write(try_op, txt, vid_in_body)
-
                             data2 = {"Table": rows2}
                             if rows2:
-                                _cache_set(try_ck, data2)  # cache only non-empty
+                                _cache_set(try_ck, data2)
                                 return data2
                             else:
                                 snippet2 = (txt or "")[:240].replace("\n", " ").strip()
                                 logger.debug("PSIX %s fallback returned no rows; head=%r", try_op, snippet2)
-
+    
                 # Still nothing; return empty
                 return {"Table": []}
-
+    
             except Exception as e:
                 last_err = f"{type(e).__name__}: {e!s}"
                 if attempt < attempts - 1:
                     time.sleep(self.backoff_s * (attempt + 1))
-
+    
         if last_err:
             logger.debug("PSIX _post_soap(%s) failed: %s", op, last_err)
         return {"Table": []}
@@ -360,8 +258,9 @@ class PsixClient:
         build_year: str = "",
     ) -> Dict[str, Any]:
         """
-        Wrapper for getVesselSummary.
-        Note: When not looking up a specific ID, PSIX requires <VesselID>0</VesselID>.
+        getVesselSummary (dataset), with <VesselID>0</VesselID> when searching by attributes.
+        Service docs and field list are published by USCG PSIX (returns .NET DataSet)
+        on cgmix.uscg.mil.
         """
         vid = int(vessel_id) if vessel_id is not None else 0
         inner = (
@@ -394,6 +293,12 @@ class PsixClient:
 
     # ---------------- Parsing helpers ----------------
 
+    @staticmethod
+    def _local(tag: str) -> str:
+        if not tag:
+            return ""
+        return re.sub(r"^\{.*\}", "", tag)
+
     def _slice_to_dataset(self, s: str) -> str:
         """
         Pull the inner dataset-like fragment:
@@ -412,12 +317,11 @@ class PsixClient:
             return f"<NewDataSet>{m.group(0)}</NewDataSet>"
         return s
 
-    def _elem_to_record(self, elem: ET.Element) -> Dict[str, Any]:
+    def _elem_to_record(self, elem: ET._Element) -> Dict[str, Any]:
         rec: Dict[str, Any] = {}
 
         # Direct children -> columns
-        child_tags: set[str] = set()
-        for child in list(elem):
+        for child in elem:
             tag = self._local(child.tag)
             if not tag:
                 continue
@@ -428,14 +332,11 @@ class PsixClient:
             if val.startswith("<![CDATA[") and val.endswith("]]>"):
                 val = val[9:-3]
             rec[tag] = val
-            child_tags.add(tag)
 
         # Non-clobbering descendants (fill gaps only)
-        for sub in elem.iter():
-            if sub is elem:
-                continue
+        for sub in elem.xpath(".//*"):
             tag = self._local(sub.tag)
-            if not tag or tag in rec or tag in child_tags:
+            if not tag or tag in rec:
                 continue
             val = "".join(sub.itertext()).strip()
             if val and val.lower() != "none":
@@ -484,7 +385,7 @@ class PsixClient:
                 d = self._digits(pid)
                 if d and (len(d) in (6, 7)) and (rec.get("IMONumber") != d):
                     rec["OfficialNumber"] = d
-
+                    
     def _extract_rows(self, xml_payload: str) -> List[Dict[str, Any]]:
         """
         Accepts:
@@ -496,38 +397,20 @@ class PsixClient:
         """
         frag = self._slice_to_dataset(xml_payload or "")
 
+        parser = ET.XMLParser(recover=True, huge_tree=True)
         try:
-            root = ET.fromstring(frag.encode("utf-8"))
+            root = ET.fromstring(frag.encode("utf-8"), parser=parser)
         except Exception:
-            # Wrap as a root if fragment isn't a full XML doc
-            root = ET.fromstring(f"<root>{frag}</root>".encode("utf-8"))
+            root = ET.fromstring(f"<root>{frag}</root>".encode("utf-8"), parser=parser)
 
         rows: List[Dict[str, Any]] = []
 
-        # collect dataset nodes
-        dataset_nodes: List[ET.Element] = []
-        for el in root.iter():
-            if self._local(el.tag).lower() == "newdataset":
-                dataset_nodes.append(el)
-        if not dataset_nodes:
-            dataset_nodes = [root]
-
+        dataset_nodes = root.xpath(".//*[local-name()='NewDataSet']") or [root]
         for ds in dataset_nodes:
-            # gather <Table>, <Table1>, <Table2>, ...
-            row_elems: List[ET.Element] = []
-            for el in ds.iter():
-                if el is ds:
-                    continue
-                if self._local(el.tag).lower().startswith("table"):
-                    row_elems.append(el)
-
+            row_elems = ds.xpath(".//*[starts-with(local-name(), 'Table')]")
             if not row_elems:
                 # Fallback: any node with a VesselName child
-                for el in ds.iter():
-                    for ch in list(el):
-                        if self._local(ch.tag) == "VesselName":
-                            row_elems.append(el)
-                            break
+                row_elems = ds.xpath(f".//*[./*[{_ln('VesselName')}]]")
 
             for elem in row_elems:
                 rec = self._elem_to_record(elem)
@@ -537,17 +420,11 @@ class PsixClient:
 
         if not rows:
             # Global fallback: any record-ish node with VesselName
-            for elem in root.iter():
-                has_vname_child = False
-                for ch in list(elem):
-                    if self._local(ch.tag) == "VesselName":
-                        has_vname_child = True
-                        break
-                if has_vname_child:
-                    rec = self._elem_to_record(elem)
-                    if rec:
-                        self._normalize_row(rec)
-                        rows.append(rec)
+            for elem in root.xpath(f".//*[./*[{_ln('VesselName')}]]"):
+                rec = self._elem_to_record(elem)
+                if rec:
+                    self._normalize_row(rec)
+                    rows.append(rec)
 
         rows = [r for r in rows if r.get("VesselName") or r.get("VesselID")]
         return rows
