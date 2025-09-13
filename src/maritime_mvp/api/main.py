@@ -490,58 +490,65 @@ def vessels_details(
         if Df_txt is not None:
             extra["Depth_m"] = Df_txt * 0.3048
 
-    # 5) Tonnage: prefer recognized labels, else max numeric
-    def label(t: Dict[str, Any]) -> str:
-        return str(t.get("TonnageTypeLookupName", "")).strip().lower()
+    # 5) Tonnage (robust selection — no global-max fallback)
+    
+    def _label(s: Any) -> str:
+        return re.sub(r"\s+", " ", str(s or "")).strip().lower()
+    
     def mw(t: Dict[str, Any]) -> Optional[float]:
         return to_float(t.get("MeasureOfWeight"))
-    def best_by_labels(rows: List[Dict[str, Any]], prefs: List[str]) -> Optional[float]:
-        for p in prefs:
-            vals = [mw(r) for r in rows if p in label(r)]
+    
+    # Exact-match preference orders
+    gross_aliases = [
+        "gross tonnage (itc)",
+        "gross tonnage",
+        "gross registered tonnage",
+        "gross ton",
+        "grt",
+        "gt",
+        "convention (subpart b), gross ton",
+    ]
+    net_aliases = [
+        "net tonnage (itc)",
+        "net tonnage",
+        "net registered tonnage",
+        "net ton",
+        "nrt",
+        "nt",
+        "convention (subpart b), net ton",
+    ]
+    
+    # Soft-match keywords and explicit excludes
+    G_INCLUDE = ("gross", "gt", "grt")
+    N_INCLUDE = ("net", "nt", "nrt")
+    EXCLUDE   = ("deadweight", "dwt", "displacement", "lightship", "lts", "summer", "suez", "panama")
+    
+    def pick_tonnage(rows: List[Dict[str, Any]],
+                     aliases: List[str],
+                     include_keywords: Tuple[str, ...]) -> Optional[float]:
+        # 1) Strict alias, in order
+        for a in aliases:
+            vals = [mw(t) for t in rows if _label(t.get("TonnageTypeLookupName")) == a]
             vals = [v for v in vals if v is not None]
             if vals:
                 return max(vals)
-        return None
-
-    gross_prefs = [
-        "gross tonnage (itc)", "gross tonnage",
-        "gross registered tonnage", "gross ton", "grt", "gt",
-        "convention (subpart b), gross ton",
-    ]
-    net_prefs = [
-        "net tonnage (itc)", "net tonnage",
-        "net registered tonnage", "net ton", "nrt", "nt",
-        "convention (subpart b), net ton",
-    ]
-
-    gross = best_by_labels(tons, gross_prefs)
-    net   = best_by_labels(tons, net_prefs)
-
-    if gross is None:
-        gross = max((v for v in (mw(t) for t in tons) if v is not None), default=None)
-    if net is None:
-        net = max((v for v in (mw(t) for t in tons) if v is not None), default=None)
-
+        # 2) Soft include (must contain any include keyword), exclude unwanted labels
+        vals = []
+        for t in rows:
+            lab = _label(t.get("TonnageTypeLookupName"))
+            if any(k in lab for k in include_keywords) and not any(bad in lab for bad in EXCLUDE):
+                v = mw(t)
+                if v is not None:
+                    vals.append(v)
+        return max(vals) if vals else None
+    
+    gross = pick_tonnage(tons, gross_aliases, G_INCLUDE)
+    net   = pick_tonnage(tons, net_aliases,   N_INCLUDE)
+    
     if gross is not None:
         extra["GrossTonnage"] = gross
     if net is not None:
         extra["NetTonnage"] = net
-
-    # Final fallback to base
-    if "GrossTonnage" not in extra or extra["GrossTonnage"] is None:
-        extra["GrossTonnage"] = (
-            to_float(base.get("GrossTonnage"))
-            or to_float(base.get("GrossRegisteredTonnage"))
-            or to_float(base.get("GrossTons"))
-            or to_float(base.get("GT"))
-        )
-    if "NetTonnage" not in extra or extra["NetTonnage"] is None:
-        extra["NetTonnage"] = (
-            to_float(base.get("NetTonnage"))
-            or to_float(base.get("NetRegisteredTonnage"))
-            or to_float(base.get("NetTons"))
-            or to_float(base.get("NT"))
-        )
 
     # YearBuilt (avoid zero)
     yb = None
