@@ -8,9 +8,7 @@ PSIX client — resilient SOAP wrapper + robust XML parser.
 - Namespace-agnostic parsing and Table/TableN extraction.
 
 USCG PSIX web service returns .NET DataSets from the * dataset ops, and an XML
-string from the *XMLString ops (documented on cgmix.uscg.mil) — behavior can vary
-by operation and server patch level. See e.g. getOperationControls docs:
-https://cgmix.uscg.mil/xml/PSIXData.asmx?op=getOperationControls
+string from the *XMLString ops (documented on cgmix.uscg.mil).
 """
 from __future__ import annotations
 
@@ -42,7 +40,7 @@ _NS_TRY = [
     "https://cgmix.uscg.mil",
     "http://cgmix.uscg.mil",
 ]
-# SOAPAction variants to try for each ns/op
+
 def _soap_actions(ns: str, op: str) -> List[str]:
     return [
         f"{ns}/{op}",
@@ -50,10 +48,8 @@ def _soap_actions(ns: str, op: str) -> List[str]:
         f"{ns}/PSIXData.asmx/{op}",
     ]
 
-
 def _ln(tag: str) -> str:
     return f"local-name()='{tag}'"
-
 
 def _cache_get(key: str) -> Optional[Dict[str, Any]]:
     if not _CACHE_TTL:
@@ -66,7 +62,6 @@ def _cache_get(key: str) -> Optional[Dict[str, Any]]:
         _CACHE.pop(key, None)
         return None
     return data
-
 
 def _cache_set(key: str, value: Dict[str, Any], ttl: Optional[int] = None) -> None:
     if ttl is None:
@@ -103,6 +98,7 @@ class PsixClient:
 
         logger.info("PSIX client initialized url=%s verify_ssl=%s timeout=%ss", self.url, self.verify_ssl, self.timeout)
 
+    # ---------------- Small utils ----------------
     @staticmethod
     def _digits(s: str) -> str:
         return re.sub(r"\D", "", s or "")
@@ -116,7 +112,6 @@ class PsixClient:
         return chk == int(s[6])
 
     # ---------------- SOAP core ----------------
-
     def _soap_envelope(self, ns: str, op: str, inner_xml: str) -> str:
         return f"""<?xml version="1.0" encoding="utf-8"?>
 <soap:Envelope xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
@@ -155,31 +150,30 @@ class PsixClient:
         - If the dataset op returns zero rows, try the *XMLString variant once.
         Returns {'Table': [...]} or {'Table': []}.
         """
-        # Cache
         ck = f"psix::{op}::{body_xml}"
         cached = _cache_get(ck)
         if cached is not None:
             return cached
-    
+
         attempts = max(1, self.retries + 1)
         last_err: Optional[str] = None
-    
+
         for attempt in range(attempts):
             try:
                 raw = self._post_soap_once(op, body_xml)
                 if not raw:
                     last_err = "no HTTP response or all SOAPAction variants failed"
                     raise RuntimeError(last_err)
-    
+
                 root = ET.fromstring(raw.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
                 result_nodes = root.xpath(f".//*[local-name()='{op}Result']")
                 if not result_nodes:
                     last_err = f"{op}Result node not found"
                     raise RuntimeError(last_err)
-    
+
                 result_node = result_nodes[0]
-    
-                # 1) Embedded XML dataset under Result?
+
+                # Prefer embedded DataSet XML (diffgram/NewDataSet)
                 ds_node = None
                 diff_nodes = result_node.xpath(".//*[local-name()='diffgram']")
                 nds_nodes = result_node.xpath(".//*[local-name()='NewDataSet']")
@@ -187,33 +181,33 @@ class PsixClient:
                     ds_node = diff_nodes[0]
                 elif nds_nodes:
                     ds_node = nds_nodes[0]
-    
+
                 if ds_node is not None:
                     payload = ET.tostring(ds_node, encoding="unicode")
                 else:
-                    # 2) String content variant (unescape)
+                    # Fallback to string payload (possibly escaped XML)
                     str_nodes = result_node.xpath(".//*[local-name()='string']") or [result_node]
                     payload = "".join(str_nodes[0].itertext()) if str_nodes else "".join(result_node.itertext())
                     if payload and ("&lt;" in payload or "&amp;lt;" in payload):
                         payload = _html.unescape(payload)
-    
+
                 rows = self._extract_rows(payload)
                 if rows:
                     data = {"Table": rows}
-                    _cache_set(ck, data)
+                    _cache_set(ck, data)  # cache only non-empty
                     return data
-    
+
                 # No rows from dataset op → try XMLString variant once
                 snippet = (payload or "")[:240].replace("\n", " ").strip()
                 logger.debug("PSIX %s returned no rows; payload head=%r", op, snippet)
-    
+
                 if self.try_xmlstring_fallback and not op.endswith("XMLString"):
                     try_op = f"{op}XMLString"
                     try_ck = f"psix::{try_op}::{body_xml}"
                     cached2 = _cache_get(try_ck)
                     if cached2 is not None:
                         return cached2
-    
+
                     raw2 = self._post_soap_once(try_op, body_xml)
                     if raw2:
                         root2 = ET.fromstring(raw2.encode("utf-8"), parser=ET.XMLParser(recover=True, huge_tree=True))
@@ -225,26 +219,25 @@ class PsixClient:
                             rows2 = self._extract_rows(txt)
                             data2 = {"Table": rows2}
                             if rows2:
-                                _cache_set(try_ck, data2)
+                                _cache_set(try_ck, data2)  # cache only non-empty
                                 return data2
                             else:
                                 snippet2 = (txt or "")[:240].replace("\n", " ").strip()
                                 logger.debug("PSIX %s fallback returned no rows; head=%r", try_op, snippet2)
-    
+
                 # Still nothing; return empty
                 return {"Table": []}
-    
+
             except Exception as e:
                 last_err = f"{type(e).__name__}: {e!s}"
                 if attempt < attempts - 1:
                     time.sleep(self.backoff_s * (attempt + 1))
-    
+
         if last_err:
             logger.debug("PSIX _post_soap(%s) failed: %s", op, last_err)
         return {"Table": []}
 
     # ---------------- Public API ----------------
-
     def get_vessel_summary(
         self,
         *,
@@ -258,9 +251,8 @@ class PsixClient:
         build_year: str = "",
     ) -> Dict[str, Any]:
         """
-        getVesselSummary (dataset), with <VesselID>0</VesselID> when searching by attributes.
-        Service docs and field list are published by USCG PSIX (returns .NET DataSet)
-        on cgmix.uscg.mil.
+        Wrapper for getVesselSummary.
+        Note: When not looking up a specific ID, PSIX requires <VesselID>0</VesselID>.
         """
         vid = int(vessel_id) if vessel_id is not None else 0
         inner = (
@@ -292,7 +284,6 @@ class PsixClient:
         return self._post_soap("getVesselDocuments", inner)
 
     # ---------------- Parsing helpers ----------------
-
     @staticmethod
     def _local(tag: str) -> str:
         if not tag:
@@ -385,7 +376,7 @@ class PsixClient:
                 d = self._digits(pid)
                 if d and (len(d) in (6, 7)) and (rec.get("IMONumber") != d):
                     rec["OfficialNumber"] = d
-                    
+
     def _extract_rows(self, xml_payload: str) -> List[Dict[str, Any]]:
         """
         Accepts:
