@@ -376,20 +376,19 @@ def vessels_details(
     docs  = _get_table(client.get_vessel_documents,   vid, "documents")
     summ  = _get_table(lambda v: client.get_vessel_summary(vessel_id=v), vid, "summary")
 
-    # --- Debug: see what PSIX actually returned for shapes/labels ---
+    # --- Debug: shapes/labels ---
     if dims:
         first_dim_keys = sorted(list(dims[0].keys()))
         logger.debug("Dims rows=%d first_keys=%s", len(dims), first_dim_keys[:15])
     else:
         logger.debug("Dims rows=0")
-    
+
     if tons:
         ton_labels = sorted({str(t.get("TonnageTypeLookupName", "")).strip() for t in tons})
         logger.debug("Tons rows=%d labels=%s", len(tons), ton_labels[:10])
     else:
         logger.debug("Tons rows=0")
-    # ----------------------------------------------------------------
-    
+    # ----------------------------
 
     # 3) Merge base details (summary + particulars)
     base: Dict[str, Any] = {}
@@ -398,7 +397,7 @@ def vessels_details(
     if parts:
         base.update(parts[0])
 
-    # 4) Dimensions (prefer meters, else convert feet). Tolerant number parse.
+    # 4) Dimensions (prefer meters, else convert feet)
     _num_re = re.compile(r"[-+]?\d+(?:[,\d]*\d)?(?:\.\d+)?")
 
     def to_float(x: Any) -> Optional[float]:
@@ -476,7 +475,7 @@ def vessels_details(
         df = max(v for v in draft_ft_vals if v is not None)
         extra["Draft_m"] = df * 0.3048
 
-    # If dimensions dataset empty, try textual fields in base (e.g., "1103.30 ft")
+    # Textual fallbacks in base (e.g., "1103.30 ft")
     if "LOA_m" not in extra or extra["LOA_m"] is None:
         Lf_txt = to_float(base.get("Length"))
         if Lf_txt is not None:
@@ -491,14 +490,12 @@ def vessels_details(
             extra["Depth_m"] = Df_txt * 0.3048
 
     # 5) Tonnage (robust selection — word-boundary matching, no global-max fallback)
-    
     def _label(s: Any) -> str:
         return re.sub(r"\s+", " ", str(s or "")).strip().lower()
-    
+
     def mw(t: Dict[str, Any]) -> Optional[float]:
         return to_float(t.get("MeasureOfWeight"))
-    
-    # Exact-match preference orders (normalized to lower-case)
+
     gross_aliases = [
         "gross tonnage (itc)",
         "gross tonnage",
@@ -517,13 +514,11 @@ def vessels_details(
         "nt",
         "convention (subpart b), net ton",
     ]
-    
-    # Soft-match regexes (use word boundaries; DO NOT use bare 'nt')
+
     G_INCLUDE_RE = re.compile(r"\b(gross|gt|grt)\b")
     N_INCLUDE_RE = re.compile(r"\b(net|nrt|net(?:[\s.-]*reg(?:istered)?)[\s.-]*ton(?:nage)?)\b")
-    
     EXCLUDE_RE   = re.compile(r"\b(deadweight|dwt|displacement|light\s*ship|lts|summer|suez|panama)\b")
-    
+
     def pick_tonnage(rows: List[Dict[str, Any]],
                      aliases: List[str],
                      include_re: re.Pattern[str]) -> Optional[float]:
@@ -533,7 +528,7 @@ def vessels_details(
             vals = [v for v in vals if v is not None]
             if vals:
                 return max(vals)
-    
+
         # 2) Soft include by regex, excluding unwanted types
         vals: List[float] = []
         for t in rows:
@@ -543,17 +538,44 @@ def vessels_details(
                 if v is not None:
                     vals.append(v)
         return max(vals) if vals else None
-    
+
     gross = pick_tonnage(tons, gross_aliases, G_INCLUDE_RE)
     net   = pick_tonnage(tons, net_aliases,   N_INCLUDE_RE)
-    
-    # Safety: if we somehow got only one value and it's clearly mislabeled, don't cross-fill.
-    # (We intentionally avoid assigning "the other" from the one we found.)
-    
+
     if gross is not None:
         extra["GrossTonnage"] = gross
     if net is not None:
         extra["NetTonnage"] = net
+
+    # 6) YearBuilt from common fields (avoid zero)
+    yb = None
+    for key in ("ConstructionCompletedYear", "YearBuilt", "BuildYear"):
+        try:
+            v = int(str(base.get(key, "")).strip())
+            if v > 0:
+                yb = v
+                break
+        except Exception:
+            continue
+    if yb:
+        extra["YearBuilt"] = yb
+
+    # Final log & response
+    logger.info(
+        "PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d",
+        vid, len(dims), len(tons), len(parts), len(docs)
+    )
+
+    merged = {
+        **base,
+        **extra,
+        "VesselID": vid,
+        "_documents": docs,
+        "_tonnage_rows": tons,
+        "_dimension_rows": dims,
+    }
+    return {"rows": [merged]}
+
 
 
 def search_by_name(self, name: str) -> Dict[str, Any]:
