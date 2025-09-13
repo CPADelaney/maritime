@@ -306,33 +306,6 @@ def _q(q, *keys):
                 return s
     return None
 
-@app.get("/vessels/summary", tags=["Vessels"])
-def vessels_summary(
-    request: Request,
-    vessel_id: Optional[int] = Query(None),
-    callsign: Optional[str] = Query(None),        # keep for docs, but we’ll read raw query below
-    vessel_name: Optional[str] = Query(None),
-    flag: Optional[str] = Query(None),
-    service: Optional[str] = Query(None),
-    build_year: Optional[str] = Query(None),
-):
-    client = PsixClient()
-    if vessel_id:
-        return client.get_vessel_summary(vessel_id=vessel_id)
-
-    q = request.query_params
-    cs = _q(q, "callsign", "call_sign", "CallSign")
-    nm = _q(q, "vessel_name", "name", "VesselName")
-
-    return client.get_vessel_summary(
-        vessel_id=None,
-        vessel_name=nm or "",
-        call_sign=cs or "",
-        flag=flag or "",
-        service=service or "",
-        build_year=build_year or "",
-    )
-
 @app.get("/vessels/details", tags=["Vessels"])
 def vessels_details(
     request: Request,
@@ -394,6 +367,30 @@ def vessels_details(
         txt = re.sub(r"[^\w\s]", " ", txt)
         txt = re.sub(r"\s+", " ", txt).strip()
         return txt
+
+    def full_label(row: Dict[str, Any]) -> str:
+        """
+        Concatenate all short string fields so split labels like:
+        'Convention (Subpart B)' + 'Gross Ton' are visible to matching.
+        """
+        parts: List[str] = []
+        # prefer known label-ish fields first
+        for k in ("TonnageTypeLookupName", "TonnageType", "TonnageDescription", "Type", "Description", "Label"):
+            v = row.get(k)
+            if isinstance(v, str) and v.strip():
+                parts.append(v.strip())
+        # then add any other short strings once
+        for k, v in row.items():
+            if k in ("TonnageTypeLookupName", "TonnageType", "TonnageDescription", "Type", "Description", "Label"):
+                continue
+            if isinstance(v, str):
+                sv = v.strip()
+                if sv and len(sv) <= 80:
+                    parts.append(sv)
+        # collapse
+        s = " ".join(parts)
+        s = re.sub(r"\s+", " ", s).strip()
+        return s
 
     # ---------- resolve vessel id ----------
     q = request.query_params
@@ -530,99 +527,69 @@ def vessels_details(
             extra["Depth_m"] = Df_txt * 0.3048
 
     # ---------- tonnage ----------
-    # Strong aliases (normalized)
-    GROSS_STRONG = [norm_label(x) for x in (
-        "Convention (Subpart B), Gross Ton",
-        "Convention (Subpart B), Gross Tonnage",
-        "Gross Tonnage (ITC)",
-        "ITC Gross Tonnage",
-        "Gross Tonnage",
-        "Gross Registered Tonnage",
-        "Gross Ton",
-        "GRT",
-        "GT",
-    )]
-    NET_STRONG = [norm_label(x) for x in (
-        "Convention (Subpart B), Net Ton",
-        "Convention (Subpart B), Net Tonnage",
-        "Net Tonnage (ITC)",
-        "ITC Net Tonnage",
-        "Net Tonnage",
-        "Net Registered Tonnage",
-        "Net Ton",
-        "NRT",
-        "NT",
-    )]
+    # Build per-row info so we DON'T collapse gross/net into one key.
+    EXCL  = re.compile(r"\b(dead\s*weight|deadweight|dwt|displacement|light\s*ship|lts|summer|suez|panama)\b", re.I)
+    GROSS_INC = re.compile(r"\bgross\b|\bgt\b|\bgross\s*ton(?:nage)?\b", re.I)
+    NET_INC   = re.compile(r"\bnet\b|\bnrt\b|\bnet\s*ton(?:nage)?\b|\bnet\s*reg(?:istered)?\b", re.I)
+    CONV_INC  = re.compile(r"\bconvention\s*subpart\s*b\b", re.I)
 
-    # Inclusive (normalized) regex with exclusions
-    G_INC = re.compile(r"\bgross\b|\bgt\b|\bgrt\b")
-    N_INC = re.compile(r"\bnet\b|\bnrt\b|\bnet\s*reg(?:istered)?\b")
-    EXCL  = re.compile(r"\b(dead\s*weight|deadweight|dwt|displacement|light\s*ship|lts|summer|suez|panama)\b")
-
-    def ton_label_of(row: Dict[str, Any]) -> str:
-        # Try common label fields first...
-        for k in ("TonnageTypeLookupName", "TonnageType", "TonnageDescription", "Type", "Description"):
-            if k in row:
-                return norm_label(row.get(k))
-        # ...else fall back to scanning any stringy field
-        cand = None
-        for k, v in row.items():
-            if isinstance(v, str) and len(v) <= 120:
-                cand = v if cand is None else cand + " " + v
-        return norm_label(cand)
-
-    def mw(row: Dict[str, Any]) -> Optional[float]:
+    row_infos: List[Dict[str, Any]] = []
+    for t in (tons or []):
+        full = full_label(t)            # keep punctuation/words
+        norm = norm_label(full)         # punctuation stripped
+        val  = None
         # Usual numeric fields
         for k in ("MeasureOfWeight", "Tonnage", "TonnageMeasure", "RegisteredTonnage",
                   "Value", "Amount", "MeasurementOfWeight", "TonnageValue", "TonnageAmount"):
-            if k in row:
-                val = to_float(row.get(k))
-                if val is not None:
-                    return val
-        # Fallback: scan all values for a plausible number
-        best = None
-        for v in row.values():
-            fv = to_float(v)
-            if fv is not None and 0 < fv < 5_000_000:
-                best = fv if best is None else max(best, fv)
-        return best
-
-    # Build label -> max(value) map (labels normalized)
-    buckets: Dict[str, float] = {}
-    seen_debug: List[str] = []
-    for t in (tons or []):
-        lab = ton_label_of(t)
-        val = mw(t)
-        if lab:
-            seen_debug.append(lab)
+            if k in t:
+                tv = to_float(t.get(k))
+                if tv is not None:
+                    val = tv
+                    break
+        # Fallback: scan all fields for a plausible number
         if val is None:
-            continue
-        if lab not in buckets or val > buckets[lab]:
-            buckets[lab] = val
+            best = None
+            for v in t.values():
+                fv = to_float(v)
+                if fv is not None and 0 < fv < 5_000_000:
+                    best = fv if best is None else max(best, fv)
+            val = best
 
-    # Info-level: show what PSIX actually sent (normalized)
-    if seen_debug:
-        sample = ", ".join(sorted(set(seen_debug)))[:500]
-        logger.info("PSIX tonnage labels (normalized): %s", sample)
+        row_infos.append({"full": full, "norm": norm, "val": val})
 
-    def pick_from_aliases(by_label: Dict[str, float], alias_norms: List[str]) -> Optional[float]:
-        for a in alias_norms:
-            if a in by_label:
-                return by_label[a]
-        return None
+    # Log what we saw
+    if row_infos:
+        sample = ", ".join(f"{ri['full']}={ri['val']}" for ri in row_infos)[:800]
+        logger.info("PSIX tonnage rows: %s", sample)
 
-    gross = pick_from_aliases(buckets, GROSS_STRONG)
-    net   = pick_from_aliases(buckets, NET_STRONG)
+    gross: Optional[float] = None
+    net:   Optional[float] = None
 
-    # Secondary regex include/exclude on normalized keys
-    if gross is None:
-        g_vals = [v for k, v in buckets.items() if G_INC.search(k) and not EXCL.search(k)]
-        gross = max(g_vals) if g_vals else None
-    if net is None:
-        n_vals = [v for k, v in buckets.items() if N_INC.search(k) and not EXCL.search(k)]
-        net = max(n_vals) if n_vals else None
+    # 1) Direct detect using 'full' strings (most reliable)
+    g_candidates = [ri["val"] for ri in row_infos if ri["val"] is not None and GROSS_INC.search(ri["full"]) and not EXCL.search(ri["full"])]
+    n_candidates = [ri["val"] for ri in row_infos if ri["val"] is not None and NET_INC.search(ri["full"])   and not EXCL.search(ri["full"])]
 
-    # Fallback to summary/particulars
+    if g_candidates:
+        gross = max(g_candidates)
+    if n_candidates:
+        net = max(n_candidates)
+
+    # 2) If either missing, try “Convention (Subpart B)” pairs (exclude deadweight/displacement)
+    if gross is None or net is None:
+        conv_vals = [ri["val"] for ri in row_infos
+                     if ri["val"] is not None
+                     and CONV_INC.search(ri["norm"])
+                     and not EXCL.search(ri["norm"])]
+        # dedupe and sort
+        conv_vals = sorted({v for v in conv_vals if v is not None})
+        # Heuristic: two convention values → smaller is net, larger is gross
+        if len(conv_vals) >= 2:
+            if net is None:
+                net = conv_vals[0]
+            if gross is None:
+                gross = conv_vals[-1]
+
+    # 3) Fallback to summary/particulars
     if gross is None:
         gross = to_float(pick_any(base, "GrossTonnage", "gross_tonnage", "GT", "Grt"))
     if net is None:
@@ -671,12 +638,6 @@ def vessels_details(
         "_dimension_rows": dims,
     }
     return {"rows": [merged]}
-
-
-
-
-
-
 
 def search_by_name(self, name: str) -> Dict[str, Any]:
     # PSIX requires <VesselID>0</VesselID> when searching by attributes
