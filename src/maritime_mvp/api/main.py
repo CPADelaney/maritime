@@ -134,7 +134,12 @@ FALLBACK_FRONTEND_HTML = """
       </div>
       <div class="mb-3">
         <label class="block text-sm font-medium mb-1">Port</label>
-        <select x-model="selectedPort" class="w-full p-2 border rounded"></select>
+        <select x-model="selectedPort" class="w-full p-2 border rounded">
+          <option value="">Select…</option>
+          <template x-for="p in ports" :key="p.code">
+            <option :value="p.code" x-text="p.name + ' (' + p.code + ')'"></option>
+          </template>
+        </select>
       </div>
       <div class="mb-3">
         <label class="block text-sm font-medium mb-1">ETA</label>
@@ -184,8 +189,12 @@ function maritimeApp() {
     selectedPort: '', eta: new Date().toISOString().split('T')[0],
     arrivalType: 'FOREIGN', ports: [], estimate: null, searching: false,
     async init() {
-      try { const r = await fetch(API_BASE + '/ports'); this.ports = await r.json(); }
-      catch (e) { console.error('Failed to load ports:', e); }
+      try {
+        const r = await fetch(API_BASE + '/ports');
+        this.ports = await r.json();
+      } catch (e) {
+        console.error('Failed to load ports:', e);
+      }
     },
     async searchVessel() {
       if (!this.vesselName.trim()) return;
@@ -195,20 +204,59 @@ function maritimeApp() {
         const data = await r.json();
         this.vesselResults = Array.isArray(data.Table) ? data.Table : [];
         this.totalCount = data.total ?? this.vesselResults.length;
-      } catch (e) { console.error('Search failed:', e); alert('Vessel search failed.'); }
-      finally { this.searching = false; }
+      } catch (e) {
+        console.error('Search failed:', e);
+        alert('Vessel search failed.');
+      } finally {
+        this.searching = false;
+      }
     },
-    selectVessel(v) { this.selectedVessel = v; this.selectedVesselName = v.VesselName || v.vesselname || ''; this.vesselResults = []; },
+    async selectVessel(v) {
+      this.selectedVessel = v;
+      this.selectedVesselName = v.VesselName || v.vesselname || '';
+      this.vesselResults = [];
+      try {
+        const params = new URLSearchParams(
+          v.VesselID
+            ? { vessel_id: v.VesselID }
+            : { vessel_name: this.selectedVesselName, callsign: v.CallSign || '' }
+        );
+        const r = await fetch(API_BASE + '/vessels/details?' + params);
+        const data = await r.json();
+        if (data && data.rows && data.rows[0]) {
+          // Merge enriched details into selectedVessel (LOA_m, Beam_m, Draft_m, GT/NT, etc.)
+          this.selectedVessel = { ...this.selectedVessel, ...data.rows[0] };
+          console.debug('[enrich] Populated from /vessels/* details', this.selectedVessel);
+        } else {
+          console.debug('[enrich] no rows');
+        }
+      } catch (e) {
+        console.error('Details fetch failed', e);
+      }
+    },
     async calculateEstimate() {
-      if (!this.selectedPort || !this.eta) { alert('Please select a port and ETA'); return; }
-      const params = new URLSearchParams({ port_code: this.selectedPort, eta: this.eta, arrival_type: this.arrivalType });
-      try { const r = await fetch(API_BASE + '/estimate?' + params); this.estimate = await r.json(); }
-      catch (e) { console.error('Estimate failed:', e); alert('Failed to calculate estimate.'); }
+      if (!this.selectedPort || !this.eta) {
+        alert('Please select a port and ETA');
+        return;
+      }
+      const params = new URLSearchParams({
+        port_code: this.selectedPort,
+        eta: this.eta,
+        arrival_type: this.arrivalType
+      });
+      try {
+        const r = await fetch(API_BASE + '/estimate?' + params);
+        this.estimate = await r.json();
+      } catch (e) {
+        console.error('Estimate failed:', e);
+        alert('Failed to calculate estimate.');
+      }
     }
   }
 }
 </script></body></html>
 """
+
 
 # ---------- App ----------
 app = FastAPI(
