@@ -463,13 +463,6 @@ def vessels_details(
     else:
         logger.debug("Dims rows=0")
 
-    if tons:
-        ton_labels = sorted({str(t.get("TonnageTypeLookupName", "")).strip() for t in tons})
-        logger.debug("Tons rows=%d labels=%s", len(tons), ton_labels[:10])
-    else:
-        logger.debug("Tons rows=0")
-    # ----------------------------
-
     # 3) Merge base details (summary + particulars)
     base: Dict[str, Any] = {}
     if summ:
@@ -554,14 +547,30 @@ def vessels_details(
             or row.get("TonnageDescription")
         )
 
+    # Extract a numeric tonnage from any plausible field; if none, scan all values.
+    _TON_KEYS_HINTS = ("measure", "ton", "weight", "value", "amount")
     def mw(row: Dict[str, Any]) -> Optional[float]:
-        # Try several common numeric holders
-        for k in ("MeasureOfWeight", "Tonnage", "TonnageMeasure", "RegisteredTonnage", "Value", "Amount"):
-            v = row.get(k)
+        # Pass 1: known/likely fields
+        for k in ("MeasureOfWeight", "Tonnage", "TonnageMeasure", "RegisteredTonnage",
+                  "Value", "Amount", "MeasurementOfWeight", "TonnageValue", "TonnageAmount"):
+            if k in row:
+                v = to_float(row.get(k))
+                if v is not None:
+                    return v
+        # Pass 2: any field whose name hints tonnage
+        for k, v in row.items():
+            kl = str(k).lower()
+            if any(h in kl for h in _TON_KEYS_HINTS):
+                fv = to_float(v)
+                if fv is not None:
+                    return fv
+        # Pass 3: scan any numeric-looking value (guard with sane range)
+        best = None
+        for v in row.values():
             fv = to_float(v)
-            if fv is not None:
-                return fv
-        return None
+            if fv is not None and 0 < fv < 5_000_000:
+                best = fv if best is None else max(best, fv)
+        return best
 
     gross_aliases = [
         "gross tonnage (itc)",
@@ -572,6 +581,7 @@ def vessels_details(
         "grt",
         "gt",
         "convention (subpart b), gross ton",
+        "convention (subpart b), gross tonnage",
     ]
     net_aliases = [
         "net tonnage (itc)",
@@ -582,6 +592,7 @@ def vessels_details(
         "nrt",
         "nt",
         "convention (subpart b), net ton",
+        "convention (subpart b), net tonnage",
     ]
 
     G_INCLUDE_RE = re.compile(r"\b(gross|gt|grt)\b")
@@ -597,7 +608,6 @@ def vessels_details(
             vals = [v for v in vals if v is not None]
             if vals:
                 return max(vals)
-
         # 2) Soft include by regex, excluding unwanted types
         vals: List[float] = []
         for t in rows:
@@ -611,7 +621,39 @@ def vessels_details(
     gross = pick_tonnage(tons, gross_aliases, G_INCLUDE_RE)
     net   = pick_tonnage(tons, net_aliases,   N_INCLUDE_RE)
 
-    # Fallbacks: use values carried on the summary/particulars if tonnage rows didn't resolve
+    # If still missing, compute label→max(value) buckets; last-resort heuristic
+    buckets: Dict[str, float] = {}
+    if tons:
+        for t in tons:
+            lab = ton_label_of(t)
+            val = mw(t)
+            if val is None:
+                continue
+            if lab not in buckets or val > buckets[lab]:
+                buckets[lab] = val
+
+    # Debug: show buckets
+    if buckets:
+        items = ", ".join([f"{k}={v:.0f}" for k, v in sorted(buckets.items())])
+        logger.debug("Tonnage buckets: %s", items)
+
+    if gross is None or net is None:
+        if buckets:
+            # Try to assign by presence of keywords
+            for lab, val in buckets.items():
+                if gross is None and re.search(r"\bgross|gt|grt\b", lab):
+                    gross = val
+                if net is None and re.search(r"\bnet|nrt\b", lab):
+                    net = val
+            # Last resort: take top values
+            if (gross is None or net is None) and len(buckets) >= 1:
+                by_val = sorted(buckets.values(), reverse=True)
+                if gross is None and by_val:
+                    gross = by_val[0]
+                if net is None and len(by_val) >= 2:
+                    net = by_val[1]
+
+    # Fallbacks to summary/particulars if still empty
     if gross is None:
         gross = to_float(pick_any(base, "GrossTonnage", "gross_tonnage", "GT", "Grt"))
     if net is None:
@@ -627,9 +669,8 @@ def vessels_details(
                 break
         except Exception:
             continue
-
     if yb:
-        base["YearBuilt"] = yb  # keep also in base for transparency
+        base["YearBuilt"] = yb  # also keep in base
 
     # Final log & response
     logger.info(
@@ -652,13 +693,12 @@ def vessels_details(
             "beam_meters": extra.get("Beam_m"),
             "depth_meters": extra.get("Depth_m"),
             "draft_meters": extra.get("Draft_m"),
-            # tonnage preferred keys
+            # tonnage preferred keys + aliases
             "GrossTonnage": gross,
-            "NetTonnage": net,
-            # tonnage aliases
             "gross_tonnage": gross,
-            "net_tonnage": net,
             "GT": gross,
+            "NetTonnage": net,
+            "net_tonnage": net,
             "NT": net,
         },
         "_documents": docs,
@@ -667,6 +707,7 @@ def vessels_details(
     }
 
     return {"rows": [merged]}
+
 
 
 
