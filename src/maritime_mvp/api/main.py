@@ -342,19 +342,13 @@ def vessels_details(
 ) -> Dict[str, Any]:
     """
     Resolve VesselID via summary (if needed), then fetch particulars, dimensions,
-    tonnage, and documents. Returns {"rows":[{...}]}.
-
-    Normalized fields + aliases:
-      LOA_m, Beam_m, Depth_m, Draft_m
-      GrossTonnage / gross_tonnage / GT
-      NetTonnage   / net_tonnage   / NT
-      YearBuilt
-
-    Raw rows exposed in _dimension_rows, _tonnage_rows, _documents.
+    tonnage, and documents. Returns {"rows":[{...}]} with helpful fields:
+    LOA_m, Beam_m, Depth_m (feet → meters), Draft_m (if present),
+    GrossTonnage, NetTonnage, YearBuilt, plus raw rows in _dimension_rows/_tonnage_rows/_documents.
     """
     client = PsixClient()
 
-    # -------- helpers --------
+    # ---------- small helpers ----------
     def _q(qm, *keys) -> Optional[str]:
         for k in keys:
             v = qm.get(k)
@@ -364,7 +358,7 @@ def vessels_details(
 
     def _first_nonempty(*vals):
         for v in vals:
-            if v is not None and str(v).strip():
+            if v is not None and str(v).strip().lower() not in ("", "none", "null"):
                 return v
         return None
 
@@ -390,11 +384,18 @@ def vessels_details(
     def pick_any(d: Dict[str, Any], *keys: str) -> Optional[Any]:
         for k in keys:
             v = d.get(k)
-            if v is not None and str(v).strip().lower() != "none":
+            if v is not None and str(v).strip().lower() not in ("", "none", "null"):
                 return v
         return None
 
-    # accept aliases/casing from query
+    def norm_label(s: Any) -> str:
+        """Lowercase, remove punctuation to smooth over commas/parentheses, collapse whitespace."""
+        txt = str(s or "").lower()
+        txt = re.sub(r"[^\w\s]", " ", txt)
+        txt = re.sub(r"\s+", " ", txt).strip()
+        return txt
+
+    # ---------- resolve vessel id ----------
     q = request.query_params
     cs = _q(q, "callsign", "call_sign", "CallSign") or callsign
     nm = _q(q, "vessel_name", "name", "VesselName") or vessel_name
@@ -402,14 +403,13 @@ def vessels_details(
     vid: Optional[int] = vessel_id
     summary_first: Dict[str, Any] = {}
 
-    # 1) Resolve VesselID via summary (prefer exact callsign match)
     if not vid:
-        summ = client.get_vessel_summary(
+        summ0 = client.get_vessel_summary(
             vessel_id=None,
             vessel_name=nm or "",
             call_sign=cs or "",
         )
-        srows = (summ or {}).get("Table") or []
+        srows = (summ0 or {}).get("Table") or []
         if not srows:
             return {"rows": []}
 
@@ -441,7 +441,7 @@ def vessels_details(
     if not vid:
         return {"rows": [summary_first] if summary_first else []}
 
-    # 2) Safe PSIX calls (each returns {"Table":[...]} or {} → [])
+    # ---------- PSIX calls ----------
     def _get_table(fn, _vid: int, label: str) -> List[Dict[str, Any]]:
         try:
             d = fn(_vid)
@@ -456,14 +456,14 @@ def vessels_details(
     docs  = _get_table(client.get_vessel_documents,   vid, "documents")
     summ  = _get_table(lambda v: client.get_vessel_summary(vessel_id=v), vid, "summary")
 
-    # 3) Merge base details (summary + particulars)
+    # ---------- base merge ----------
     base: Dict[str, Any] = {}
     if summ:
         base.update(summ[0])
     if parts:
         base.update(parts[0])
 
-    # 4) Dimensions (prefer meters, else convert feet)
+    # ---------- dimensions ----------
     len_ft, brd_ft, dep_ft = [], [], []
     len_m,  brd_m,  dep_m  = [], [], []
 
@@ -506,7 +506,7 @@ def vessels_details(
         extra["DepthInFeet"] = Df
         extra["Depth_m"] = Df * 0.3048
 
-    # Optional Draft if present
+    # Draft (optional)
     draft_ft_vals = [to_float(pick_any(d, "DraftInFeet", "MaxDraftInFeet", "Draft_ft")) for d in dims]
     draft_m_vals  = [to_float(pick_any(d, "DraftInMeters", "MaxDraftInMeters", "Draft_m")) for d in dims]
     if any(v is not None for v in draft_m_vals):
@@ -529,33 +529,57 @@ def vessels_details(
         if Df_txt is not None:
             extra["Depth_m"] = Df_txt * 0.3048
 
-    # 5) Tonnage (strict label-first, then regex; NO "top-2 largest" heuristic)
-    def _label(s: Any) -> str:
-        return re.sub(r"\s+", " ", str(s or "")).strip().lower()
+    # ---------- tonnage ----------
+    # Strong aliases (normalized)
+    GROSS_STRONG = [norm_label(x) for x in (
+        "Convention (Subpart B), Gross Ton",
+        "Convention (Subpart B), Gross Tonnage",
+        "Gross Tonnage (ITC)",
+        "ITC Gross Tonnage",
+        "Gross Tonnage",
+        "Gross Registered Tonnage",
+        "Gross Ton",
+        "GRT",
+        "GT",
+    )]
+    NET_STRONG = [norm_label(x) for x in (
+        "Convention (Subpart B), Net Ton",
+        "Convention (Subpart B), Net Tonnage",
+        "Net Tonnage (ITC)",
+        "ITC Net Tonnage",
+        "Net Tonnage",
+        "Net Registered Tonnage",
+        "Net Ton",
+        "NRT",
+        "NT",
+    )]
+
+    # Inclusive (normalized) regex with exclusions
+    G_INC = re.compile(r"\bgross\b|\bgt\b|\bgrt\b")
+    N_INC = re.compile(r"\bnet\b|\bnrt\b|\bnet\s*reg(?:istered)?\b")
+    EXCL  = re.compile(r"\b(dead\s*weight|deadweight|dwt|displacement|light\s*ship|lts|summer|suez|panama)\b")
 
     def ton_label_of(row: Dict[str, Any]) -> str:
-        return _label(
-            row.get("TonnageTypeLookupName")
-            or row.get("TonnageType")
-            or row.get("TonnageDescription")
-            or row.get("Type")
-        )
+        # Try common label fields first...
+        for k in ("TonnageTypeLookupName", "TonnageType", "TonnageDescription", "Type", "Description"):
+            if k in row:
+                return norm_label(row.get(k))
+        # ...else fall back to scanning any stringy field
+        cand = None
+        for k, v in row.items():
+            if isinstance(v, str) and len(v) <= 120:
+                cand = v if cand is None else cand + " " + v
+        return norm_label(cand)
 
-    # Extract numeric tonnage from likely fields; fall back to scanning values
-    _TON_KEYS_HINTS = ("measure", "ton", "weight", "value", "amount")
     def mw(row: Dict[str, Any]) -> Optional[float]:
+        # Usual numeric fields
         for k in ("MeasureOfWeight", "Tonnage", "TonnageMeasure", "RegisteredTonnage",
                   "Value", "Amount", "MeasurementOfWeight", "TonnageValue", "TonnageAmount"):
             if k in row:
-                v = to_float(row.get(k))
-                if v is not None:
-                    return v
-        for k, v in row.items():
-            kl = str(k).lower()
-            if any(h in kl for h in _TON_KEYS_HINTS):
-                fv = to_float(v)
-                if fv is not None:
-                    return fv
+                val = to_float(row.get(k))
+                if val is not None:
+                    return val
+        # Fallback: scan all values for a plausible number
         best = None
         for v in row.values():
             fv = to_float(v)
@@ -563,85 +587,58 @@ def vessels_details(
                 best = fv if best is None else max(best, fv)
         return best
 
-    # Exact-match alias lists (lowercased)
-    gross_aliases = [
-        "convention (subpart b), gross ton",     # PSIX label
-        "convention (subpart b), gross tonnage",
-        "gross tonnage (itc)",
-        "itc gross tonnage",
-        "gross tonnage",
-        "gross registered tonnage",
-        "gross ton",
-        "grt",
-        "gt",
-    ]
-    net_aliases = [
-        "convention (subpart b), net ton",       # PSIX label
-        "convention (subpart b), net tonnage",
-        "net tonnage (itc)",
-        "itc net tonnage",
-        "net tonnage",
-        "net registered tonnage",
-        "net ton",
-        "nrt",
-        "nt",
-    ]
-
-    G_INCLUDE_RE = re.compile(r"\b(gross|gt|grt)\b")
-    N_INCLUDE_RE = re.compile(r"\b(net|nrt|net(?:[\s.-]*reg(?:istered)?)[\s.-]*ton(?:nage)?)\b")
-    EXCLUDE_RE   = re.compile(r"\b(deadweight|dwt|displacement|light\s*ship|lts|summer|suez|panama)\b")
-
-    # Build buckets: label -> max(value)
+    # Build label -> max(value) map (labels normalized)
     buckets: Dict[str, float] = {}
-    for t in tons or []:
+    seen_debug: List[str] = []
+    for t in (tons or []):
         lab = ton_label_of(t)
         val = mw(t)
+        if lab:
+            seen_debug.append(lab)
         if val is None:
             continue
         if lab not in buckets or val > buckets[lab]:
             buckets[lab] = val
 
-    if buckets:
-        dbg = ", ".join([f"{k}={v:.0f}" for k, v in sorted(buckets.items())])
-        logger.debug("Tonnage buckets: %s", dbg)
+    # Info-level: show what PSIX actually sent (normalized)
+    if seen_debug:
+        sample = ", ".join(sorted(set(seen_debug)))[:500]
+        logger.info("PSIX tonnage labels (normalized): %s", sample)
 
-    def pick_from_aliases(by_label: Dict[str, float], aliases: List[str]) -> Optional[float]:
-        for a in aliases:
+    def pick_from_aliases(by_label: Dict[str, float], alias_norms: List[str]) -> Optional[float]:
+        for a in alias_norms:
             if a in by_label:
                 return by_label[a]
         return None
 
-    gross = pick_from_aliases(buckets, gross_aliases)
-    net   = pick_from_aliases(buckets, net_aliases)
+    gross = pick_from_aliases(buckets, GROSS_STRONG)
+    net   = pick_from_aliases(buckets, NET_STRONG)
 
-    # Secondary regex include (exclude DWT/Displacement/Suez/Panama)
+    # Secondary regex include/exclude on normalized keys
     if gross is None:
-        g_vals = [v for k, v in buckets.items() if G_INCLUDE_RE.search(k) and not EXCLUDE_RE.search(k)]
+        g_vals = [v for k, v in buckets.items() if G_INC.search(k) and not EXCL.search(k)]
         gross = max(g_vals) if g_vals else None
     if net is None:
-        n_vals = [v for k, v in buckets.items() if N_INCLUDE_RE.search(k) and not EXCLUDE_RE.search(k)]
+        n_vals = [v for k, v in buckets.items() if N_INC.search(k) and not EXCL.search(k)]
         net = max(n_vals) if n_vals else None
 
-    # Fallbacks to summary/particulars if still empty
+    # Fallback to summary/particulars
     if gross is None:
         gross = to_float(pick_any(base, "GrossTonnage", "gross_tonnage", "GT", "Grt"))
     if net is None:
         net = to_float(pick_any(base, "NetTonnage", "net_tonnage", "NT", "Nrt"))
 
-    # 6) YearBuilt from common fields (avoid zero)
-    yb = None
+    # ---------- year built ----------
     for key in ("ConstructionCompletedYear", "YearBuilt", "BuildYear"):
         try:
-            v = int(str(base.get(key, "")).strip())
-            if v > 0:
-                yb = v
+            y = int(str(base.get(key, "")).strip())
+            if y > 0:
+                base["YearBuilt"] = y
                 break
         except Exception:
-            continue
-    if yb:
-        base["YearBuilt"] = yb  # also keep in base
+            pass
 
-    # Final log & response
+    # ---------- log & return ----------
     logger.info(
         "PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d (GT=%s NT=%s)",
         vid, len(dims), len(tons), len(parts), len(docs), gross, net
@@ -651,17 +648,17 @@ def vessels_details(
         **base,
         **{
             "VesselID": vid,
+            # dimensions + aliases
             "LOA_m": extra.get("LOA_m"),
             "Beam_m": extra.get("Beam_m"),
             "Depth_m": extra.get("Depth_m"),
             "Draft_m": extra.get("Draft_m"),
-            # dimension aliases
             "loa_meters": extra.get("LOA_m"),
             "LengthOverallMeters": extra.get("LOA_m"),
             "beam_meters": extra.get("Beam_m"),
             "depth_meters": extra.get("Depth_m"),
             "draft_meters": extra.get("Draft_m"),
-            # tonnage preferred keys + aliases (now ITC/Subpart-B first)
+            # tonnage + aliases
             "GrossTonnage": gross,
             "gross_tonnage": gross,
             "GT": gross,
@@ -673,8 +670,8 @@ def vessels_details(
         "_tonnage_rows": tons,
         "_dimension_rows": dims,
     }
-
     return {"rows": [merged]}
+
 
 
 
