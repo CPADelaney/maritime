@@ -490,7 +490,7 @@ def vessels_details(
         if Df_txt is not None:
             extra["Depth_m"] = Df_txt * 0.3048
 
-    # 5) Tonnage (robust selection — no global-max fallback)
+    # 5) Tonnage (robust selection — word-boundary matching, no global-max fallback)
     
     def _label(s: Any) -> str:
         return re.sub(r"\s+", " ", str(s or "")).strip().lower()
@@ -498,7 +498,7 @@ def vessels_details(
     def mw(t: Dict[str, Any]) -> Optional[float]:
         return to_float(t.get("MeasureOfWeight"))
     
-    # Exact-match preference orders
+    # Exact-match preference orders (normalized to lower-case)
     gross_aliases = [
         "gross tonnage (itc)",
         "gross tonnage",
@@ -518,63 +518,43 @@ def vessels_details(
         "convention (subpart b), net ton",
     ]
     
-    # Soft-match keywords and explicit excludes
-    G_INCLUDE = ("gross", "gt", "grt")
-    N_INCLUDE = ("net", "nt", "nrt")
-    EXCLUDE   = ("deadweight", "dwt", "displacement", "lightship", "lts", "summer", "suez", "panama")
+    # Soft-match regexes (use word boundaries; DO NOT use bare 'nt')
+    G_INCLUDE_RE = _re.compile(r"\b(gross|gt|grt)\b")
+    N_INCLUDE_RE = _re.compile(r"\b(net|nrt|net(?:[\s.-]*reg(?:istered)?)[\s.-]*ton(?:nage)?)\b")
+    
+    EXCLUDE_RE   = _re.compile(r"\b(deadweight|dwt|displacement|light\s*ship|lts|summer|suez|panama)\b")
     
     def pick_tonnage(rows: List[Dict[str, Any]],
                      aliases: List[str],
-                     include_keywords: Tuple[str, ...]) -> Optional[float]:
-        # 1) Strict alias, in order
+                     include_re: _re.Pattern[str]) -> Optional[float]:
+        # 1) Strict alias match, in order
         for a in aliases:
             vals = [mw(t) for t in rows if _label(t.get("TonnageTypeLookupName")) == a]
             vals = [v for v in vals if v is not None]
             if vals:
                 return max(vals)
-        # 2) Soft include (must contain any include keyword), exclude unwanted labels
-        vals = []
+    
+        # 2) Soft include by regex, excluding unwanted types
+        vals: List[float] = []
         for t in rows:
             lab = _label(t.get("TonnageTypeLookupName"))
-            if any(k in lab for k in include_keywords) and not any(bad in lab for bad in EXCLUDE):
+            if include_re.search(lab) and not EXCLUDE_RE.search(lab):
                 v = mw(t)
                 if v is not None:
                     vals.append(v)
         return max(vals) if vals else None
     
-    gross = pick_tonnage(tons, gross_aliases, G_INCLUDE)
-    net   = pick_tonnage(tons, net_aliases,   N_INCLUDE)
+    gross = pick_tonnage(tons, gross_aliases, G_INCLUDE_RE)
+    net   = pick_tonnage(tons, net_aliases,   N_INCLUDE_RE)
+    
+    # Safety: if we somehow got only one value and it's clearly mislabeled, don't cross-fill.
+    # (We intentionally avoid assigning "the other" from the one we found.)
     
     if gross is not None:
         extra["GrossTonnage"] = gross
     if net is not None:
         extra["NetTonnage"] = net
 
-    # YearBuilt (avoid zero)
-    yb = None
-    for key in ("ConstructionCompletedYear", "YearBuilt", "BuildYear"):
-        try:
-            v = int(str(base.get(key, "")).strip())
-            if v > 0:
-                yb = v
-                break
-        except Exception:
-            continue
-    if yb:
-        extra["YearBuilt"] = yb
-
-    logger.info("PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d",
-                vid, len(dims), len(tons), len(parts), len(docs))
-
-    merged = {
-        **base,
-        **extra,
-        "VesselID": vid,
-        "_documents": docs,
-        "_tonnage_rows": tons,
-        "_dimension_rows": dims,
-    }
-    return {"rows": [merged]}
 
 def search_by_name(self, name: str) -> Dict[str, Any]:
     # PSIX requires <VesselID>0</VesselID> when searching by attributes
