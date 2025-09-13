@@ -376,6 +376,21 @@ def vessels_details(
     docs  = _get_table(client.get_vessel_documents,   vid, "documents")
     summ  = _get_table(lambda v: client.get_vessel_summary(vessel_id=v), vid, "summary")
 
+    # --- Debug: see what PSIX actually returned for shapes/labels ---
+    if dims:
+        first_dim_keys = sorted(list(dims[0].keys()))
+        logger.debug("Dims rows=%d first_keys=%s", len(dims), first_dim_keys[:15])
+    else:
+        logger.debug("Dims rows=0")
+    
+    if tons:
+        ton_labels = sorted({str(t.get("TonnageTypeLookupName", "")).strip() for t in tons})
+        logger.debug("Tons rows=%d labels=%s", len(tons), ton_labels[:10])
+    else:
+        logger.debug("Tons rows=0")
+    # ----------------------------------------------------------------
+    
+
     # 3) Merge base details (summary + particulars)
     base: Dict[str, Any] = {}
     if summ:
