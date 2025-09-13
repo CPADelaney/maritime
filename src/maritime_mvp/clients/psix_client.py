@@ -186,6 +186,11 @@ class PsixClient:
         if cached is not None:
             return cached
     
+        # For optional debug logging (works whether helper is named debug_write or _debug_write)
+        _dbg_write = getattr(self, "debug_write", None) or getattr(self, "_debug_write", None)
+        _dbg_callsign = getattr(self, "debug_callsign", None)
+        _dbg_vids = getattr(self, "_debug_vids", None)
+    
         # Extract VesselID (if present) from request body for per-VID debug
         vid_in_body: Optional[int] = None
         try:
@@ -231,11 +236,12 @@ class PsixClient:
                     if payload and ("&lt;" in payload or "&amp;lt;" in payload):
                         payload = _html.unescape(payload)
     
-                rows = self._extract_rows(payload)
+                # Keep all rows for non-summary ops (dim/ton tables often lack VesselName/ID)
+                rows = self._extract_rows(payload, keep_all=(op != "getVesselSummary"))
     
                 # Debug: if this is a summary and the callsign matches, capture raw and remember VesselID(s)
-                if op == "getVesselSummary" and self.debug_callsign and rows:
-                    csu = self.debug_callsign
+                if op == "getVesselSummary" and _dbg_callsign and rows:
+                    csu = str(_dbg_callsign).strip().upper()
                     matched_vids: set[int] = set()
                     for r in rows:
                         rcs = str(r.get("CallSign") or r.get("VesselCallSign") or "").strip().upper()
@@ -246,12 +252,15 @@ class PsixClient:
                             except Exception:
                                 pass
                     if matched_vids:
-                        self._debug_vids.update(matched_vids)
-                        self._debug_write(op, payload, None, tag=f"callsign_{csu}")
+                        if isinstance(_dbg_vids, set):
+                            _dbg_vids.update(matched_vids)
+                        if callable(_dbg_write):
+                            _dbg_write(op, payload, None, tag=f"callsign_{csu}")
     
                 # Debug: if this op targets a VesselID we care about, capture raw
-                if vid_in_body is not None and vid_in_body in self._debug_vids:
-                    self._debug_write(op, payload, vid_in_body)
+                if vid_in_body is not None and isinstance(_dbg_vids, set) and vid_in_body in _dbg_vids:
+                    if callable(_dbg_write):
+                        _dbg_write(op, payload, vid_in_body)
     
                 if rows:
                     data = {"Table": rows}
@@ -277,11 +286,11 @@ class PsixClient:
                             txt = "".join(result_nodes2[0].itertext())
                             if txt and ("&lt;" in txt or "&amp;lt;" in txt):
                                 txt = _html.unescape(txt)
-                            rows2 = self._extract_rows(txt)
+                            rows2 = self._extract_rows(txt, keep_all=(op != "getVesselSummary"))
     
                             # Debug for XMLString path as well
-                            if op == "getVesselSummary" and self.debug_callsign and rows2:
-                                csu = self.debug_callsign
+                            if op == "getVesselSummary" and _dbg_callsign and rows2:
+                                csu = str(_dbg_callsign).strip().upper()
                                 matched_vids2: set[int] = set()
                                 for r in rows2:
                                     rcs = str(r.get("CallSign") or r.get("VesselCallSign") or "").strip().upper()
@@ -292,11 +301,14 @@ class PsixClient:
                                         except Exception:
                                             pass
                                 if matched_vids2:
-                                    self._debug_vids.update(matched_vids2)
-                                    self._debug_write(try_op, txt, None, tag=f"callsign_{csu}")
+                                    if isinstance(_dbg_vids, set):
+                                        _dbg_vids.update(matched_vids2)
+                                    if callable(_dbg_write):
+                                        _dbg_write(try_op, txt, None, tag=f"callsign_{csu}")
     
-                            if vid_in_body is not None and vid_in_body in self._debug_vids:
-                                self._debug_write(try_op, txt, vid_in_body)
+                            if vid_in_body is not None and isinstance(_dbg_vids, set) and vid_in_body in _dbg_vids:
+                                if callable(_dbg_write):
+                                    _dbg_write(try_op, txt, vid_in_body)
     
                             data2 = {"Table": rows2}
                             if rows2:
@@ -317,6 +329,7 @@ class PsixClient:
         if last_err:
             logger.debug("PSIX _post_soap(%s) failed: %s", op, last_err)
         return {"Table": []}
+
 
     # ---------------- Public API ----------------
     def get_vessel_summary(
@@ -458,38 +471,40 @@ class PsixClient:
                 if d and (len(d) in (6, 7)) and (rec.get("IMONumber") != d):
                     rec["OfficialNumber"] = d
 
-    def _extract_rows(self, xml_payload: str) -> List[Dict[str, Any]]:
+    def _extract_rows(self, xml_payload: str, keep_all: bool = False) -> List[Dict[str, Any]]:
         """
         Accepts:
           - diffgram/NewDataSet subtree
           - plain NewDataSet
           - concatenated Table/TableN fragments
           - or an outer wrapper with those inside
-        Returns a list of dicts with normalized display fields.
+    
+        When keep_all=True, return all parsed rows (even if they lack VesselName/ID).
+        This is required for dataset ops like dimensions/tonnage that often omit those fields.
         """
         frag = self._slice_to_dataset(xml_payload or "")
-
+    
         parser = ET.XMLParser(recover=True, huge_tree=True)
         try:
             root = ET.fromstring(frag.encode("utf-8"), parser=parser)
         except Exception:
             root = ET.fromstring(f"<root>{frag}</root>".encode("utf-8"), parser=parser)
-
+    
         rows: List[Dict[str, Any]] = []
-
+    
         dataset_nodes = root.xpath(".//*[local-name()='NewDataSet']") or [root]
         for ds in dataset_nodes:
             row_elems = ds.xpath(".//*[starts-with(local-name(), 'Table')]")
             if not row_elems:
-                # Fallback: any node with a VesselName child
+                # Fallback: any node with a VesselName child (helps for summary-ish payloads)
                 row_elems = ds.xpath(f".//*[./*[{_ln('VesselName')}]]")
-
+    
             for elem in row_elems:
                 rec = self._elem_to_record(elem)
                 if rec:
                     self._normalize_row(rec)
                     rows.append(rec)
-
+    
         if not rows:
             # Global fallback: any record-ish node with VesselName
             for elem in root.xpath(f".//*[./*[{_ln('VesselName')}]]"):
@@ -497,6 +512,9 @@ class PsixClient:
                 if rec:
                     self._normalize_row(rec)
                     rows.append(rec)
-
-        rows = [r for r in rows if r.get("VesselName") or r.get("VesselID")]
+    
+        # Only filter out nameless/ID-less rows for summary; keep everything for details ops
+        if not keep_all:
+            rows = [r for r in rows if r.get("VesselName") or r.get("VesselID")]
+    
         return rows
