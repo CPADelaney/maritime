@@ -342,13 +342,19 @@ def vessels_details(
 ) -> Dict[str, Any]:
     """
     Resolve VesselID via summary (if needed), then fetch particulars, dimensions,
-    tonnage, and documents. Returns {"rows":[{...}]} with helpful fields:
-    LOA_m, Beam_m, Depth_m (feet → meters), Draft_m (if present),
-    GrossTonnage, NetTonnage, YearBuilt, plus raw rows in _dimension_rows/_tonnage_rows/_documents.
+    tonnage, and documents. Returns {"rows":[{...}]}.
+
+    Adds helpful normalized fields + aliases:
+      LOA_m, Beam_m, Depth_m, Draft_m
+      GrossTonnage / gross_tonnage / GT
+      NetTonnage   / net_tonnage   / NT
+      YearBuilt
+
+    Also exposes raw rows in _dimension_rows, _tonnage_rows, _documents.
     """
     client = PsixClient()
 
-    # local helpers
+    # -------- helpers --------
     def _q(qm, *keys) -> Optional[str]:
         for k in keys:
             v = qm.get(k)
@@ -359,6 +365,32 @@ def vessels_details(
     def _first_nonempty(*vals):
         for v in vals:
             if v is not None and str(v).strip():
+                return v
+        return None
+
+    _num_re = re.compile(r"[-+]?\d+(?:[,\d]*\d)?(?:\.\d+)?")
+
+    def to_float(x: Any) -> Optional[float]:
+        if x is None:
+            return None
+        s = str(x).strip()
+        if not s:
+            return None
+        try:
+            return float(s.replace(",", ""))
+        except Exception:
+            m = _num_re.search(s)
+            if m:
+                try:
+                    return float(m.group(0).replace(",", ""))
+                except Exception:
+                    return None
+            return None
+
+    def pick_any(d: Dict[str, Any], *keys: str) -> Optional[Any]:
+        for k in keys:
+            v = d.get(k)
+            if v is not None and str(v).strip().lower() != "none":
                 return v
         return None
 
@@ -409,7 +441,7 @@ def vessels_details(
     if not vid:
         return {"rows": [summary_first] if summary_first else []}
 
-    # 2) Safe PSIX calls (each returns {"Table":[...]})
+    # 2) Safe PSIX calls (each returns {"Table":[...]} or {} → [])
     def _get_table(fn, _vid: int, label: str) -> List[Dict[str, Any]]:
         try:
             d = fn(_vid)
@@ -445,33 +477,7 @@ def vessels_details(
     if parts:
         base.update(parts[0])
 
-    # 4) Dimensions (prefer meters, else convert feet). Tolerant parse.
-    _num_re = re.compile(r"[-+]?\d+(?:[,\d]*\d)?(?:\.\d+)?")
-
-    def to_float(x: Any) -> Optional[float]:
-        if x is None:
-            return None
-        s = str(x).strip()
-        if not s:
-            return None
-        try:
-            return float(s.replace(",", ""))
-        except Exception:
-            m = _num_re.search(s)
-            if m:
-                try:
-                    return float(m.group(0).replace(",", ""))
-                except Exception:
-                    return None
-            return None
-
-    def pick_any(d: Dict[str, Any], *keys: str) -> Optional[Any]:
-        for k in keys:
-            v = d.get(k)
-            if v is not None and str(v).strip().lower() != "none":
-                return v
-        return None
-
+    # 4) Dimensions (prefer meters, else convert feet)
     len_ft, brd_ft, dep_ft = [], [], []
     len_m,  brd_m,  dep_m  = [], [], []
 
@@ -537,15 +543,29 @@ def vessels_details(
         if Df_txt is not None:
             extra["Depth_m"] = Df_txt * 0.3048
 
-    # 5) Tonnage (robust selection — word-boundary matching, no global-max fallback)
+    # 5) Tonnage (robust selection — expanded labels & numeric fields)
     def _label(s: Any) -> str:
         return re.sub(r"\s+", " ", str(s or "")).strip().lower()
 
-    def mw(t: Dict[str, Any]) -> Optional[float]:
-        return to_float(t.get("MeasureOfWeight"))
+    def ton_label_of(row: Dict[str, Any]) -> str:
+        return _label(
+            row.get("TonnageTypeLookupName")
+            or row.get("TonnageType")
+            or row.get("TonnageDescription")
+        )
+
+    def mw(row: Dict[str, Any]) -> Optional[float]:
+        # Try several common numeric holders
+        for k in ("MeasureOfWeight", "Tonnage", "TonnageMeasure", "RegisteredTonnage", "Value", "Amount"):
+            v = row.get(k)
+            fv = to_float(v)
+            if fv is not None:
+                return fv
+        return None
 
     gross_aliases = [
         "gross tonnage (itc)",
+        "itc gross tonnage",
         "gross tonnage",
         "gross registered tonnage",
         "gross ton",
@@ -555,6 +575,7 @@ def vessels_details(
     ]
     net_aliases = [
         "net tonnage (itc)",
+        "itc net tonnage",
         "net tonnage",
         "net registered tonnage",
         "net ton",
@@ -572,7 +593,7 @@ def vessels_details(
                      include_re: re.Pattern[str]) -> Optional[float]:
         # 1) Strict alias match, in order
         for a in aliases:
-            vals = [mw(t) for t in rows if _label(t.get("TonnageTypeLookupName")) == a]
+            vals = [mw(t) for t in rows if ton_label_of(t) == a]
             vals = [v for v in vals if v is not None]
             if vals:
                 return max(vals)
@@ -580,7 +601,7 @@ def vessels_details(
         # 2) Soft include by regex, excluding unwanted types
         vals: List[float] = []
         for t in rows:
-            lab = _label(t.get("TonnageTypeLookupName"))
+            lab = ton_label_of(t)
             if include_re.search(lab) and not EXCLUDE_RE.search(lab):
                 v = mw(t)
                 if v is not None:
@@ -590,29 +611,11 @@ def vessels_details(
     gross = pick_tonnage(tons, gross_aliases, G_INCLUDE_RE)
     net   = pick_tonnage(tons, net_aliases,   N_INCLUDE_RE)
 
-    if gross is not None:
-        extra["GrossTonnage"] = gross
-    if net is not None:
-        extra["NetTonnage"] = net
-
-    # --- Fallback tonnage from summary/particulars if tonnage rows didn't yield a match ---
-    if extra.get("GrossTonnage") is None:
-        extra["GrossTonnage"] = (
-            to_float(base.get("GrossTonnage"))
-            or to_float(base.get("GrossRegisteredTonnage"))
-            or to_float(base.get("GrossTons"))
-            or to_float(base.get("GT"))
-        )
-
-    if extra.get("NetTonnage") is None:
-        extra["NetTonnage"] = (
-            to_float(base.get("NetTonnage"))
-            or to_float(base.get("NetRegisteredTonnage"))
-            or to_float(base.get("NetTons"))
-            or to_float(base.get("NT"))
-        )
-
-    logger.debug("Chosen tonnage fallback: GT=%s NT=%s", extra.get("GrossTonnage"), extra.get("NetTonnage"))
+    # Fallbacks: use values carried on the summary/particulars if tonnage rows didn't resolve
+    if gross is None:
+        gross = to_float(pick_any(base, "GrossTonnage", "gross_tonnage", "GT", "Grt"))
+    if net is None:
+        net = to_float(pick_any(base, "NetTonnage", "net_tonnage", "NT", "Nrt"))
 
     # 6) YearBuilt from common fields (avoid zero)
     yb = None
@@ -624,24 +627,47 @@ def vessels_details(
                 break
         except Exception:
             continue
+
     if yb:
-        extra["YearBuilt"] = yb
+        base["YearBuilt"] = yb  # keep also in base for transparency
 
     # Final log & response
     logger.info(
-        "PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d",
-        vid, len(dims), len(tons), len(parts), len(docs)
+        "PSIX details: vid=%s dims=%d tons=%d parts=%d docs=%d (GT=%s NT=%s)",
+        vid, len(dims), len(tons), len(parts), len(docs), gross, net
     )
 
+    # Build merged with aliases many UIs expect
     merged = {
         **base,
-        **extra,
-        "VesselID": vid,
+        **{
+            "VesselID": vid,
+            "LOA_m": extra.get("LOA_m"),
+            "Beam_m": extra.get("Beam_m"),
+            "Depth_m": extra.get("Depth_m"),
+            "Draft_m": extra.get("Draft_m"),
+            # dimension aliases
+            "loa_meters": extra.get("LOA_m"),
+            "LengthOverallMeters": extra.get("LOA_m"),
+            "beam_meters": extra.get("Beam_m"),
+            "depth_meters": extra.get("Depth_m"),
+            "draft_meters": extra.get("Draft_m"),
+            # tonnage preferred keys
+            "GrossTonnage": gross,
+            "NetTonnage": net,
+            # tonnage aliases
+            "gross_tonnage": gross,
+            "net_tonnage": net,
+            "GT": gross,
+            "NT": net,
+        },
         "_documents": docs,
         "_tonnage_rows": tons,
         "_dimension_rows": dims,
     }
+
     return {"rows": [merged]}
+
 
 
 
