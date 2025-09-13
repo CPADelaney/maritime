@@ -732,7 +732,7 @@
         // ---------- Normalizer (no out-before-init) ----------
         augment(v) {
           const src = (v && typeof v === 'object') ? { ...v } : {};
-  
+        
           const scanDeep = (obj, keyRegex, accept = (val) => (
             (typeof val === 'string' && val.trim() !== '') || typeof val === 'number'
           ), depth = 0) => {
@@ -751,7 +751,7 @@
             return null;
           };
           const scan = (re, accept) => scanDeep(src, re, accept);
-  
+        
           const pick = (...cands) => {
             for (const c of cands) {
               if (c in src && src[c] != null) {
@@ -761,14 +761,14 @@
             }
             return null;
           };
-  
+        
           const toNumber = (val) => {
             if (val == null) return null;
             const n = Number(String(val).replace(/[^0-9.+-]/g, ''));
             return Number.isFinite(n) ? n : null;
           };
-  
-          const toMeters = (val) => {
+        
+          const toMetersGeneric = (val) => {
             if (val == null) return null;
             const s = String(val).toLowerCase();
             const n = toNumber(s);
@@ -776,11 +776,17 @@
             if (s.includes('ft') || s.includes('feet') || s.includes("'")) return n * 0.3048;
             return n; // assume meters if unitless
           };
-  
+        
+          // Feet→meters helper when we *know* the source is feet (e.g., LengthInFeet)
+          const feetToMeters = (val) => {
+            const n = toNumber(val);
+            return n == null ? null : n * 0.3048;
+          };
+        
           const num7 = (x) => (x ? String(x).match(/\b\d{6,7}\b/)?.[0] : null);
-  
+        
           // Identity / descriptors
-          const VesselID   = pick('VesselID','vesselid','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
+          const VesselID   = pick('VesselID','vesselid','VesselId','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
           const VesselName = pick('VesselName','vesselname','Name','name') ?? scan(/vessel.*name|^name$/i);
           const CallSign   = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign')
                           ?? scan(/call.?sign|radio.?call/i);
@@ -788,43 +794,67 @@
                           ?? scan(/(flag|country)(.*(name|lookup|state|country))?/i, v => isNaN(v));
           const VesselType = pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype')
                           ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
-  
+        
           // IDs
           const imoRaw = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMONo','IMOShipNo','imo')
                       || pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No')
                       || scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
           const IMONumber = num7(imoRaw);
-  
+        
           const OfficialNumber = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number')
                               ?? scan(/official.?number/i);
-  
+        
           const YearBuilt = (() => {
             const y = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
                    ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i);
             const n = Number(String(y ?? '').replace(/\D/g,''));
             return Number.isFinite(n) ? n : null;
           })();
-  
-          // Tonnage
-          const gtRaw = pick('GrossTonnage','GT','Gross_Tonnage','GrossTons','GrossTonnageText')
-                     ?? scan(/gross.*ton|(^|\b)gt\b/i);
-          const ntRaw = pick('NetTonnage','NT','Net_Tonnage')
-                     ?? scan(/net.*ton|(^|\b)nt\b/i);
+        
+          // Tonnage (broaden common aliases)
+          const gtRaw = pick(
+            'GrossTonnage','GrossRegisteredTonnage','GrossTons','GT','Gross_Tonnage','grosstonnage'
+          ) ?? scan(/gross.*ton|(^|\b)gt\b/i);
+          const ntRaw = pick(
+            'NetTonnage','NetRegisteredTonnage','NetTons','NT','Net_Tonnage','nettonnage'
+          ) ?? scan(/net.*ton|(^|\b)nt\b/i);
           const GrossTonnage = (toNumber(gtRaw) ?? gtRaw) ?? null;
           const NetTonnage   = (toNumber(ntRaw) ?? ntRaw) ?? null;
-  
-         
-          // IMPORTANT: do NOT map Depth → Draft; expose Depth separately
-          const lenRaw   = pick('LOA','Length','LengthOverall','OverallLength','LengthInFeet','loa_m','loa','length_overall','Length (ft)') ?? scan(/(length|loa)/i);
-          const beamRaw  = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','BreadthInFeet','beam_m','Breadth (ft)') ?? scan(/(beam|breadth|width)/i);
-          const draftRaw = pick('Draft','SummerDraft','draft_m') ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b/i);
-          const depthRaw = pick('Depth','DepthInFeet','Depth (ft)') ?? scan(/(^|\b)depth\b/i);
-          
-          const LOA_m   = toMeters(lenRaw);
-          const Beam_m  = toMeters(beamRaw);
-          const Draft_m = toMeters(draftRaw);
-          const Depth_m = toMeters(depthRaw);
-          
+        
+          // ---------- Dimensions ----------
+          // Prefer explicit meters, else explicit feet, else generic text (unit-detected)
+          // Length/LOA
+          const lenMetersRaw = pick('LOA_m','LengthInMeters','LOAInMeters','OverallLengthInMeters','loa_m','length_m');
+          const lenFeetRaw   = pick('LengthInFeet','LOAInFeet','OverallLengthInFeet','Length (ft)');
+          const lenGeneric   = pick('LOA','Length','LengthOverall','OverallLength','loa','length_overall') ?? scan(/(length|loa)/i);
+          const LOA_m = toNumber(lenMetersRaw)
+            ?? (feetToMeters(lenFeetRaw))
+            ?? toMetersGeneric(lenGeneric);
+        
+          // Beam/Breadth
+          const beamMetersRaw = pick('Beam_m','BreadthInMeters','BeamInMeters','OverallBreadthInMeters','MouldedBreadthInMeters','beam_m','breadth_m');
+          const beamFeetRaw   = pick('BreadthInFeet','BeamInFeet','OverallBreadthInFeet','MouldedBreadthInFeet','Breadth (ft)');
+          const beamGeneric   = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','beam','breadth') ?? scan(/(beam|breadth|width)/i);
+          const Beam_m = toNumber(beamMetersRaw)
+            ?? (feetToMeters(beamFeetRaw))
+            ?? toMetersGeneric(beamGeneric);
+        
+          // Depth (NOT Draft)
+          const depthMetersRaw = pick('Depth_m','DepthInMeters','MouldedDepthInMeters','depth_m');
+          const depthFeetRaw   = pick('DepthInFeet','MouldedDepthInFeet','Depth (ft)');
+          const depthGeneric   = pick('Depth','depth') ?? scan(/(^|\b)depth\b/i);
+          const Depth_m = toNumber(depthMetersRaw)
+            ?? (feetToMeters(depthFeetRaw))
+            ?? toMetersGeneric(depthGeneric);
+        
+          // Draft (optional, distinct from Depth)
+          const draftMetersRaw = pick('Draft_m','DraftInMeters','MaxDraftInMeters','draft_m');
+          const draftFeetRaw   = pick('DraftInFeet','MaxDraftInFeet','Draft (ft)');
+          const draftGeneric   = pick('Draft','SummerDraft','draft') ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b/i);
+          const Draft_m = toNumber(draftMetersRaw)
+            ?? (feetToMeters(draftFeetRaw))
+            ?? toMetersGeneric(draftGeneric);
+        
           return {
             ...src,
             VesselID, VesselName, CallSign, Flag, VesselType,
@@ -832,7 +862,8 @@
             GrossTonnage, NetTonnage,
             LOA_m, Beam_m, Draft_m, Depth_m
           };
-          }, // <— close augment properly
+        }, // ← close augment
+
   
         // --- Vessel search with server pagination + augmentation ---
         async searchVessel(page = 1) {
