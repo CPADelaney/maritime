@@ -13,6 +13,25 @@ CREATE TABLE IF NOT EXISTS ports (
   tariff_url VARCHAR(512)
 );
 
+CREATE TABLE IF NOT EXISTS port_documents (
+  id SERIAL PRIMARY KEY,
+  port_code VARCHAR(12) NOT NULL,
+  document_name VARCHAR(200) NOT NULL,
+  document_code VARCHAR(64),
+  is_mandatory BOOLEAN DEFAULT TRUE NOT NULL,
+  lead_time_hours INTEGER DEFAULT 0,
+  authority VARCHAR(200),
+  description TEXT,
+  applies_to_vessel_types TEXT[],
+  applies_if_foreign BOOLEAN DEFAULT FALSE
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS port_documents_unique_doc
+  ON port_documents (port_code, document_name, COALESCE(document_code, ''));
+
+CREATE INDEX IF NOT EXISTS port_documents_port_code_idx
+  ON port_documents (port_code);
+
 CREATE TABLE IF NOT EXISTS fees (
   id SERIAL PRIMARY KEY,
   code VARCHAR(64) UNIQUE NOT NULL,
