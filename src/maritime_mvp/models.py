@@ -4,7 +4,8 @@ import datetime
 from decimal import Decimal
 
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Boolean, Numeric, Date
+from sqlalchemy import String, Boolean, Numeric, Date, Integer, Text
+from sqlalchemy.dialects.postgresql import ARRAY
 
 class Base(DeclarativeBase):
     pass
@@ -49,3 +50,18 @@ class Source(Base):
     url: Mapped[str] = mapped_column(String(512))
     type: Mapped[str] = mapped_column(String(24))  # pilotage/tariff/law/program/api
     effective_date: Mapped[Optional[datetime.date]] = mapped_column(Date)
+
+
+class PortDocument(Base):
+    __tablename__ = "port_documents"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    port_code: Mapped[str] = mapped_column(String(12))
+    document_name: Mapped[str] = mapped_column(String(200))
+    document_code: Mapped[Optional[str]] = mapped_column(String(64))
+    is_mandatory: Mapped[bool] = mapped_column(Boolean, default=True)
+    lead_time_hours: Mapped[int] = mapped_column(Integer, default=0)
+    authority: Mapped[Optional[str]] = mapped_column(String(200))
+    description: Mapped[Optional[str]] = mapped_column(Text)
+    applies_to_vessel_types: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String))
+    applies_if_foreign: Mapped[bool] = mapped_column(Boolean, default=False)
