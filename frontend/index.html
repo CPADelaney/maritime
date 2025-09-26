@@ -882,16 +882,48 @@
         },
   
         async selectVessel(v) {
+          const prevSelected = this.selectedVessel || null;
+          const prevAutoFlags = {
+            autoGT: this.autoGT,
+            autoNT: this.autoNT,
+            autoLOA: this.autoLOA,
+            autoBeam: this.autoBeam,
+            autoDraft: this.autoDraft,
+          };
+          const makeToken = (obj) => {
+            if (!obj) return '';
+            const parts = [
+              obj.VesselID ?? obj.vessel_id ?? obj.id ?? '',
+              obj.CallSign ?? obj.VesselCallSign ?? '',
+              obj.VesselName ?? obj.Name ?? ''
+            ].map(val => String(val || '').trim().toUpperCase()).filter(Boolean);
+            return parts.join('|');
+          };
+          const prevToken = makeToken(prevSelected);
+
           const normalized = this.augment(v) || {};
+          const nextToken = makeToken(normalized) || makeToken(v);
+          const hadPrevious = !!prevSelected;
+          const vesselChanged = !hadPrevious || prevToken !== nextToken;
+
           this._rawSelected = v;
           this.selectedVessel = normalized;
-  
+          this._selectedVesselToken = nextToken;
+
           console.log('[select] raw row:', v);
           console.log('[select] normalized:', normalized);
-  
+
           // reset badges
           this.autoGT = this.autoNT = this.autoLOA = this.autoBeam = this.autoDraft = false;
-  
+
+          if (vesselChanged && hadPrevious) {
+            if (prevAutoFlags.autoGT) this.grossTonnage = null;
+            if (prevAutoFlags.autoNT) this.netTonnage = null;
+            if (prevAutoFlags.autoLOA) this.loaMeters = null;
+            if (prevAutoFlags.autoBeam) this.beamMeters = null;
+            if (prevAutoFlags.autoDraft) this.draftMeters = null;
+          }
+
           // quick type guess
           const s = (normalized.VesselType || '').toLowerCase();
           const guess =
@@ -904,20 +936,28 @@
             (s.includes('vehicle') || s.includes('car carrier')) ? 'vehicle_carrier' :
             'general_cargo';
           if (this.vesselType === 'general_cargo' && guess !== 'general_cargo') this.vesselType = guess;
-  
+
           // prefill from search row
-          const prefer = (curr, next, flag, dp = 2) => {
-            if (Number(curr) > 0) return curr;
+          const prefer = (field, next, flag, dp = 2) => {
+            const curr = this[field];
             const n = Number(next);
-            if (Number.isFinite(n) && n > 0) { this[flag] = true; return dp ? Number(n.toFixed(dp)) : n; }
-            return curr;
+            const currNum = Number(curr);
+            const currValid = Number.isFinite(currNum) && currNum > 0;
+            const nextValid = Number.isFinite(n) && n > 0;
+
+            if (!nextValid) return curr;
+            if (!vesselChanged && currValid) return curr;
+            if (vesselChanged && currValid && !prevAutoFlags[flag]) return curr;
+
+            this[flag] = true;
+            return dp ? Number(n.toFixed(dp)) : n;
           };
-          if (normalized.GrossTonnage != null) this.grossTonnage = prefer(this.grossTonnage, normalized.GrossTonnage, 'autoGT', 0);
-          if (normalized.NetTonnage   != null) this.netTonnage   = prefer(this.netTonnage,   normalized.NetTonnage,   'autoNT', 0);
-          if (normalized.LOA_m        != null) this.loaMeters    = prefer(this.loaMeters,    normalized.LOA_m,        'autoLOA', 2);
-          if (normalized.Beam_m       != null) this.beamMeters   = prefer(this.beamMeters,   normalized.Beam_m,       'autoBeam', 2);
-          if (normalized.Draft_m      != null) this.draftMeters  = prefer(this.draftMeters,  normalized.Draft_m,      'autoDraft', 2);
-  
+          if (normalized.GrossTonnage != null) this.grossTonnage = prefer('grossTonnage', normalized.GrossTonnage, 'autoGT', 0);
+          if (normalized.NetTonnage   != null) this.netTonnage   = prefer('netTonnage',   normalized.NetTonnage,   'autoNT', 0);
+          if (normalized.LOA_m        != null) this.loaMeters    = prefer('loaMeters',    normalized.LOA_m,        'autoLOA', 2);
+          if (normalized.Beam_m       != null) this.beamMeters   = prefer('beamMeters',   normalized.Beam_m,       'autoBeam', 2);
+          if (normalized.Draft_m      != null) this.draftMeters  = prefer('draftMeters',  normalized.Draft_m,      'autoDraft', 2);
+
           await this.enrichVesselDimensions();
           if (this.selectedPort) this.loadLiveData();
         },
