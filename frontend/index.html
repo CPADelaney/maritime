@@ -8,8 +8,6 @@
   <!-- Tailwind + Alpine (ok for dev; use a proper build for production) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
-  <!-- Charts -->
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
   <style>
     @keyframes slideUp { from { transform: translateY(8px); opacity:.0 } to { transform: translateY(0); opacity:1 } }
@@ -442,46 +440,6 @@
           </div>
         </template>
 
-        <!-- Historical Fee Trends -->
-        <div class="glass card p-6 animate-slide-up">
-          <div class="flex items-center justify-between mb-3">
-            <h3 class="text-xl font-semibold">Historical Fee Trends</h3>
-            <span class="badge">beta</span>
-          </div>
-
-          <div class="grid sm:grid-cols-3 gap-3 mb-3">
-            <div>
-              <label class="block text-xs font-medium mb-1">Port (internal)</label>
-              <select x-model="trendsPort" class="w-full field">
-                <option value="">Select…</option>
-                <template x-for="p in ports" :key="p.code">
-                  <option :value="p.code" x-text="`${p.name} (${p.code})`"></option>
-                </template>
-              </select>
-            </div>
-            <div>
-              <label class="block text-xs font-medium mb-1">Months</label>
-              <input x-model.number="trendsMonths" type="number" min="3" max="60" class="w-full field" />
-            </div>
-            <div>
-              <label class="block text-xs font-medium mb-1">Source</label>
-              <select x-model="trendsSource" class="w-full field">
-                <option value="fees">Fees table</option>
-                <option value="estimates">Estimates</option>
-              </select>
-            </div>
-          </div>
-
-          <div class="flex items-center gap-2 mb-3">
-            <button @click="loadTrends" :disabled="!trendsPort" class="btn btn-soft px-3 py-1.5 disabled:opacity-50">Load</button>
-            <span class="text-xs text-slate-500">Plots CBP, APHIS, MX, Tonnage (if available)</span>
-          </div>
-
-          <div class="relative">
-            <canvas id="trendsChart" height="140"></canvas>
-          </div>
-        </div>
-
         <!-- Multi-Port Voyage Planner -->
         <div class="glass card p-6 animate-slide-up">
           <div class="flex items-center justify-between mb-3">
@@ -682,12 +640,7 @@
         unlocNext: [],
         unlocMp: [],
   
-        // trends & multi-port
-        trendsChart: null,
-        trendsPort: '',
-        trendsMonths: 12,
-        trendsSource: 'fees',
-  
+        // multi-port
         mpVesselName: '',
         mpStartDate: new Date().toISOString().split('T')[0],
         mpDaysBetween: 14,
@@ -1310,47 +1263,6 @@
           a.href = URL.createObjectURL(blob);
           a.download = `estimate_v1_${this.selectedPort}_${this.eta}.csv`;
           a.click();
-        },
-  
-        // Historical trends
-        async loadTrends() {
-          if (!this.trendsPort) return;
-          try {
-            const url = `${API_BASE}/api/v2/fees/historical/${encodeURIComponent(this.trendsPort)}?months=${this.trendsMonths}&source=${this.trendsSource}`;
-            const r = await fetch(url);
-            if (!r.ok) throw new Error(await r.text());
-            const data = await r.json();
-            const series = data.series || {};
-            const labels = (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"] || []).map(p => p.month);
-  
-            const mk = (key, color) => {
-              const arr = (series[key] || []).map(p => p.value);
-              return { label: key, data: arr, borderColor: color, backgroundColor: color, tension: .25, spanGaps: true };
-            };
-            const palette = { cbp: '#ef4444', aphis: '#10b981', mx: '#6366f1', ton: '#f59e0b' };
-            const datasets = [];
-            if (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"] || series["CBP_USER_FEE"]) {
-              if (series["CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE"]) datasets.push(mk("CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE", palette.cbp));
-              else datasets.push(mk("CBP_USER_FEE", palette.cbp));
-            }
-            if (series["APHIS_COMMERCIAL_VESSEL"]) datasets.push(mk("APHIS_COMMERCIAL_VESSEL", palette.aphis));
-            if (series["MX_VTS_PER_CALL"]) datasets.push(mk("MX_VTS_PER_CALL", palette.mx));
-            if (series["TONNAGE_TAX_PER_TON"]) datasets.push(mk("TONNAGE_TAX_PER_TON", palette.ton));
-  
-            const ctx = document.getElementById('trendsChart').getContext('2d');
-            if (this.trendsChart) this.trendsChart.destroy();
-            this.trendsChart = new Chart(ctx, {
-              type: 'line',
-              data: { labels, datasets },
-              options: {
-                plugins: { legend: { position: 'bottom' } },
-                scales: { y: { ticks: { callback: v => '$' + Number(v).toLocaleString() } } }
-              }
-            });
-          } catch (e) {
-            console.error('Trends failed:', e);
-            alert('Failed to load trends.');
-          }
         },
   
         // Multi-port methods
