@@ -447,8 +447,8 @@
             <span class="badge">new</span>
           </div>
 
-          <div class="grid sm:grid-cols-3 gap-3">
-            <div class="sm:col-span-3">
+          <div class="grid sm:grid-cols-2 gap-3">
+            <div class="sm:col-span-2">
               <label class="block text-sm font-medium text-gray-700 mb-1">Vessel Name</label>
               <input x-model="mpVesselName" class="w-full field" placeholder="Defaults to selected vessel name if blank" />
             </div>
@@ -456,10 +456,6 @@
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Start Date</label>
               <input x-model="mpStartDate" type="date" class="w-full field" />
-            </div>
-            <div>
-              <label class="block text-sm font-medium text-gray-700 mb-1">Days Between Ports</label>
-              <input x-model.number="mpDaysBetween" type="number" min="1" class="w-full field" />
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Days in Port</label>
@@ -523,7 +519,7 @@
           <div x-show="mpResult" class="mt-4">
             <div class="text-sm text-slate-600 mb-2">
               <div><span class="font-medium">Legs:</span> <span x-text="mpResult?.voyage_summary?.total_legs"></span> ·
-                   <span class="font-medium">Days:</span> <span x-text="mpResult?.voyage_summary?.total_days"></span></div>
+                   <span class="font-medium">Port Days:</span> <span x-text="mpResult?.voyage_summary?.total_days_in_port"></span></div>
             </div>
 
             <div class="overflow-x-auto">
@@ -643,7 +639,6 @@
         // multi-port
         mpVesselName: '',
         mpStartDate: new Date().toISOString().split('T')[0],
-        mpDaysBetween: 14,
         mpDaysInPort: 2,
         mpPortInput: '',
         mpPorts: [],
@@ -1331,7 +1326,6 @@
             vessel_name: vessel.name,
             ports: this.mpPorts.slice(),
             start_date: this.mpStartDate,
-            days_between_ports: Number(this.mpDaysBetween) || 14,
             days_in_port: Number(this.mpDaysInPort) || 2,
           };
   

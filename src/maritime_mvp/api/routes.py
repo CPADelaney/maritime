@@ -83,7 +83,6 @@ class PortSequenceRequest(BaseModel):
     vessel_name: str
     ports: List[str] = Field(..., example=["CNSHA", "USOAK", "USSEA", "USLAX"])
     start_date: date = Field(..., example="2025-09-01")
-    days_between_ports: int = Field(14, example=14)
     days_in_port: int = Field(2, example=2)
 
 
@@ -599,7 +598,7 @@ async def calculate_multi_port_voyage(
             }
         )
 
-        current_date += timedelta(days=request.days_in_port + request.days_between_ports)
+        current_date += timedelta(days=request.days_in_port)
 
     total_mandatory = sum(_dec(leg["fees"]["mandatory"]) for leg in voyage_legs)
     total_optional_high = sum(_dec(leg["fees"]["optional_high"]) for leg in voyage_legs)
@@ -609,7 +608,7 @@ async def calculate_multi_port_voyage(
         "voyage_summary": {
             "total_ports": len(request.ports),
             "total_legs": len(voyage_legs),
-            "total_days": (current_date - request.start_date).days,
+            "total_days_in_port": (current_date - request.start_date).days,
             "start_date": request.start_date.isoformat(),
             "end_date": current_date.isoformat(),
         },
