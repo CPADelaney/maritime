@@ -159,10 +159,11 @@
               <div class="relative" @click.away="showPortDropdown = false">
                 <input
                   x-model="portQuery"
-                  @input="searchPorts()"
+                  @input="searchPorts(false, 'single')"
                   @focus="searchPorts(true)"
+                  @keydown.enter.prevent="selectFirstPortResult()"
                   class="w-full field pr-16"
-                  placeholder="Search for a port…"
+                  placeholder="Search zone, port, or terminal…"
                 />
                 <button
                   type="button"
@@ -176,25 +177,51 @@
                   x-show="showPortDropdown"
                   class="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg list-scroll"
                 >
-                  <template x-for="p in filteredPorts" :key="p.code">
+                  <template x-for="p in filteredPorts" :key="`single-${p.type}-${p.zoneCode}-${p.portCode || ''}-${p.terminalCode || p.terminalName || ''}`">
                     <button
                       type="button"
                       class="w-full text-left px-3 py-2 hover:bg-indigo-50"
                       @click="selectPort(p)"
                     >
-                      <div class="font-medium" x-text="portLabel(p)"></div>
-                      <div class="text-xs text-slate-500 flex items-center gap-2">
-                        <span class="chip bg-slate-100" x-text="p.code"></span>
-                        <span x-text="p.state || p.country"></span>
+                      <div class="font-medium text-slate-800" x-text="portResultTitle(p)"></div>
+                      <div class="text-xs text-slate-500 mt-1" x-text="portResultDescription(p)"></div>
+                      <div class="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
+                        <span class="chip bg-indigo-50 text-indigo-600" x-show="p.zoneCode" x-text="p.zoneCode"></span>
+                        <span class="chip bg-slate-100" x-show="p.portCode" x-text="p.portCode"></span>
+                        <span class="chip bg-slate-100" x-show="p.terminalCode" x-text="p.terminalCode"></span>
                       </div>
+                      <div class="text-[11px] text-slate-400 mt-0.5" x-show="p.operator" x-text="p.operator"></div>
                     </button>
                   </template>
                 </div>
               </div>
-              <div class="text-xs text-slate-500 mt-1">Tip: LALB, SFBAY, PUGET, COLRIV, STKN</div>
+              <div class="text-xs text-slate-500 mt-1">
+                Selects the zone code required for downstream APIs. Try “Bellingham” or “Los Angeles”.
+              </div>
 
-              <div x-show="selectedPort" class="mt-1">
-                <span class="chip bg-slate-100">Internal: <span x-text="selectedPort"></span></span>
+              <div x-show="selectedPortContext" class="mt-2 text-xs text-slate-600 space-y-1">
+                <div class="flex items-center gap-2">
+                  <span class="font-semibold" x-text="selectedPortContext.zoneName"></span>
+                  <span class="chip bg-indigo-50 text-indigo-600" x-text="selectedPortContext.zoneCode"></span>
+                </div>
+                <template x-if="selectedPortContext.portName">
+                  <div>
+                    <span class="text-slate-500">Port:</span>
+                    <span class="font-medium" x-text="selectedPortContext.portName"></span>
+                    <span class="chip bg-slate-100 ml-1" x-text="selectedPortContext.portCode"></span>
+                  </div>
+                </template>
+                <template x-if="selectedPortContext.terminalName">
+                  <div>
+                    <span class="text-slate-500">Terminal:</span>
+                    <span class="font-medium" x-text="selectedPortContext.terminalName"></span>
+                    <span class="chip bg-slate-100 ml-1" x-text="selectedPortContext.terminalCode || '—'"></span>
+                  </div>
+                </template>
+                <template x-if="selectedPortContext.operator">
+                  <div class="text-[11px] text-slate-500">Operator: <span x-text="selectedPortContext.operator"></span></div>
+                </template>
+                <div class="text-[11px] text-slate-400" x-show="selectedPortContext.description" x-text="selectedPortContext.description"></div>
               </div>
             </div>
 
@@ -537,28 +564,69 @@
           </div>
 
           <div class="mt-3">
-            <label class="block text-sm font-medium text-gray-700 mb-1">Ports (UN/LOCODE sequence)</label>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Ports (zone selections)</label>
             <div class="flex gap-2">
-              <input x-model="mpPortInput" @input.debounce.250ms="searchUnloc('mp')" placeholder="Type UN/LOCODE or name…" class="w-full field" />
-              <button @click="addMpPort" class="btn btn-soft px-3 py-1.5">Add</button>
+              <div class="relative flex-1" @click.away="showMpDropdown = false">
+                <input
+                  x-model="mpPortInput"
+                  @input="searchPorts(false, 'multi')"
+                  @focus="searchPorts(true, 'multi')"
+                  @keydown.enter.prevent="addMpPort()"
+                  placeholder="Search zone, port, or terminal…"
+                  class="w-full field pr-16"
+                />
+                <button
+                  type="button"
+                  class="absolute inset-y-0 right-0 px-3 text-sm text-indigo-600 hover:text-indigo-700"
+                  x-show="mpPortInput"
+                  @click="mpPortInput=''; searchPorts(true, 'multi')"
+                >
+                  Clear
+                </button>
+                <div
+                  x-show="showMpDropdown"
+                  class="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg list-scroll"
+                >
+                  <template x-for="p in mpFilteredPorts" :key="`multi-${p.type}-${p.zoneCode}-${p.portCode || ''}-${p.terminalCode || p.terminalName || ''}`">
+                    <button
+                      type="button"
+                      class="w-full text-left px-3 py-2 hover:bg-indigo-50"
+                      @click="addMpPort(p)"
+                    >
+                      <div class="font-medium text-slate-800" x-text="portResultTitle(p)"></div>
+                      <div class="text-xs text-slate-500 mt-1" x-text="portResultDescription(p)"></div>
+                      <div class="mt-1 flex flex-wrap gap-1 text-[11px] text-slate-500">
+                        <span class="chip bg-indigo-50 text-indigo-600" x-show="p.zoneCode" x-text="p.zoneCode"></span>
+                        <span class="chip bg-slate-100" x-show="p.portCode" x-text="p.portCode"></span>
+                        <span class="chip bg-slate-100" x-show="p.terminalCode" x-text="p.terminalCode"></span>
+                      </div>
+                      <div class="text-[11px] text-slate-400 mt-0.5" x-show="p.operator" x-text="p.operator"></div>
+                    </button>
+                  </template>
+                </div>
+              </div>
+              <button @click="addMpPort()" class="btn btn-soft px-3 py-1.5">Add</button>
             </div>
 
-            <div x-show="unlocMp.length" class="mt-1 border rounded-lg bg-white shadow-sm">
-              <template x-for="p in unlocMp" :key="p.locode">
-                <div @click="mpPortInput = p.locode; unlocMp = []" class="px-3 py-2 hover:bg-gray-50 cursor-pointer text-sm">
-                  <span class="font-medium" x-text="p.port_name"></span>
-                  <span class="ml-2 chip bg-slate-100" x-text="p.locode"></span>
+            <div class="text-xs text-slate-500 mt-1">Reuse the same zone lookup—selections are sent as internal zone codes.</div>
+
+            <div class="mt-3 space-y-2">
+              <template x-for="(item, i) in mpPorts" :key="`${item.zoneCode}-${i}`">
+                <div class="flex items-start justify-between bg-slate-100 rounded-lg px-3 py-2 text-slate-700">
+                  <div>
+                    <div class="font-medium" x-text="item.label"></div>
+                    <div class="text-[11px] text-slate-500" x-show="item.description" x-text="item.description"></div>
+                  </div>
+                  <div class="flex items-center gap-2">
+                    <div class="flex flex-wrap gap-1 text-[11px] text-slate-500">
+                      <span class="chip bg-indigo-50 text-indigo-600" x-text="item.zoneCode"></span>
+                      <span class="chip bg-slate-100" x-show="item.portCode" x-text="item.portCode"></span>
+                    </div>
+                    <button @click="removeMpPort(i)" class="text-slate-500 hover:text-slate-700" aria-label="remove">×</button>
+                  </div>
                 </div>
               </template>
-            </div>
-
-            <div class="mt-2 flex flex-wrap gap-2">
-              <template x-for="(code, i) in mpPorts" :key="i">
-                <span class="chip bg-slate-100">
-                  <span x-text="code"></span>
-                  <button @click="removeMpPort(i)" class="ml-1 text-slate-500 hover:text-slate-700" aria-label="remove">×</button>
-                </span>
-              </template>
+              <div x-show="mpPorts.length === 0" class="text-xs text-slate-400">No ports added yet.</div>
             </div>
           </div>
 
@@ -609,7 +677,7 @@
 
           <div class="mt-3 flex items-center gap-2">
             <button @click="submitMultiPort" :disabled="mpPorts.length < 2" class="btn btn-primary px-3 py-1.5 disabled:opacity-50">Plan Voyage</button>
-            <span class="text-xs text-slate-500">Add at least two UN/LOCODEs</span>
+            <span class="text-xs text-slate-500">Add at least two zones to build a voyage.</span>
           </div>
 
           <div x-show="mpResult" class="mt-4">
@@ -701,12 +769,23 @@
   
         // selection & forms
         selectedVessel: null,
-        ports: [],
+        zones: [],
+        portSearchIndex: [],
+        zoneLookup: {},
+        portLookup: {},
+        terminalLookup: {},
+        zoneLabels: {},
+        portLabels: {},
+        terminalLabels: {},
+        selectedPortContext: null,
         selectedPort: '',
         portQuery: '',
         filteredPorts: [],
+        mpFilteredPorts: [],
         showPortDropdown: false,
+        showMpDropdown: false,
         portSearchTimeout: null,
+        mpPortSearchTimeout: null,
         eta: new Date().toISOString().split('T')[0],
         arrivalType: 'FOREIGN',
         netTonnage: '',
@@ -735,7 +814,6 @@
         // UN/LOCODE suggestions
         unlocPrev: [],
         unlocNext: [],
-        unlocMp: [],
   
         // multi-port
         mpVesselName: '',
@@ -772,29 +850,253 @@
         async loadPorts() {
           try {
             const r = await fetch(`${API_BASE}/ports`);
-            this.ports = await r.json();
+            const zones = await r.json();
+            this.buildPortCaches(Array.isArray(zones) ? zones : []);
             this.filteredPorts = [];
+            this.mpFilteredPorts = [];
             this.showPortDropdown = false;
+            this.showMpDropdown = false;
             this.syncPortQueryWithSelection();
           } catch (e) {
             console.error('Ports load failed:', e);
           }
         },
 
-        portLabel(port) {
-          if (!port) return '';
-          const name = port.name || port.code || '';
-          const region = port.state || port.country || '';
-          return region && name ? `${name} (${region})` : name;
+        buildPortCaches(zones) {
+          const tokenize = (...values) => {
+            const tokens = new Set();
+            const push = (value) => {
+              if (Array.isArray(value)) {
+                value.forEach(push);
+                return;
+              }
+              if (value == null) return;
+              String(value)
+                .toLowerCase()
+                .split(/[^a-z0-9]+/i)
+                .filter(Boolean)
+                .forEach((token) => tokens.add(token));
+            };
+            values.forEach(push);
+            return Array.from(tokens).join(' ');
+          };
+
+          this.zones = zones;
+          this.zoneLookup = {};
+          this.portLookup = {};
+          this.terminalLookup = {};
+          this.zoneLabels = {};
+          this.portLabels = {};
+          this.terminalLabels = {};
+
+          const index = [];
+
+          for (const zone of zones) {
+            const zoneCode = String(zone?.zone_code || '').trim().toUpperCase();
+            const zoneName = zone?.zone_name || zoneCode || 'Unknown Zone';
+            this.zoneLookup[zoneCode] = zone;
+            this.zoneLabels[zoneCode] = zoneCode ? `${zoneName} (${zoneCode})` : zoneName;
+
+            const zoneTokenCollector = [
+              zoneCode,
+              zoneName,
+              zone?.region,
+              zone?.primary_state,
+              zone?.country,
+            ];
+
+            const zoneEntries = [];
+            const ports = Array.isArray(zone?.ports) ? zone.ports : [];
+            for (const port of ports) {
+              const portCode = String(port?.code || '').trim().toUpperCase();
+              const portName = port?.name || portCode || 'Unnamed Port';
+              if (portCode) this.portLookup[portCode] = { zoneCode, zoneName, port };
+              if (portCode) this.portLabels[`${zoneCode}::${portCode}`] = `${zoneName} • ${portName}`;
+
+              zoneTokenCollector.push(portCode, portName, port?.state, port?.country, port?.region);
+
+              const location = [
+                port?.state || zone?.primary_state,
+                port?.country || zone?.country,
+              ].filter(Boolean).join(', ');
+
+              const portEntry = {
+                type: 'port',
+                zoneCode,
+                zoneName,
+                portCode,
+                portName,
+                terminalCode: null,
+                terminalName: null,
+                zone,
+                port,
+                terminal: null,
+                label: `${zoneName} • ${portName}`,
+                description: [
+                  zoneCode ? `Zone ${zoneCode}` : null,
+                  portCode ? `Port ${portCode}` : null,
+                  location || null,
+                ].filter(Boolean).join(' · '),
+                operator: '',
+                haystack: tokenize(
+                  zoneCode,
+                  zoneName,
+                  zone?.region,
+                  zone?.primary_state,
+                  zone?.country,
+                  portCode,
+                  portName,
+                  port?.state,
+                  port?.country,
+                  port?.region,
+                ),
+              };
+              zoneEntries.push(portEntry);
+
+              const terminals = Array.isArray(port?.public_terminals) ? port.public_terminals : [];
+              for (const term of terminals) {
+                const termCodeRaw = term?.code ? String(term.code).trim() : '';
+                const termCode = termCodeRaw.toUpperCase();
+                const termName = term?.name || termCode || 'Terminal';
+                const operator = term?.operator_name || '';
+                const notes = term?.notes || '';
+
+                zoneTokenCollector.push(termCode, termName, operator);
+
+                const terminalEntry = {
+                  type: 'terminal',
+                  zoneCode,
+                  zoneName,
+                  portCode,
+                  portName,
+                  terminalCode: termCode || null,
+                  terminalName: termName,
+                  zone,
+                  port,
+                  terminal: term,
+                  label: `${zoneName} • ${portName} • ${termName}`,
+                  description: [
+                    zoneCode ? `Zone ${zoneCode}` : null,
+                    portCode ? `Port ${portCode}` : null,
+                    termCode ? `Terminal ${termCode}` : null,
+                    operator || null,
+                    location || null,
+                  ].filter(Boolean).join(' · '),
+                  operator,
+                  haystack: tokenize(
+                    zoneCode,
+                    zoneName,
+                    zone?.region,
+                    zone?.primary_state,
+                    zone?.country,
+                    portCode,
+                    portName,
+                    port?.state,
+                    port?.country,
+                    port?.region,
+                    termCode,
+                    termName,
+                    operator,
+                    notes,
+                  ),
+                };
+                zoneEntries.push(terminalEntry);
+
+                if (termCode) {
+                  this.terminalLookup[`${zoneCode}::${termCode}`] = { zoneCode, portCode, terminal: term, port, zone };
+                  this.terminalLabels[`${zoneCode}::${termCode}`] = terminalEntry.label;
+                }
+                if (termName) {
+                  this.terminalLookup[`${zoneCode}::name::${termName.toLowerCase()}`] = { zoneCode, portCode, terminal: term, port, zone };
+                }
+              }
+            }
+
+            const portCount = ports.length;
+            const zoneEntry = {
+              type: 'zone',
+              zoneCode,
+              zoneName,
+              portCode: null,
+              portName: null,
+              terminalCode: null,
+              terminalName: null,
+              zone,
+              port: null,
+              terminal: null,
+              label: zoneName,
+              description: [
+                zoneCode ? `Zone ${zoneCode}` : null,
+                [zone?.primary_state, zone?.country].filter(Boolean).join(', ') || null,
+                portCount ? `${portCount} port${portCount === 1 ? '' : 's'}` : null,
+              ].filter(Boolean).join(' · '),
+              operator: '',
+              haystack: tokenize(zoneTokenCollector),
+            };
+
+            index.push(zoneEntry, ...zoneEntries);
+          }
+
+          this.portSearchIndex = index;
+        },
+
+        makeSelectionContext(entry) {
+          if (!entry) return null;
+          const zone = this.zoneLookup[entry.zoneCode] || entry.zone || null;
+          const port = entry.port || (entry.portCode ? this.portLookup[entry.portCode]?.port : null);
+          let terminal = entry.terminal || null;
+          if (!terminal && entry.terminalCode && port) {
+            terminal = (Array.isArray(port?.public_terminals) ? port.public_terminals : []).find(
+              (t) => String(t?.code || '').trim().toUpperCase() === entry.terminalCode
+            ) || null;
+          }
+          const labelParts = [entry.zoneName || entry.zoneCode];
+          if (entry.portName) labelParts.push(entry.portName);
+          if (entry.terminalName) labelParts.push(entry.terminalName);
+          const descriptionParts = [
+            entry.zoneCode ? `Zone ${entry.zoneCode}` : null,
+            entry.portCode ? `Port ${entry.portCode}` : null,
+            entry.terminalCode ? `Terminal ${entry.terminalCode}` : null,
+            [port?.state || zone?.primary_state, port?.country || zone?.country].filter(Boolean).join(', ') || null,
+          ].filter(Boolean);
+          if (terminal?.operator_name) descriptionParts.push(terminal.operator_name);
+
+          return {
+            ...entry,
+            zone,
+            port,
+            terminal,
+            label: labelParts.join(' • '),
+            description: descriptionParts.join(' · '),
+            operator: terminal?.operator_name || entry.operator || '',
+          };
+        },
+
+        portResultTitle(entry) {
+          return entry ? (entry.label || '') : '';
+        },
+
+        portResultDescription(entry) {
+          return entry ? (entry.description || '') : '';
         },
 
         syncPortQueryWithSelection() {
           if (!this.selectedPort) {
+            this.selectedPortContext = null;
             this.portQuery = '';
             return;
           }
-          const match = this.ports.find(p => p.code === this.selectedPort);
-          this.portQuery = match ? this.portLabel(match) : this.selectedPort;
+          if (!this.selectedPortContext || this.selectedPortContext.zoneCode !== this.selectedPort) {
+            const fallback = this.portSearchIndex.find(
+              (entry) => entry.zoneCode === this.selectedPort && entry.type === 'zone'
+            );
+            this.selectedPortContext = this.makeSelectionContext(fallback ?? null);
+          }
+          if (this.selectedPortContext) {
+            this.portQuery = this.selectedPortContext.label;
+          } else {
+            this.portQuery = this.zoneLabels[this.selectedPort] || this.selectedPort;
+          }
         },
 
         clearPortQuery() {
@@ -807,56 +1109,118 @@
           this.showPortDropdown = false;
           if (this.selectedPort) {
             this.selectedPort = '';
+            this.selectedPortContext = null;
           }
         },
 
-        searchPorts(immediate = false) {
-          if (!Array.isArray(this.ports) || this.ports.length === 0) {
-            this.filteredPorts = [];
-            this.showPortDropdown = false;
+        rankPortMatches(tokens) {
+          const matches = [];
+          for (const entry of this.portSearchIndex) {
+            if (!entry?.haystack) continue;
+            const haystack = entry.haystack;
+            const allMatch = tokens.every((token) => haystack.includes(token));
+            if (!allMatch) continue;
+            let score = 0;
+            const qExact = (value) => value && tokens.length === 1 && value === tokens[0];
+            if (qExact(entry.zoneCode?.toLowerCase())) score += 6;
+            if (qExact(entry.portCode?.toLowerCase())) score += 5;
+            if (qExact(entry.terminalCode?.toLowerCase())) score += 5;
+            const primaryMatches = [entry.zoneName, entry.portName, entry.terminalName]
+              .map((value) => (value || '').toLowerCase());
+            for (const token of tokens) {
+              if (entry.zoneCode?.toLowerCase().includes(token)) score += 2;
+              if (entry.portCode?.toLowerCase().includes(token)) score += 2;
+              if ((entry.terminalCode || '').toLowerCase().includes(token)) score += 2;
+              if (primaryMatches.some((v) => v && v.includes(token))) score += 1;
+            }
+            if (entry.type === 'zone') score += 1;
+            if (entry.type === 'port') score += 2;
+            if (entry.type === 'terminal') score += 3;
+            matches.push({ entry, score });
+          }
+          matches.sort((a, b) => {
+            if (b.score !== a.score) return b.score - a.score;
+            return (a.entry.label || '').localeCompare(b.entry.label || '');
+          });
+          return matches.slice(0, 12).map((m) => m.entry);
+        },
+
+        searchPorts(immediate = false, target = 'single') {
+          const configs = {
+            single: {
+              getQuery: () => this.portQuery,
+              clear: () => {
+                this.filteredPorts = [];
+                this.showPortDropdown = false;
+              },
+              apply: (matches) => {
+                this.filteredPorts = matches;
+                this.showPortDropdown = matches.length > 0;
+              },
+              timeoutProp: 'portSearchTimeout',
+            },
+            multi: {
+              getQuery: () => this.mpPortInput,
+              clear: () => {
+                this.mpFilteredPorts = [];
+                this.showMpDropdown = false;
+              },
+              apply: (matches) => {
+                this.mpFilteredPorts = matches;
+                this.showMpDropdown = matches.length > 0;
+              },
+              timeoutProp: 'mpPortSearchTimeout',
+            },
+          };
+
+          const cfg = configs[target] || configs.single;
+          if (!Array.isArray(this.portSearchIndex) || this.portSearchIndex.length === 0) {
+            cfg.clear();
             return;
           }
 
-          if (this.portSearchTimeout) {
-            clearTimeout(this.portSearchTimeout);
-            this.portSearchTimeout = null;
+          if (this[cfg.timeoutProp]) {
+            clearTimeout(this[cfg.timeoutProp]);
+            this[cfg.timeoutProp] = null;
           }
 
           const run = () => {
-            this.portSearchTimeout = null;
-            const query = this.portQuery.trim().toLowerCase();
+            this[cfg.timeoutProp] = null;
+            const query = (cfg.getQuery() || '').trim().toLowerCase();
             if (!query) {
-              this.filteredPorts = [];
-              this.showPortDropdown = false;
+              cfg.clear();
               return;
             }
-
-            const matches = this.ports.filter((p) => {
-              const name = (p.name || '').toLowerCase();
-              const code = (p.code || '').toLowerCase();
-              const region = (p.state || p.country || '').toLowerCase();
-              const label = this.portLabel(p).toLowerCase();
-              return label.includes(query) || name.includes(query) || code.includes(query) || region.includes(query);
-            }).slice(0, 12);
-
-            this.filteredPorts = matches;
-            this.showPortDropdown = matches.length > 0;
+            const tokens = query.split(/[^a-z0-9]+/g).filter(Boolean);
+            if (!tokens.length) {
+              cfg.clear();
+              return;
+            }
+            const matches = this.rankPortMatches(tokens);
+            cfg.apply(matches);
           };
 
-          if (immediate) {
-            run();
-          } else {
-            this.portSearchTimeout = setTimeout(run, 200);
+          if (immediate) run();
+          else this[cfg.timeoutProp] = setTimeout(run, 180);
+        },
+
+        selectFirstPortResult(target = 'single') {
+          const results = target === 'multi' ? this.mpFilteredPorts : this.filteredPorts;
+          if (results.length) {
+            if (target === 'multi') this.addMpPort(results[0]);
+            else this.selectPort(results[0]);
           }
         },
 
-        selectPort(port) {
-          if (!port) return;
-          this.selectedPort = port.code || '';
-          this.portQuery = this.portLabel(port);
+        selectPort(entry) {
+          if (!entry) return;
+          const context = this.makeSelectionContext(entry);
+          this.selectedPortContext = context;
+          this.selectedPort = context?.zoneCode || '';
+          this.portQuery = context?.label || '';
           this.filteredPorts = [];
           this.showPortDropdown = false;
-          this.loadLiveData();
+          if (this.selectedPort) this.loadLiveData();
         },
 
         // ---------- Normalizer (no out-before-init) ----------
@@ -1469,12 +1833,11 @@
   
         // UN/LOCODE typeahead for previous/next/mp ports
         async searchUnloc(current = 'prev') {
-          const base = current === 'prev' ? this.previousPortCode : current === 'next' ? this.nextPortCode : this.mpPortInput;
+          const base = current === 'prev' ? this.previousPortCode : this.nextPortCode;
           const q = (base || '').trim();
           if (q.length < 2) {
             if (current === 'prev') this.unlocPrev = [];
-            else if (current === 'next') this.unlocNext = [];
-            else this.unlocMp = [];
+            else this.unlocNext = [];
             return;
           }
           try {
@@ -1482,8 +1845,7 @@
             if (!r.ok) throw new Error('UN/LOCODE search failed');
             const rows = await r.json();
             if (current === 'prev') this.unlocPrev = rows;
-            else if (current === 'next') this.unlocNext = rows;
-            else this.unlocMp = rows;
+            else this.unlocNext = rows;
           } catch (e) {
             console.error('UN/LOCODE search error:', e);
           }
@@ -1555,16 +1917,30 @@
         },
   
         // Multi-port methods
-        addMpPort() {
-          const code = (this.mpPortInput || '').trim().toUpperCase();
-          if (!code) return;
-          this.mpPorts.push(code);
+        addMpPort(entry = null) {
+          let context = entry ? this.makeSelectionContext(entry) : null;
+          if (!context) {
+            if (this.mpFilteredPorts.length) {
+              context = this.makeSelectionContext(this.mpFilteredPorts[0]);
+            } else {
+              const direct = (this.mpPortInput || '').trim().toUpperCase();
+              if (direct && this.zoneLookup[direct]) {
+                const fallback = this.portSearchIndex.find(
+                  (item) => item.zoneCode === direct && item.type === 'zone'
+                );
+                context = this.makeSelectionContext(fallback ?? null);
+              }
+            }
+          }
+          if (!context) return;
+          this.mpPorts.push(context);
           this.mpPortInput = '';
-          this.unlocMp = [];
+          this.mpFilteredPorts = [];
+          this.showMpDropdown = false;
         },
         removeMpPort(i) { this.mpPorts.splice(i, 1); },
         async submitMultiPort() {
-          if (this.mpPorts.length < 2) { alert('Add at least two UN/LOCODE ports.'); return; }
+          if (this.mpPorts.length < 2) { alert('Add at least two zones or ports.'); return; }
   
           const mpFwdDraft = Number(this.draftForwardMeters) || 0;
           const mpAftDraft = Number(this.draftAftMeters) || 0;
@@ -1590,7 +1966,7 @@
           };
           const request = {
             vessel_name: vessel.name,
-            ports: this.mpPorts.slice(),
+            ports: this.mpPorts.map((p) => p.zoneCode),
             start_date: this.mpStartDate,
             days_in_port: Number(this.mpDaysInPort) || 2,
           };
