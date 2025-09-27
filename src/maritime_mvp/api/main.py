@@ -1024,7 +1024,6 @@ def estimate(
             optional_services = [
                 {"service": "Pilotage", "estimated_low": 5000, "estimated_high": 15000, "note": "Varies by size/draft"},
                 {"service": "Tugboat Assist", "estimated_low": 3000, "estimated_high": 8000, "note": "Depends on maneuvering"},
-                {"service": "Launch Service", "estimated_low": 500, "estimated_high": 1500, "note": "Crew/supplies"},
                 {"service": "Line Handling", "estimated_low": 1000, "estimated_high": 2500, "note": "Mooring/unmooring"},
             ]
 

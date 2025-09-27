@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
@@ -9,12 +10,16 @@ import sys
 
 sys.path.append(str(Path(__file__).resolve().parents[1] / "src"))
 
+from fastapi.testclient import TestClient
+
 from maritime_mvp.rules.fee_engine import (
     FeeCalculation,
     FeeEngine,
     VesselSpecs,
     VoyageContext,
 )
+
+os.environ.setdefault("DATABASE_URL", "sqlite://")
 
 
 def _make_fee(code: str, amount: str, *, optional: bool = False) -> FeeCalculation:
@@ -74,3 +79,55 @@ def test_comprehensive_excludes_legacy_optional_services_by_default():
     assert optional_codes == {"LINE_HANDLING", "TUGBOAT"}
     assert result["totals"]["optional_low"] == str(Decimal("9000.00"))
     assert result["totals"]["optional_high"] == str(Decimal("15500.00"))
+
+
+def test_estimate_endpoint_excludes_legacy_launch_service(monkeypatch):
+    from maritime_mvp.api import main as api_main
+
+    class DummySession:
+        def execute(self, stmt):  # noqa: D401 - simple stub
+            class Result:
+                def scalar_one_or_none(self_inner):
+                    return SimpleNamespace(code="LALB", name="Port of Los Angeles")
+
+            return Result()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(api_main, "SessionLocal", lambda: DummySession())
+
+    class StubFeeEngine:
+        _infer_arrival_type = staticmethod(lambda previous, declared: declared or "FOREIGN")
+
+        def __init__(self, db):  # noqa: D401 - simple stub
+            pass
+
+        def compute(self, ctx):
+            return [
+                SimpleNamespace(
+                    code="CBP",
+                    name="CBP User Fee",
+                    amount=Decimal("100.00"),
+                    details="stub",
+                )
+            ]
+
+    monkeypatch.setattr(api_main, "FeeEngine", StubFeeEngine)
+
+    client = TestClient(api_main.app)
+    response = client.get(
+        "/estimate",
+        params={
+            "port_code": "LALB",
+            "eta": "2024-05-01",
+            "arrival_type": "FOREIGN",
+            "include_optional": "true",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    services = payload.get("optional_services", [])
+    assert services, "expected optional services list to be populated"
+    assert all("Launch" not in svc["service"] for svc in services)
