@@ -193,11 +193,13 @@ class FeeEngine:
         "COLRIV": {"base": 3800, "per_foot": 8.00, "draft_mult": 1.20},
     }
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, *, show_legacy_optional: bool = False):
         self.db = db
         # Rolling caps for comprehensive API; the simple API takes caps from ctx
         self.ytd_cbp_paid = Decimal("0.00")
         self.tonnage_year_paid = Decimal("0.00")
+        # Legacy optional services (launch, garbage, fresh water) are hidden by default.
+        self.show_legacy_optional = show_legacy_optional
 
     # ------------- Holiday helper -------------
 
@@ -448,12 +450,35 @@ class FeeEngine:
         calcs.append(self._calc_mx(voyage, port))
 
         # 8) Optional services (water, garbage, launch, lines, etc.)
-        calcs.extend(self._optional_services(voyage))
+        optional_calcs = self._optional_services(
+            voyage, include_legacy=self.show_legacy_optional
+        )
+        calcs.extend(optional_calcs)
 
-        # Totals
-        mandatory_total = _money(sum(c.final_amount for c in calcs if not c.is_optional))
-        opt_low = _money(sum((c.estimated_range[0] if c.estimated_range else c.final_amount) for c in calcs if c.is_optional))
-        opt_high = _money(sum((c.estimated_range[1] if c.estimated_range else c.final_amount) for c in calcs if c.is_optional))
+        # Totals (recalculate from the filtered lists to ensure deprecated options stay excluded)
+        mandatory_calcs = [c for c in calcs if not c.is_optional]
+        optional_calcs = [c for c in calcs if c.is_optional]
+        mandatory_total = _money(sum(c.final_amount for c in mandatory_calcs))
+        opt_low = _money(
+            sum(
+                (
+                    c.estimated_range[0]
+                    if c.estimated_range
+                    else c.final_amount
+                )
+                for c in optional_calcs
+            )
+        )
+        opt_high = _money(
+            sum(
+                (
+                    c.estimated_range[1]
+                    if c.estimated_range
+                    else c.final_amount
+                )
+                for c in optional_calcs
+            )
+        )
 
         confidences = [c.confidence for c in calcs if not c.is_optional]
         overall_conf = (sum(confidences) / Decimal(len(confidences))) if confidences else Decimal("0.85")
@@ -768,7 +793,9 @@ class FeeEngine:
             calculation_details="Fallback fixed port fee",
         )
 
-    def _optional_services(self, voyage: VoyageContext) -> List[FeeCalculation]:
+    def _optional_services(
+        self, voyage: VoyageContext, *, include_legacy: bool = False
+    ) -> List[FeeCalculation]:
         out: List[FeeCalculation] = []
 
         out.append(
@@ -783,42 +810,46 @@ class FeeEngine:
                 estimated_range=(Decimal("1000.00"), Decimal("2500.00")),
             )
         )
-        out.append(
-            FeeCalculation(
-                code="LAUNCH_SERVICE",
-                name="Launch/Water Taxi Service",
-                base_amount=_money(800),
-                final_amount=_money(800),
-                confidence=Decimal("0.75"),
-                calculation_details="Crew transportation",
-                is_optional=True,
-                estimated_range=(Decimal("500.00"), Decimal("1500.00")),
-            )
-        )
-        out.append(
-            FeeCalculation(
-                code="GARBAGE",
-                name="Garbage Disposal",
-                base_amount=_money(600),
-                final_amount=_money(600),
-                confidence=Decimal("0.90"),
-                calculation_details="Waste removal",
-                is_optional=True,
-                estimated_range=(Decimal("400.00"), Decimal("1000.00")),
-            )
-        )
-        if voyage.days_alongside > 1:
-            amt = _money(200) * Decimal(str(voyage.days_alongside))
+        if include_legacy:
             out.append(
                 FeeCalculation(
-                    code="FRESH_WATER",
-                    name="Fresh Water Supply",
-                    base_amount=amt,
-                    final_amount=amt,
-                    confidence=Decimal("0.85"),
-                    calculation_details=f"$200/day × {voyage.days_alongside} days",
+                    code="LAUNCH_SERVICE",
+                    name="Launch/Water Taxi Service",
+                    base_amount=_money(800),
+                    final_amount=_money(800),
+                    confidence=Decimal("0.75"),
+                    calculation_details="Crew transportation",
                     is_optional=True,
-                    estimated_range=(_money(amt * Decimal("0.8")), _money(amt * Decimal("1.2"))),
+                    estimated_range=(Decimal("500.00"), Decimal("1500.00")),
                 )
             )
+            out.append(
+                FeeCalculation(
+                    code="GARBAGE",
+                    name="Garbage Disposal",
+                    base_amount=_money(600),
+                    final_amount=_money(600),
+                    confidence=Decimal("0.90"),
+                    calculation_details="Waste removal",
+                    is_optional=True,
+                    estimated_range=(Decimal("400.00"), Decimal("1000.00")),
+                )
+            )
+            if voyage.days_alongside > 1:
+                amt = _money(200) * Decimal(str(voyage.days_alongside))
+                out.append(
+                    FeeCalculation(
+                        code="FRESH_WATER",
+                        name="Fresh Water Supply",
+                        base_amount=amt,
+                        final_amount=amt,
+                        confidence=Decimal("0.85"),
+                        calculation_details=f"$200/day × {voyage.days_alongside} days",
+                        is_optional=True,
+                        estimated_range=(
+                            _money(amt * Decimal("0.8")),
+                            _money(amt * Decimal("1.2")),
+                        ),
+                    )
+                )
         return out
