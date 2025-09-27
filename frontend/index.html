@@ -156,12 +156,41 @@
           <div class="space-y-3">
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Port (internal)</label>
-              <select x-model="selectedPort" @change="loadLiveData" class="w-full field">
-                <option value="">Select a port…</option>
-                <template x-for="p in ports" :key="p.code">
-                  <option :value="p.code" x-text="`${p.name} (${p.state || p.country})`"></option>
-                </template>
-              </select>
+              <div class="relative" @click.away="showPortDropdown = false">
+                <input
+                  x-model="portQuery"
+                  @input="searchPorts()"
+                  @focus="searchPorts(true)"
+                  class="w-full field pr-16"
+                  placeholder="Search for a port…"
+                />
+                <button
+                  type="button"
+                  class="absolute inset-y-0 right-0 px-3 text-sm font-medium text-indigo-600 hover:text-indigo-700"
+                  x-show="portQuery"
+                  @click="clearPortQuery"
+                >
+                  Clear
+                </button>
+                <div
+                  x-show="showPortDropdown"
+                  class="absolute z-20 mt-1 w-full bg-white border border-gray-200 rounded-lg shadow-lg list-scroll"
+                >
+                  <template x-for="p in filteredPorts" :key="p.code">
+                    <button
+                      type="button"
+                      class="w-full text-left px-3 py-2 hover:bg-indigo-50"
+                      @click="selectPort(p)"
+                    >
+                      <div class="font-medium" x-text="portLabel(p)"></div>
+                      <div class="text-xs text-slate-500 flex items-center gap-2">
+                        <span class="chip bg-slate-100" x-text="p.code"></span>
+                        <span x-text="p.state || p.country"></span>
+                      </div>
+                    </button>
+                  </template>
+                </div>
+              </div>
               <div class="text-xs text-slate-500 mt-1">Tip: LALB, SFBAY, PUGET, COLRIV, STKN</div>
 
               <div x-show="selectedPort" class="mt-1">
@@ -674,6 +703,10 @@
         selectedVessel: null,
         ports: [],
         selectedPort: '',
+        portQuery: '',
+        filteredPorts: [],
+        showPortDropdown: false,
+        portSearchTimeout: null,
         eta: new Date().toISOString().split('T')[0],
         arrivalType: 'FOREIGN',
         netTonnage: '',
@@ -740,11 +773,92 @@
           try {
             const r = await fetch(`${API_BASE}/ports`);
             this.ports = await r.json();
+            this.filteredPorts = [];
+            this.showPortDropdown = false;
+            this.syncPortQueryWithSelection();
           } catch (e) {
             console.error('Ports load failed:', e);
           }
         },
-  
+
+        portLabel(port) {
+          if (!port) return '';
+          const name = port.name || port.code || '';
+          const region = port.state || port.country || '';
+          return region && name ? `${name} (${region})` : name;
+        },
+
+        syncPortQueryWithSelection() {
+          if (!this.selectedPort) {
+            this.portQuery = '';
+            return;
+          }
+          const match = this.ports.find(p => p.code === this.selectedPort);
+          this.portQuery = match ? this.portLabel(match) : this.selectedPort;
+        },
+
+        clearPortQuery() {
+          if (this.portSearchTimeout) {
+            clearTimeout(this.portSearchTimeout);
+            this.portSearchTimeout = null;
+          }
+          this.portQuery = '';
+          this.filteredPorts = [];
+          this.showPortDropdown = false;
+          if (this.selectedPort) {
+            this.selectedPort = '';
+          }
+        },
+
+        searchPorts(immediate = false) {
+          if (!Array.isArray(this.ports) || this.ports.length === 0) {
+            this.filteredPorts = [];
+            this.showPortDropdown = false;
+            return;
+          }
+
+          if (this.portSearchTimeout) {
+            clearTimeout(this.portSearchTimeout);
+            this.portSearchTimeout = null;
+          }
+
+          const run = () => {
+            this.portSearchTimeout = null;
+            const query = this.portQuery.trim().toLowerCase();
+            if (!query) {
+              this.filteredPorts = [];
+              this.showPortDropdown = false;
+              return;
+            }
+
+            const matches = this.ports.filter((p) => {
+              const name = (p.name || '').toLowerCase();
+              const code = (p.code || '').toLowerCase();
+              const region = (p.state || p.country || '').toLowerCase();
+              const label = this.portLabel(p).toLowerCase();
+              return label.includes(query) || name.includes(query) || code.includes(query) || region.includes(query);
+            }).slice(0, 12);
+
+            this.filteredPorts = matches;
+            this.showPortDropdown = matches.length > 0;
+          };
+
+          if (immediate) {
+            run();
+          } else {
+            this.portSearchTimeout = setTimeout(run, 200);
+          }
+        },
+
+        selectPort(port) {
+          if (!port) return;
+          this.selectedPort = port.code || '';
+          this.portQuery = this.portLabel(port);
+          this.filteredPorts = [];
+          this.showPortDropdown = false;
+          this.loadLiveData();
+        },
+
         // ---------- Normalizer (no out-before-init) ----------
         augment(v) {
           const src = (v && typeof v === 'object') ? { ...v } : {};
