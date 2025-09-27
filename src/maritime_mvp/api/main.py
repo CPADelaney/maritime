@@ -898,6 +898,10 @@ def get_vessel_by_id(vessel_id: int) -> Dict[str, Any]:
 def estimate(
     port_code: str = Query(..., description="Port code (e.g., LALB, USOAK, USSFO)"),
     eta: date = Query(..., description="Estimated time of arrival"),
+    previous_port_code: Optional[str] = Query(
+        None,
+        description="Previous port UN/LOCODE like USLAX or CNSHA. Used to infer arrival type.",
+    ),
     arrival_type: Literal["FOREIGN", "COASTWISE"] = Query("FOREIGN"),
     net_tonnage: Optional[Decimal] = Query(None),
     ytd_cbp_paid: Decimal = Query(Decimal("0")),
@@ -909,15 +913,19 @@ def estimate(
         if not port:
             raise HTTPException(status_code=404, detail=f"Port {port_code} not found")
         engine = FeeEngine(db)
+        prev_unloc = ((previous_port_code or "").strip().upper() or None)
+
         ctx = EstimateContext(
             port_code=port_code,
             arrival_date=eta,
-            arrival_type=str(arrival_type),
+            arrival_type=str(arrival_type) if arrival_type else None,
+            previous_port_code=prev_unloc,
             net_tonnage=net_tonnage,
             ytd_cbp_paid=ytd_cbp_paid,
         )
         items = engine.compute(ctx)
         total = sum((i.amount for i in items), Decimal("0.00"))
+        derived_arrival_type = FeeEngine._infer_arrival_type(prev_unloc, ctx.arrival_type)
 
         optional_services: List[Dict[str, Any]] = []
         if include_optional:
@@ -932,7 +940,8 @@ def estimate(
             "port_code": port_code,
             "port_name": port.name,
             "eta": str(eta),
-            "arrival_type": str(arrival_type),
+            "previous_port_code": prev_unloc,
+            "arrival_type": derived_arrival_type,
             "line_items": [
                 {"code": i.code, "name": i.name, "amount": str(i.amount), "details": i.details}
                 for i in items

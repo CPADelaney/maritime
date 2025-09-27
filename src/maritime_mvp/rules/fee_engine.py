@@ -46,7 +46,8 @@ class LineItem:
 class EstimateContext:
     port_code: str
     arrival_date: date
-    arrival_type: str  # "FOREIGN" | "COASTWISE"
+    arrival_type: Optional[str] = None  # "FOREIGN" | "COASTWISE"
+    previous_port_code: Optional[str] = None
     net_tonnage: Optional[Decimal] = None
     ytd_cbp_paid: Decimal = Decimal("0.00")
     tonnage_year_paid: Decimal = Decimal("0.00")
@@ -263,6 +264,7 @@ class FeeEngine:
         """
         items: List[LineItem] = []
         port = self._get_port(ctx.port_code)
+        arrival_type = self._infer_arrival_type(ctx.previous_port_code, ctx.arrival_type)
 
         # ---- 1) CBP User Fee (calendar-year cap) ----
         db_cbp = self._active_fee("CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE", ctx.arrival_date, port)
@@ -310,7 +312,7 @@ class FeeEngine:
             # Cascadia gets Cascadia rate; domestic coastwise gets domestic; else medium.
             if port.is_cascadia:
                 risk = "cascadia"
-            elif ctx.arrival_type == "COASTWISE":
+            elif arrival_type == "COASTWISE":
                 risk = "domestic"
             else:
                 risk = "medium_risk"
@@ -400,6 +402,21 @@ class FeeEngine:
             )
 
         return items
+
+    @staticmethod
+    def _infer_arrival_type(previous_port_code: Optional[str], fallback: Optional[str]) -> str:
+        prev = (previous_port_code or "").strip().upper()
+        if prev.startswith("US"):
+            return "COASTWISE"
+        if prev:
+            return "FOREIGN"
+
+        fallback_norm = (fallback or "").strip().upper()
+        if fallback_norm in {"COASTWISE", "FOREIGN"}:
+            return fallback_norm
+        if fallback_norm == "DOMESTIC":
+            return "COASTWISE"
+        return "FOREIGN"
 
     # ------------- Comprehensive API (full breakdown) -------------
 
