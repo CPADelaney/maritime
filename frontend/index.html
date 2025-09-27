@@ -465,12 +465,22 @@
               <h4 class="font-semibold mb-2">Optional Services (Estimates)</h4>
               <div class="space-y-2">
                 <template x-for="s in (estimate && estimate.optional_services ? estimate.optional_services : [])" :key="s.service">
-                  <div class="flex justify-between text-sm">
-                    <span>
-                      <span x-text="s.service"></span>
-                      <span class="text-xs text-gray-500" x-text="`(${s.note})`"></span>
-                    </span>
-                    <span class="font-mono" x-text="`$${Number(s.estimated_low).toLocaleString()} - $${Number(s.estimated_high).toLocaleString()}`"></span>
+                  <div class="flex justify-between text-sm gap-3">
+                    <div>
+                      <div class="font-medium" x-text="s.service"></div>
+                      <div class="text-xs text-gray-500" x-text="s.note"></div>
+                      <template x-if="s.manual_entry">
+                        <div class="text-xs text-amber-600 font-semibold mt-1">Manual quote required</div>
+                      </template>
+                    </div>
+                    <div class="text-right font-mono">
+                      <template x-if="s.estimated_low !== undefined && s.estimated_high !== undefined">
+                        <span x-text="`$${Number(s.estimated_low).toLocaleString()} - $${Number(s.estimated_high).toLocaleString()}`"></span>
+                      </template>
+                      <template x-if="s.manual_entry">
+                        <span class="text-xs text-gray-500">Add custom</span>
+                      </template>
+                    </div>
                   </div>
                 </template>
               </div>
