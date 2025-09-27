@@ -184,7 +184,14 @@
               </div>
               <div>
                 <label class="block text-sm font-medium text-gray-700 mb-1">Net Tonnage (v1)</label>
-                <input x-model="netTonnage" type="number" class="w-full field" placeholder="Optional" @input="autoNT=false" />
+                <input
+                  x-model="netTonnage"
+                  type="number"
+                  class="w-full field"
+                  placeholder="Optional"
+                  @input="autoNT=false"
+                  :readonly="!!selectedVessel"
+                />
                 <span x-show="autoNT" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
               </div>
             </div>
@@ -266,12 +273,26 @@
                 <div class="grid grid-cols-2 gap-3">
                   <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Gross Tonnage</label>
-                    <input x-model.number="grossTonnage" type="number" step="1" class="w-full field" @input="autoGT=false" />
+                    <input
+                      x-model.number="grossTonnage"
+                      type="number"
+                      step="1"
+                      class="w-full field"
+                      @input="autoGT=false"
+                      :readonly="!!selectedVessel"
+                    />
                     <span x-show="autoGT" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                   </div>
                   <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">Net Tonnage</label>
-                    <input x-model.number="netTonnage" type="number" step="1" class="w-full field" @input="autoNT=false" />
+                    <input
+                      x-model.number="netTonnage"
+                      type="number"
+                      step="1"
+                      class="w-full field"
+                      @input="autoNT=false"
+                      :readonly="!!selectedVessel"
+                    />
                     <span x-show="autoNT" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                   </div>
                 </div>
@@ -279,20 +300,43 @@
                 <div class="grid grid-cols-2 gap-3">
                   <div>
                     <label class="block text-sm font-medium text-gray-700 mb-1">LOA (m)</label>
-                    <input x-model.number="loaMeters" type="number" step="0.1" class="w-full field" @input="autoLOA=false" />
+                    <input
+                      x-model.number="loaMeters"
+                      type="number"
+                      step="0.1"
+                      class="w-full field"
+                      @input="autoLOA=false"
+                      :readonly="!!selectedVessel"
+                    />
                     <span x-show="autoLOA" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                   </div>
                   <div>
-                    <label class="block text-sm font-medium text-gray-700 mb-1">Draft (m)</label>
-                    <input x-model.number="draftMeters" type="number" step="0.1" class="w-full field" @input="autoDraft=false" />
-                    <span x-show="autoDraft" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Beam (m)</label>
+                    <input
+                      x-model.number="beamMeters"
+                      type="number"
+                      step="0.1"
+                      class="w-full field"
+                      @input="autoBeam=false"
+                      :readonly="!!selectedVessel"
+                    />
+                    <span x-show="autoBeam" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
                   </div>
                 </div>
 
-                <div>
-                  <label class="block text-sm font-medium text-gray-700 mb-1">Beam (m)</label>
-                  <input x-model.number="beamMeters" type="number" step="0.1" class="w-full field" @input="autoBeam=false" />
-                  <span x-show="autoBeam" class="chip bg-emerald-100 text-emerald-700 mt-1 inline-block">Autofilled</span>
+                <div class="grid sm:grid-cols-3 gap-3">
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">FWD Draft (m)</label>
+                    <input x-model.number="draftForwardMeters" type="number" step="0.1" class="w-full field" />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">AFT Draft (m)</label>
+                    <input x-model.number="draftAftMeters" type="number" step="0.1" class="w-full field" />
+                  </div>
+                  <div>
+                    <label class="block text-sm font-medium text-gray-700 mb-1">Air Draft (m)</label>
+                    <input x-model.number="airDraftMeters" type="number" step="0.1" class="w-full field" />
+                  </div>
                 </div>
               </div>
             </div>
@@ -504,11 +548,34 @@
               </select>
             </div>
 
-            <div><label class="block text-xs font-medium mb-1">GT</label><input x-model.number="grossTonnage" type="number" step="1" class="w-full field" @input="autoGT=false"/></div>
-            <div><label class="block text-xs font-medium mb-1">NT</label><input x-model.number="netTonnage" type="number" step="1" class="w-full field" @input="autoNT=false"/></div>
-            <div><label class="block text-xs font-medium mb-1">LOA (m)</label><input x-model.number="loaMeters" type="number" step="0.1" class="w-full field" @input="autoLOA=false"/></div>
-            <div><label class="block text-xs font-medium mb-1">Draft (m)</label><input x-model.number="draftMeters" type="number" step="0.1" class="w-full field" @input="autoDraft=false"/></div>
-            <div><label class="block text-xs font-medium mb-1">Beam (m)</label><input x-model.number="beamMeters" type="number" step="0.1" class="w-full field" @input="autoBeam=false"/></div>
+            <div>
+              <label class="block text-xs font-medium mb-1">GT</label>
+              <input x-model.number="grossTonnage" type="number" step="1" class="w-full field" @input="autoGT=false" :readonly="!!selectedVessel"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1">NT</label>
+              <input x-model.number="netTonnage" type="number" step="1" class="w-full field" @input="autoNT=false" :readonly="!!selectedVessel"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1">LOA (m)</label>
+              <input x-model.number="loaMeters" type="number" step="0.1" class="w-full field" @input="autoLOA=false" :readonly="!!selectedVessel"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1">Beam (m)</label>
+              <input x-model.number="beamMeters" type="number" step="0.1" class="w-full field" @input="autoBeam=false" :readonly="!!selectedVessel"/>
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1">FWD Draft (m)</label>
+              <input x-model.number="draftForwardMeters" type="number" step="0.1" class="w-full field" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1">AFT Draft (m)</label>
+              <input x-model.number="draftAftMeters" type="number" step="0.1" class="w-full field" />
+            </div>
+            <div>
+              <label class="block text-xs font-medium mb-1">Air Draft (m)</label>
+              <input x-model.number="airDraftMeters" type="number" step="0.1" class="w-full field" />
+            </div>
           </div>
 
           <div class="mt-3 flex items-center gap-2">
@@ -621,15 +688,16 @@
         vesselType: 'general_cargo',
         grossTonnage: 0,
         loaMeters: 0,
-        draftMeters: 0,
         beamMeters: 0,
-  
+        draftForwardMeters: 0,
+        draftAftMeters: 0,
+        airDraftMeters: 0,
+
         // autofill flags (for badges)
         autoGT: false,
         autoNT: false,
         autoLOA: false,
         autoBeam: false,
-        autoDraft: false,
   
         // UN/LOCODE suggestions
         unlocPrev: [],
@@ -796,19 +864,41 @@
             ?? toMetersGeneric(depthGeneric);
         
           // Draft (optional, distinct from Depth)
+          const draftFwdMetersRaw = pick('DraftForward_m','ForwardDraft_m','ForwardDraftInMeters','ForwardDraftMeters','forward_draft_m','draft_forward_meters');
+          const draftFwdFeetRaw   = pick('ForwardDraftInFeet','ForwardDraftFeet','forward_draft_ft');
+          const draftFwdGeneric   = scan(/forward.*draft/i);
+          const DraftForward_m = toNumber(draftFwdMetersRaw)
+            ?? (feetToMeters(draftFwdFeetRaw))
+            ?? toMetersGeneric(draftFwdGeneric);
+
+          const draftAftMetersRaw = pick('DraftAft_m','AftDraft_m','AftDraftInMeters','AftDraftMeters','aft_draft_m','draft_aft_meters');
+          const draftAftFeetRaw   = pick('AftDraftInFeet','AftDraftFeet','aft_draft_ft');
+          const draftAftGeneric   = scan(/aft.*draft|draft.*aft/i);
+          const DraftAft_m = toNumber(draftAftMetersRaw)
+            ?? (feetToMeters(draftAftFeetRaw))
+            ?? toMetersGeneric(draftAftGeneric);
+
+          const airDraftMetersRaw = pick('AirDraft_m','AirDraftInMeters','AirDraftMeters','air_draft_m');
+          const airDraftFeetRaw   = pick('AirDraftInFeet','AirDraftFeet','air_draft_ft');
+          const airDraftGeneric   = scan(/air.*draft/i);
+          const AirDraft_m = toNumber(airDraftMetersRaw)
+            ?? (feetToMeters(airDraftFeetRaw))
+            ?? toMetersGeneric(airDraftGeneric);
+
           const draftMetersRaw = pick('Draft_m','DraftInMeters','MaxDraftInMeters','draft_m');
           const draftFeetRaw   = pick('DraftInFeet','MaxDraftInFeet','Draft (ft)');
           const draftGeneric   = pick('Draft','SummerDraft','draft') ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b/i);
           const Draft_m = toNumber(draftMetersRaw)
             ?? (feetToMeters(draftFeetRaw))
             ?? toMetersGeneric(draftGeneric);
-        
+
           return {
             ...src,
             VesselID, VesselName, CallSign, Flag, VesselType,
             IMONumber, OfficialNumber, YearBuilt,
             GrossTonnage, NetTonnage,
-            LOA_m, Beam_m, Draft_m, Depth_m
+            LOA_m, Beam_m, Draft_m, Depth_m,
+            DraftForward_m, DraftAft_m, AirDraft_m
           };
         }, // ← close augment
 
@@ -878,13 +968,6 @@
   
         async selectVessel(v) {
           const prevSelected = this.selectedVessel || null;
-          const prevAutoFlags = {
-            autoGT: this.autoGT,
-            autoNT: this.autoNT,
-            autoLOA: this.autoLOA,
-            autoBeam: this.autoBeam,
-            autoDraft: this.autoDraft,
-          };
           const makeToken = (obj) => {
             if (!obj) return '';
             const parts = [
@@ -898,8 +981,7 @@
 
           const normalized = this.augment(v) || {};
           const nextToken = makeToken(normalized) || makeToken(v);
-          const hadPrevious = !!prevSelected;
-          const vesselChanged = !hadPrevious || prevToken !== nextToken;
+          const vesselChanged = !prevSelected || prevToken !== nextToken;
 
           this._rawSelected = v;
           this.selectedVessel = normalized;
@@ -908,15 +990,19 @@
           console.log('[select] raw row:', v);
           console.log('[select] normalized:', normalized);
 
-          // reset badges
-          this.autoGT = this.autoNT = this.autoLOA = this.autoBeam = this.autoDraft = false;
-
-          if (vesselChanged && hadPrevious) {
-            if (prevAutoFlags.autoGT) this.grossTonnage = null;
-            if (prevAutoFlags.autoNT) this.netTonnage = null;
-            if (prevAutoFlags.autoLOA) this.loaMeters = null;
-            if (prevAutoFlags.autoBeam) this.beamMeters = null;
-            if (prevAutoFlags.autoDraft) this.draftMeters = null;
+          // reset badges for locked particulars when vessel changes
+          if (vesselChanged) {
+            this.autoGT = false;
+            this.autoNT = false;
+            this.autoLOA = false;
+            this.autoBeam = false;
+            this.grossTonnage = null;
+            this.netTonnage = null;
+            this.loaMeters = null;
+            this.beamMeters = null;
+            this.draftForwardMeters = null;
+            this.draftAftMeters = null;
+            this.airDraftMeters = null;
           }
 
           // quick type guess
@@ -941,17 +1027,30 @@
             const nextValid = Number.isFinite(n) && n > 0;
 
             if (!nextValid) return curr;
-            if (!vesselChanged && currValid) return curr;
-            if (vesselChanged && currValid && !prevAutoFlags[flag]) return curr;
-
-            this[flag] = true;
-            return dp ? Number(n.toFixed(dp)) : n;
+            if (vesselChanged) {
+              this[flag] = true;
+              return dp ? Number(n.toFixed(dp)) : n;
+            }
+            if (!currValid || this[flag]) {
+              this[flag] = true;
+              return dp ? Number(n.toFixed(dp)) : n;
+            }
+            return curr;
           };
           if (normalized.GrossTonnage != null) this.grossTonnage = prefer('grossTonnage', normalized.GrossTonnage, 'autoGT', 0);
           if (normalized.NetTonnage   != null) this.netTonnage   = prefer('netTonnage',   normalized.NetTonnage,   'autoNT', 0);
           if (normalized.LOA_m        != null) this.loaMeters    = prefer('loaMeters',    normalized.LOA_m,        'autoLOA', 2);
           if (normalized.Beam_m       != null) this.beamMeters   = prefer('beamMeters',   normalized.Beam_m,       'autoBeam', 2);
-          if (normalized.Draft_m      != null) this.draftMeters  = prefer('draftMeters',  normalized.Draft_m,      'autoDraft', 2);
+
+          const setDraftField = (field, value, dp = 2) => {
+            const n = Number(value);
+            if (!Number.isFinite(n) || n <= 0) return;
+            if (!vesselChanged && Number(this[field]) > 0) return;
+            this[field] = dp ? Number(n.toFixed(dp)) : n;
+          };
+          setDraftField('draftForwardMeters', normalized.DraftForward_m ?? normalized.Draft_m);
+          setDraftField('draftAftMeters', normalized.DraftAft_m ?? normalized.Draft_m);
+          setDraftField('airDraftMeters', normalized.AirDraft_m);
 
           await this.enrichVesselDimensions();
           if (this.selectedPort) this.loadLiveData();
@@ -1001,14 +1100,26 @@
           this.estimate = null;
           this.estimateV2 = null;
   
+          const fwdDraft = Number(this.draftForwardMeters) || 0;
+          const aftDraft = Number(this.draftAftMeters) || 0;
+          const airDraft = Number(this.airDraftMeters) || 0;
+          const draftSamples = [fwdDraft, aftDraft].filter(v => v > 0);
+          const representativeDraft = draftSamples.length
+            ? Number((draftSamples.reduce((sum, v) => sum + v, 0) / draftSamples.length).toFixed(2))
+            : (fwdDraft || aftDraft || 0);
+          const draftString = (val) => (val > 0 ? String(val) : null);
+
           const body = {
             vessel_name: this.selectedVessel?.VesselName || this.vesselQuery || 'Unknown Vessel',
             vessel_type: this.vesselType,
             gross_tonnage: String(this.grossTonnage || 0),
             net_tonnage: String(this.netTonnage || 0),
             loa_meters: String(this.loaMeters || 0),
-            draft_meters: String(this.draftMeters || 0),
+            draft_meters: String(representativeDraft || 0),
             beam_meters: String(this.beamMeters || 0),
+            forward_draft_meters: draftString(fwdDraft),
+            aft_draft_meters: draftString(aftDraft),
+            air_draft_meters: draftString(airDraft),
             previous_port_code: this.previousPortCode.trim().toUpperCase(),
             arrival_port_code: this.selectedPort,
             next_port_code: this.nextPortCode ? this.nextPortCode.trim().toUpperCase() : null,
@@ -1041,7 +1152,8 @@
   
         // ----- NEW: PSIX-first enrichment flow -----
         async enrichVesselDimensions() {
-          const needsDims = !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !(Number(this.draftMeters) > 0);
+          const hasDraftInfo = (Number(this.draftForwardMeters) > 0) || (Number(this.draftAftMeters) > 0) || (Number(this.airDraftMeters) > 0);
+          const needsDims = !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !hasDraftInfo;
           const needsTons = !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0);
           if (!needsDims && !needsTons) return;
         
@@ -1055,6 +1167,14 @@
             const n = Number(next);
             if (Number.isFinite(n) && n > 0) { this[flag] = true; return dp ? Number(n.toFixed(dp)) : n; }
             return curr;
+          };
+          const setDraftIf = (field, value, dp = 2) => {
+            if (Number(this[field]) > 0) return;
+            const n = Number(value);
+            if (Number.isFinite(n) && n > 0) {
+              this[field] = dp ? Number(n.toFixed(dp)) : n;
+              updated = true;
+            }
           };
         
           const qs = (obj) => Object.entries(obj).map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
@@ -1163,7 +1283,13 @@
               if (pickRow.LengthInFeet != null)  extra.LOA_m  = Number(pickRow.LengthInFeet)  * 0.3048;
               if (pickRow.BreadthInFeet != null) extra.Beam_m = Number(pickRow.BreadthInFeet) * 0.3048;
               if (pickRow.DepthInFeet != null)   extra.Depth_m = Number(pickRow.DepthInFeet)  * 0.3048;
-        
+              if (pickRow.ForwardDraftInFeet != null) extra.DraftForward_m = Number(pickRow.ForwardDraftInFeet) * 0.3048;
+              if (pickRow.ForwardDraftInMeters != null) extra.DraftForward_m = Number(pickRow.ForwardDraftInMeters);
+              if (pickRow.AftDraftInFeet != null) extra.DraftAft_m = Number(pickRow.AftDraftInFeet) * 0.3048;
+              if (pickRow.AftDraftInMeters != null) extra.DraftAft_m = Number(pickRow.AftDraftInMeters);
+              if (pickRow.AirDraftInFeet != null) extra.AirDraft_m = Number(pickRow.AirDraftInFeet) * 0.3048;
+              if (pickRow.AirDraftInMeters != null) extra.AirDraft_m = Number(pickRow.AirDraftInMeters);
+
               merged = { ...merged, ...pickRow, ...extra };
               // If we still didn’t have VesselID, try to grab it from this payload
               if (!vesselId) vesselId = pickRow.VesselID ?? pickRow.vessel_id ?? pickRow.ID ?? vesselId;
@@ -1185,12 +1311,21 @@
             updated ||= (this.grossTonnage !== bGT || this.netTonnage !== bNT);
           }
           if (needsDims) {
-            const bL = this.loaMeters, bB = this.beamMeters, bD = this.draftMeters;
+            const bL = this.loaMeters, bB = this.beamMeters;
+            const bF = this.draftForwardMeters, bA = this.draftAftMeters, bAir = this.airDraftMeters;
             this.loaMeters  = setIf(this.loaMeters,  aug.LOA_m,  'autoLOA', 2);
             this.beamMeters = setIf(this.beamMeters, aug.Beam_m, 'autoBeam', 2);
-            // Only set real draft if present (never from Depth)
-            this.draftMeters = setIf(this.draftMeters, aug.Draft_m, 'autoDraft', 2);
-            updated ||= (this.loaMeters !== bL || this.beamMeters !== bB || this.draftMeters !== bD);
+            // Only set real drafts if present (never from Depth)
+            setDraftIf('draftForwardMeters', aug.DraftForward_m ?? aug.Draft_m, 2);
+            setDraftIf('draftAftMeters', aug.DraftAft_m ?? aug.Draft_m, 2);
+            setDraftIf('airDraftMeters', aug.AirDraft_m, 2);
+            updated ||= (
+              this.loaMeters !== bL ||
+              this.beamMeters !== bB ||
+              this.draftForwardMeters !== bF ||
+              this.draftAftMeters !== bA ||
+              this.airDraftMeters !== bAir
+            );
           }
         
           console.info(updated ? '[enrich] Populated from /vessels/* details' : '[enrich] Details fetched, nothing new');
@@ -1317,6 +1452,15 @@
         async submitMultiPort() {
           if (this.mpPorts.length < 2) { alert('Add at least two UN/LOCODE ports.'); return; }
   
+          const mpFwdDraft = Number(this.draftForwardMeters) || 0;
+          const mpAftDraft = Number(this.draftAftMeters) || 0;
+          const mpAirDraft = Number(this.airDraftMeters) || 0;
+          const mpDrafts = [mpFwdDraft, mpAftDraft].filter(v => v > 0);
+          const mpRepresentativeDraft = mpDrafts.length
+            ? Number((mpDrafts.reduce((sum, v) => sum + v, 0) / mpDrafts.length).toFixed(2))
+            : (mpFwdDraft || mpAftDraft || 0);
+          const toDraftString = (val) => (val > 0 ? String(val) : null);
+
           const vessel = {
             name: this.mpVesselName || this.selectedVessel?.VesselName || 'Unknown Vessel',
             imo_number: this.selectedVessel?.IMONumber || null,
@@ -1325,7 +1469,10 @@
             net_tonnage: String(this.netTonnage || 0),
             loa_meters: String(this.loaMeters || 0),
             beam_meters: String(this.beamMeters || 0),
-            draft_meters: String(this.draftMeters || 0),
+            draft_meters: String(mpRepresentativeDraft || 0),
+            forward_draft_meters: toDraftString(mpFwdDraft),
+            aft_draft_meters: toDraftString(mpAftDraft),
+            air_draft_meters: toDraftString(mpAirDraft),
           };
           const request = {
             vessel_name: vessel.name,
