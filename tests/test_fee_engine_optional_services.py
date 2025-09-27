@@ -131,3 +131,9 @@ def test_estimate_endpoint_excludes_legacy_launch_service(monkeypatch):
     services = payload.get("optional_services", [])
     assert services, "expected optional services list to be populated"
     assert all("Launch" not in svc["service"] for svc in services)
+    tug = next((svc for svc in services if svc["service"] == "Tugboat Assist"), None)
+    assert tug is not None, "expected tug service entry"
+    assert tug.get("manual_entry") is True
+    assert "estimated_low" not in tug and "estimated_high" not in tug
+    assert payload["total_with_optional_low"] == "6100.00"
+    assert payload["total_with_optional_high"] == "17600.00"

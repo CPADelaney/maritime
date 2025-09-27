@@ -1023,9 +1023,19 @@ def estimate(
         if include_optional:
             optional_services = [
                 {"service": "Pilotage", "estimated_low": 5000, "estimated_high": 15000, "note": "Varies by size/draft"},
-                {"service": "Tugboat Assist", "estimated_low": 3000, "estimated_high": 8000, "note": "Depends on maneuvering"},
+                {
+                    "service": "Tugboat Assist",
+                    "manual_entry": True,
+                    "note": "Coordinate with local tug operator; add negotiated rate manually.",
+                },
                 {"service": "Line Handling", "estimated_low": 1000, "estimated_high": 2500, "note": "Mooring/unmooring"},
             ]
+
+        optional_estimates = [
+            svc
+            for svc in optional_services
+            if "estimated_low" in svc and "estimated_high" in svc
+        ]
 
         return {
             "port_code": port_code,
@@ -1039,8 +1049,8 @@ def estimate(
             ],
             "optional_services": optional_services,
             "total": str(total),
-            "total_with_optional_low": str(total + sum(s["estimated_low"] for s in optional_services)),
-            "total_with_optional_high": str(total + sum(s["estimated_high"] for s in optional_services)),
+            "total_with_optional_low": str(total + sum(s["estimated_low"] for s in optional_estimates)),
+            "total_with_optional_high": str(total + sum(s["estimated_high"] for s in optional_estimates)),
             "disclaimer": "Estimate only. Verify against official tariffs/guidance and your negotiated contracts.",
         }
     except HTTPException:
