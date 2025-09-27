@@ -14,10 +14,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import select, text
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 # v2 router (enhanced endpoints)
-from .routes import router as v2_router
+from .routes import router as v2_router, ResolvedPort, _resolve_port_code as resolve_port_identifier
 
 # Optional faster JSON (falls back gracefully if orjson isn't installed)
 try:
@@ -41,7 +41,7 @@ from ..connectors.live_sources import (
     clear_cache,
     get_cache_stats,
 )
-from ..models import Port, Fee, Source
+from ..models import Port, PortZone, Fee, Source
 
 # ---------------- Logging ----------------
 logging.basicConfig(
@@ -187,11 +187,15 @@ function maritimeApp() {
     vesselName: '', vesselResults: [], totalCount: null,
     selectedVessel: null, selectedVesselName: '',
     selectedPort: '', eta: new Date().toISOString().split('T')[0],
-    arrivalType: 'FOREIGN', ports: [], estimate: null, searching: false,
+    arrivalType: 'FOREIGN', ports: [], zones: [], estimate: null, searching: false,
     async init() {
       try {
         const r = await fetch(API_BASE + '/ports');
-        this.ports = await r.json();
+        const data = await r.json();
+        this.zones = Array.isArray(data) ? data : [];
+        this.ports = this.zones.flatMap(zone =>
+          (zone.ports || []).map(p => ({ ...p, zone_code: zone.zone_code, zone_name: zone.zone_name }))
+        );
       } catch (e) {
         console.error('Failed to load ports:', e);
       }
@@ -753,51 +757,139 @@ def health() -> Dict[str, Any]:
     }
 
 # ----- Ports -----
+def _serialize_port_with_terminals(port: Port) -> Dict[str, Any]:
+    public_terms = sorted(
+        [t for t in (port.terminals or []) if getattr(t, "is_public", False)],
+        key=lambda t: (t.name or "", t.code or ""),
+    )
+    return {
+        "code": port.code,
+        "name": port.name,
+        "state": port.state,
+        "country": port.country,
+        "region": port.region,
+        "is_california": port.is_california,
+        "is_cascadia": port.is_cascadia,
+        "pilotage_url": port.pilotage_url,
+        "mx_url": port.mx_url,
+        "tariff_url": port.tariff_url,
+        "public_terminals": [
+            {
+                "code": term.code,
+                "name": term.name,
+                "operator_name": term.operator_name,
+                "notes": term.notes,
+            }
+            for term in public_terms
+        ],
+    }
+
+
+def _serialize_zone(zone: PortZone) -> Dict[str, Any]:
+    ports_sorted = sorted(zone.ports or [], key=lambda p: (p.name or "", p.code or ""))
+    return {
+        "zone_code": zone.code,
+        "zone_name": zone.name,
+        "region": zone.region,
+        "primary_state": zone.primary_state,
+        "country": zone.country,
+        "description": zone.description,
+        "ports": [_serialize_port_with_terminals(port) for port in ports_sorted],
+    }
+
+
+def _make_orphan_zone(port: Port) -> Dict[str, Any]:
+    return {
+        "zone_code": port.code,
+        "zone_name": port.name,
+        "region": port.region,
+        "primary_state": port.state,
+        "country": port.country,
+        "description": None,
+        "ports": [_serialize_port_with_terminals(port)],
+    }
+
+
 @app.get("/ports", tags=["Ports"])
 def list_ports() -> List[Dict[str, Any]]:
     db: Session = SessionLocal()
     try:
-        rows = db.execute(select(Port).order_by(Port.name)).scalars().all()
-        return [
-            {
-                "code": p.code,
-                "name": p.name,
-                "state": p.state,
-                "country": p.country,
-                "region": p.region,
-                "is_california": p.is_california,
-                "is_cascadia": p.is_cascadia,
-                "pilotage_url": p.pilotage_url,
-                "mx_url": p.mx_url,
-                "tariff_url": p.tariff_url,
-            }
-            for p in rows
-        ]
+        zones = (
+            db.execute(
+                select(PortZone)
+                .options(selectinload(PortZone.ports).selectinload(Port.terminals))
+                .order_by(PortZone.name)
+            )
+            .scalars()
+            .all()
+        )
+        response: List[Dict[str, Any]] = [_serialize_zone(zone) for zone in zones]
+
+        orphan_ports = (
+            db.execute(
+                select(Port)
+                .where(Port.zone_id.is_(None))
+                .options(selectinload(Port.terminals))
+                .order_by(Port.name)
+            )
+            .scalars()
+            .all()
+        )
+        response.extend(_make_orphan_zone(port) for port in orphan_ports)
+        return response
     except Exception:
         logger.exception("Failed to list ports")
         raise HTTPException(status_code=500, detail="ports query failed")
     finally:
         db.close()
 
+
 @app.get("/ports/{port_code}", tags=["Ports"])
 def get_port(port_code: str) -> Dict[str, Any]:
+    code = (port_code or "").strip().upper()
+    if not code:
+        raise HTTPException(status_code=422, detail="Port code is required")
+
     db: Session = SessionLocal()
     try:
-        port = db.execute(select(Port).where(Port.code == port_code)).scalar_one_or_none()
+        zone = (
+            db.execute(
+                select(PortZone)
+                .where(PortZone.code == code)
+                .options(selectinload(PortZone.ports).selectinload(Port.terminals))
+            )
+            .scalars()
+            .first()
+        )
+        if zone:
+            return _serialize_zone(zone)
+
+        port = (
+            db.execute(
+                select(Port)
+                .where(Port.code == code)
+                .options(selectinload(Port.terminals))
+            )
+            .scalars()
+            .first()
+        )
         if not port:
             raise HTTPException(status_code=404, detail=f"Port {port_code} not found")
-        return {
-            "code": port.code,
-            "name": port.name,
-            "state": port.state,
-            "country": port.country,
-            "region": port.region,
-            "is_california": port.is_california,
-            "is_cascadia": port.is_cascadia,
-            "pilotage_url": port.pilotage_url,
-            "mx_url": port.mx_url,
-            "tariff_url": port.tariff_url,
-        }
+
+        if port.zone_id:
+            zone = (
+                db.execute(
+                    select(PortZone)
+                    .where(PortZone.id == port.zone_id)
+                    .options(selectinload(PortZone.ports).selectinload(Port.terminals))
+                )
+                .scalars()
+                .first()
+            )
+            if zone:
+                return _serialize_zone(zone)
+
+        return _make_orphan_zone(port)
     except HTTPException:
         raise
     except Exception:
@@ -990,24 +1082,6 @@ def get_imo_port(locode: str):
     finally:
         db.close()
 
-# UN/LOCODE -> internal region mapping
-UNLOCODE_TO_INTERNAL = {
-    # Bay Area
-    "USOAK": "SFBAY",
-    "USSFO": "SFBAY",
-    "USSTK": "STKN",
-    "USSAC": "STKN",
-    # Puget Sound
-    "USSEA": "PUGET",
-    "USTAC": "PUGET",
-    # Columbia River
-    "USPDX": "COLRIV",
-    "USAST": "COLRIV",  # Astoria
-    # Southern California (combined internal region)
-    "USLAX": "LALB",
-    "USLGB": "LALB",
-}
-
 # ----- Fee Estimation (v2 Comprehensive) -----
 @app.post("/v2/estimate", tags=["Estimates"])
 def estimate_v2(
@@ -1036,21 +1110,14 @@ def estimate_v2(
     db: Session = SessionLocal()
     try:
         # ---- Resolve arrival port to an internal Port row ----
-        requested_unloc = (arrival_port_code or "").strip().upper()
-        resolved_code = requested_unloc  # assume caller used an internal code already
+        requested_raw = (arrival_port_code or "").strip()
+        requested_unloc = requested_raw.upper()
+        try:
+            resolved_port: ResolvedPort = resolve_port_identifier(db, requested_raw)
+        except HTTPException:
+            raise
 
-        # Try direct match against internal ports table
-        port = db.execute(select(Port).where(Port.code == resolved_code)).scalar_one_or_none()
-
-        # If not found, try UN/LOCODE → internal mapping
-        used_mapping = False
-        if not port:
-            mapped = UNLOCODE_TO_INTERNAL.get(requested_unloc)
-            if mapped:
-                resolved_code = mapped
-                port = db.execute(select(Port).where(Port.code == resolved_code)).scalar_one_or_none()
-                used_mapping = port is not None
-
+        port = db.execute(select(Port).where(Port.code == resolved_port.port_code)).scalar_one_or_none()
         if not port:
             raise HTTPException(
                 status_code=404,
@@ -1078,7 +1145,7 @@ def estimate_v2(
         # IMPORTANT: pass internal port code to the FeeEngine
         voyage = VoyageContext(
             previous_port_code=prev_unloc,
-            arrival_port_code=resolved_code,
+            arrival_port_code=resolved_port.port_code,
             next_port_code=next_unloc,
             eta=eta or datetime.utcnow(),
             etd=etd,
@@ -1103,9 +1170,12 @@ def estimate_v2(
 
         # Echo both what the caller sent and what we resolved to internally
         result["port"] = {
+            "arrival_input": requested_raw,
             "arrival_unlocode": requested_unloc,
             "resolved_internal_code": port.code,
-            "used_mapping": used_mapping,
+            "zone_code": resolved_port.zone_code,
+            "zone_name": resolved_port.zone_name,
+            "used_mapping": requested_unloc != (port.code or "").upper(),
             "name": port.name,
             "state": port.state,
             "country": port.country,

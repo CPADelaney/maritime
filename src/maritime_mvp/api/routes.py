@@ -13,13 +13,14 @@ from __future__ import annotations
 import logging
 from datetime import datetime, date, timedelta
 from decimal import Decimal
+from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Query, Body, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import text
-from sqlalchemy.orm import Session
+from sqlalchemy import text, select, func
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..db import SessionLocal
 from ..rules.fee_engine import (
@@ -28,6 +29,7 @@ from ..rules.fee_engine import (
     VoyageContext,
     VesselType,
 )
+from ..models import Port, PortZone, Terminal
 
 logger = logging.getLogger("maritime-api")
 
@@ -40,6 +42,7 @@ class PortInfo(BaseModel):
     port_name: str = Field(..., example="Oakland, CA")
     country_code: str = Field(..., example="US")
     region: Optional[str] = None
+    zone_code: Optional[str] = Field(None, description="Parent zone code when known")
 
 
 class VesselInput(BaseModel):
@@ -138,9 +141,22 @@ def _has_voyage_estimates(db: Session) -> bool:
     return _table_exists(db, "voyage_estimates")
 
 
-def _port_exists(db: Session, code: str) -> bool:
-    row = db.execute(text("SELECT 1 FROM ports WHERE code = :c LIMIT 1"), {"c": code}).fetchone()
-    return bool(row)
+@dataclass
+class ResolvedPort:
+    zone_code: str
+    zone_name: Optional[str]
+    port_code: str
+    port_name: Optional[str]
+
+
+def _primary_port_for_zone(zone: PortZone) -> Optional[Port]:
+    ports = list(zone.ports or [])
+    if not ports:
+        return None
+    for port in ports:
+        if (port.code or "").upper() == (zone.code or "").upper():
+            return port
+    return sorted(ports, key=lambda p: (p.name or "", p.code or ""))[0]
 
 
 # UN/LOCODE → internal ports.code direct mapping and name-based fallback
@@ -159,61 +175,122 @@ _UNLOCODE_MAP = {
     "USAST": "COLRIV",
 }
 
-def _resolve_port_code(db: Session, locode_or_internal: str) -> str:
-    """
-    Resolve an incoming code (could be UN/LOCODE or internal ports.code) to an internal ports.code.
-    - If already an internal code in ports, use it.
-    - Else use the static UN/LOCODE map.
-    - Else try imo_ports name-based heuristics to choose an internal region code.
-    - Else raise 422 with instructions to add a mapping or use an internal code.
-    """
-    code = (locode_or_internal or "").strip().upper()
-    if not code:
+
+def _resolved_from_port(port: Port) -> ResolvedPort:
+    zone = port.zone
+    zone_code = zone.code if zone else port.code
+    zone_name = zone.name if zone else port.name
+    return ResolvedPort(zone_code=zone_code, zone_name=zone_name, port_code=port.code, port_name=port.name)
+
+
+def _resolve_port_code(db: Session, locode_or_internal: str) -> ResolvedPort:
+    """Resolve a caller-supplied identifier to a Port + its parent zone."""
+    raw = (locode_or_internal or "").strip()
+    if not raw:
         raise HTTPException(status_code=422, detail="Missing port code")
 
-    # Already an internal code?
-    if _port_exists(db, code):
-        return code
+    code = raw.upper()
 
-    # Direct UN/LOCODE map
+    # Zone direct hit
+    zone = (
+        db.execute(
+            select(PortZone)
+            .where(func.upper(PortZone.code) == code)
+            .options(selectinload(PortZone.ports))
+        )
+        .scalars()
+        .first()
+    )
+    if zone:
+        primary = _primary_port_for_zone(zone)
+        if not primary:
+            raise HTTPException(status_code=422, detail=f"Zone '{zone.code}' has no associated ports")
+        return ResolvedPort(
+            zone_code=zone.code,
+            zone_name=zone.name,
+            port_code=primary.code,
+            port_name=primary.name,
+        )
+
+    # Internal port code match
+    port = (
+        db.execute(
+            select(Port)
+            .where(func.upper(Port.code) == code)
+            .options(joinedload(Port.zone))
+        )
+        .scalars()
+        .first()
+    )
+    if port:
+        return _resolved_from_port(port)
+
+    # UN/LOCODE static mapping support
     mapped = _UNLOCODE_MAP.get(code)
-    if mapped and _port_exists(db, mapped):
-        return mapped
+    if mapped:
+        return _resolve_port_code(db, mapped)
 
-    # Name-based mapping via imo_ports (if available)
-    if _use_imo_ports(db):
-        row = db.execute(
-            text("SELECT port_name FROM imo_ports WHERE locode = :c"),
-            {"c": code},
-        ).fetchone()
-        if row:
-            name = (row[0] or "").lower()
-            # Stockton (dedicated)
-            if "stockton" in name:
-                if _port_exists(db, "STKN"):
-                    return "STKN"
-                if _port_exists(db, "SFBAY"):
-                    return "SFBAY"
-            # Bay Area family
-            if any(x in name for x in ["san francisco", "oakland", "richmond", "alameda", "redwood", "sacramento"]):
-                if _port_exists(db, "SFBAY"):
-                    return "SFBAY"
-            # LA/LB
-            if any(x in name for x in ["los angeles", "long beach", "san pedro", "hueneme"]):
-                if _port_exists(db, "LALB"):
-                    return "LALB"
-            # Puget
-            if any(x in name for x in ["seattle", "tacoma", "everett", "olympia", "bellingham", "anacortes"]):
-                if _port_exists(db, "PUGET"):
-                    return "PUGET"
-            # Columbia River
-            if any(x in name for x in ["portland", "astoria", "columbia", "vancouver", "longview", "kalama", "rainier"]):
-                if _port_exists(db, "COLRIV"):
-                    return "COLRIV"
+    raw_term = raw
+
+    # Exact port name match (case-insensitive)
+    port = (
+        db.execute(
+            select(Port)
+            .where(func.lower(Port.name) == func.lower(raw_term))
+            .options(joinedload(Port.zone))
+        )
+        .scalars()
+        .first()
+    )
+    if port:
+        return _resolved_from_port(port)
+
+    # Fuzzy port name match
+    port = (
+        db.execute(
+            select(Port)
+            .where(Port.name.ilike(f"%{raw_term}%"))
+            .options(joinedload(Port.zone))
+            .order_by(func.length(Port.name), Port.name)
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if port:
+        return _resolved_from_port(port)
+
+    # Terminal lookup by name
+    terminal = (
+        db.execute(
+            select(Terminal)
+            .where(func.lower(Terminal.name) == func.lower(raw_term))
+            .options(joinedload(Terminal.port).joinedload(Port.zone))
+        )
+        .scalars()
+        .first()
+    )
+    if not terminal:
+        terminal = (
+            db.execute(
+                select(Terminal)
+                .where(Terminal.name.ilike(f"%{raw_term}%"))
+                .options(joinedload(Terminal.port).joinedload(Port.zone))
+                .order_by(func.length(Terminal.name), Terminal.name)
+                .limit(1)
+            )
+            .scalars()
+            .first()
+        )
+    if terminal:
+        port = terminal.port
+        if not port:
+            raise HTTPException(status_code=422, detail=f"Terminal '{raw_term}' is missing a parent port mapping")
+        return _resolved_from_port(port)
 
     raise HTTPException(
         status_code=422,
-        detail=f"Unsupported port code '{code}'. Use an internal code (one of ports.code) or add a UN/LOCODE mapping.",
+        detail=f"Unsupported port or terminal '{raw}'. Add a mapping or use an internal code.",
     )
 
 
@@ -232,7 +309,7 @@ async def search_ports(
     if _use_imo_ports(db):
         sql = text(
             """
-            SELECT locode, port_name, country_code, region
+            SELECT locode, port_name, country_code, region, port_code
             FROM imo_ports
             WHERE (port_name ILIKE :q OR locode ILIKE :q OR port_code ILIKE :q)
               AND (:country IS NULL OR country_code = :country)
@@ -241,13 +318,25 @@ async def search_ports(
             """
         )
         rows = db.execute(sql, {"q": f"%{q}%", "rawq": q, "country": country, "limit": limit}).fetchall()
-        return [PortInfo(locode=r[0], port_name=r[1], country_code=r[2], region=r[3]) for r in rows]
+        results: List[PortInfo] = []
+        for r in rows:
+            zone_code = None
+            port_code = (r[4] or "").strip()
+            if port_code:
+                try:
+                    resolved = _resolve_port_code(db, port_code)
+                    zone_code = resolved.zone_code
+                except HTTPException:
+                    zone_code = None
+            results.append(PortInfo(locode=r[0], port_name=r[1], country_code=r[2], region=r[3], zone_code=zone_code))
+        return results
 
     # Fallback to ports table (code, name, country, region)
     sql = text(
         """
-        SELECT code, name, country, region
-        FROM ports
+        SELECT p.code, p.name, p.country, p.region, z.code AS zone_code
+        FROM ports p
+        LEFT JOIN port_zones z ON z.id = p.zone_id
         WHERE (name ILIKE :q OR code ILIKE :q)
           AND (:country IS NULL OR country = :country)
         ORDER BY CASE WHEN code = UPPER(:rawq) THEN 0 ELSE 1 END, name
@@ -255,7 +344,7 @@ async def search_ports(
         """
     )
     rows = db.execute(sql, {"q": f"%{q}%", "rawq": q, "country": country, "limit": limit}).fetchall()
-    return [PortInfo(locode=r[0], port_name=r[1], country_code=r[2], region=r[3]) for r in rows]
+    return [PortInfo(locode=r[0], port_name=r[1], country_code=r[2], region=r[3], zone_code=r[4]) for r in rows]
 
 
 @router.get("/ports/{locode}", response_model=PortInfo)
@@ -267,26 +356,35 @@ async def get_port_details(locode: str, db: Session = Depends(get_db)):
     if _use_imo_ports(db):
         sql = text(
             """
-            SELECT locode, port_name, country_code, region
+            SELECT locode, port_name, country_code, region, port_code
             FROM imo_ports
             WHERE locode = :loc
             """
         )
         row = db.execute(sql, {"loc": code}).fetchone()
         if row:
-            return PortInfo(locode=row[0], port_name=row[1], country_code=row[2], region=row[3])
+            zone_code = None
+            port_code = (row[4] or "").strip()
+            if port_code:
+                try:
+                    resolved = _resolve_port_code(db, port_code)
+                    zone_code = resolved.zone_code
+                except HTTPException:
+                    zone_code = None
+            return PortInfo(locode=row[0], port_name=row[1], country_code=row[2], region=row[3], zone_code=zone_code)
 
     # Fallback to ports (treat given code as internal)
     sql2 = text(
         """
-        SELECT code, name, country, region
-        FROM ports
+        SELECT p.code, p.name, p.country, p.region, z.code AS zone_code
+        FROM ports p
+        LEFT JOIN port_zones z ON z.id = p.zone_id
         WHERE code = :loc
         """
     )
     row2 = db.execute(sql2, {"loc": code}).fetchone()
     if row2:
-        return PortInfo(locode=row2[0], port_name=row2[1], country_code=row2[2], region=row2[3])
+        return PortInfo(locode=row2[0], port_name=row2[1], country_code=row2[2], region=row2[3], zone_code=row2[4])
 
     raise HTTPException(status_code=404, detail=f"Port {locode} not found")
 
@@ -314,12 +412,14 @@ async def calculate_comprehensive_estimate(
     )
 
     prev_code = (request.voyage.previous_port_code or "").strip().upper()
-    arr_locode_or_internal = (request.voyage.arrival_port_code or "").strip().upper()
+    arr_input_raw = (request.voyage.arrival_port_code or "").strip()
+    arr_locode_or_internal = arr_input_raw.upper()
     next_code = (request.voyage.next_port_code or None)
     next_code = next_code.strip().upper() if next_code else None
 
     # Resolve arrival port to internal code for FeeEngine
-    internal_port_code = _resolve_port_code(db, arr_locode_or_internal)
+    resolved_port = _resolve_port_code(db, arr_input_raw)
+    internal_port_code = resolved_port.port_code
 
     voyage = VoyageContext(
         previous_port_code=prev_code,
@@ -402,8 +502,12 @@ async def calculate_comprehensive_estimate(
             logger.warning("voyage_estimates insert failed/skipped", exc_info=True)
 
     result["estimate_id"] = voyage_id
-    result.setdefault("meta", {})["arrival_type"] = _arrival_type(prev_code)
-    result.setdefault("meta", {})["arrival_port_internal_code"] = internal_port_code
+    meta = result.setdefault("meta", {})
+    meta["arrival_type"] = _arrival_type(prev_code)
+    meta["arrival_port_internal_code"] = internal_port_code
+    meta["arrival_port_zone_code"] = resolved_port.zone_code
+    meta["arrival_port_zone_name"] = resolved_port.zone_name
+    meta["arrival_port_name"] = resolved_port.port_name
     return result
 
 
@@ -442,13 +546,20 @@ def _document_requirements_core(
     is_foreign = not ((previous_port or "").strip().upper().startswith("US"))
 
     # Also consider internal code variant for port_documents if you store internal codes there
-    internal_code = None
+    resolved = None
     try:
-        internal_code = _resolve_port_code(db, port_code)
-    except Exception:
-        internal_code = None
+        resolved = _resolve_port_code(db, port_code)
+    except HTTPException:
+        resolved = None
 
-    port_codes_to_check = [c for c in {port_code, internal_code} if c]
+    code_candidates = {port_code.strip().upper()}
+    if resolved:
+        if resolved.port_code:
+            code_candidates.add(resolved.port_code.upper())
+        if resolved.zone_code:
+            code_candidates.add(resolved.zone_code.upper())
+
+    port_codes_to_check = [c for c in code_candidates if c]
 
     # Common + specific
     sql = text(
@@ -542,11 +653,13 @@ async def calculate_multi_port_voyage(
 
     for i in range(len(request.ports) - 1):
         prev_port = request.ports[i].strip().upper()
-        arrival_port_input = request.ports[i + 1].strip().upper()
+        arrival_port_raw = request.ports[i + 1].strip()
+        arrival_port_input = arrival_port_raw.upper()
         next_port = request.ports[i + 2].strip().upper() if (i + 2) < len(request.ports) else None
 
         # Resolve arrival to internal code
-        internal_arrival = _resolve_port_code(db, arrival_port_input)
+        resolved_arrival = _resolve_port_code(db, arrival_port_raw)
+        internal_arrival = resolved_arrival.port_code
 
         eta = datetime.combine(current_date, datetime.min.time())
         etd = datetime.combine(current_date + timedelta(days=request.days_in_port), datetime.min.time())
@@ -576,7 +689,7 @@ async def calculate_multi_port_voyage(
 
         arr_type = _arrival_type(prev_port)
         weekend_arrival = eta.weekday() >= 5  # Sat/Sun
-        docs = _document_requirements_core(db, arrival_port_input, vessel.vessel_type, prev_port)
+        docs = _document_requirements_core(db, arrival_port_raw, vessel.vessel_type, prev_port)
 
         fees_totals = leg_estimate.get("totals", {})
         voyage_legs.append(
@@ -585,6 +698,7 @@ async def calculate_multi_port_voyage(
                 "from_port": prev_port,
                 "to_port": arrival_port_input,  # echo original UN/LOCODE if provided
                 "internal_port_code": internal_arrival,
+                "zone_code": resolved_arrival.zone_code,
                 "eta": eta.isoformat(),
                 "etd": etd.isoformat(),
                 "fees": {
