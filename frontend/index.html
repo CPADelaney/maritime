@@ -300,7 +300,7 @@
 
           <button
             @click="useV2 ? getEstimateV2() : getEstimate()"
-            :disabled="!selectedPort || !eta || estimateLoading || (useV2 && (!previousPortCode.trim() || !Number(grossTonnage) || !Number(netTonnage)))"
+            :disabled="!selectedPort || !eta || !previousPortCode.trim() || estimateLoading || (useV2 && (!Number(grossTonnage) || !Number(netTonnage)))"
             class="w-full mt-4 px-4 py-2 btn btn-primary disabled:opacity-50">
             <span x-show="!estimateLoading">Calculate Estimate</span>
             <span x-show="estimateLoading">Calculating…</span>
@@ -960,16 +960,21 @@
         // ----- v1 estimator (GET /estimate) -----
         async getEstimate() {
           if (!this.selectedPort || !this.eta) return;
+          if (!this.previousPortCode.trim()) {
+            alert('Previous port UN/LOCODE is required.');
+            return;
+          }
           this.estimateLoading = true;
           this.estimate = null;
           this.estimateV2 = null;
-  
+
           const params = new URLSearchParams({
             port_code: this.selectedPort,
             eta: this.eta,
             arrival_type: this.arrivalType,
             include_optional: 'true'
           });
+          params.set('previous_port_code', this.previousPortCode.trim().toUpperCase());
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
   
