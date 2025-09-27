@@ -1,6 +1,18 @@
 BEGIN;
+
+CREATE TABLE IF NOT EXISTS port_zones (
+  id SERIAL PRIMARY KEY,
+  code VARCHAR(12) UNIQUE NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  region VARCHAR(48),
+  primary_state CHAR(2),
+  country CHAR(2) DEFAULT 'US',
+  description TEXT
+);
+
 CREATE TABLE IF NOT EXISTS ports (
   id SERIAL PRIMARY KEY,
+  zone_id INTEGER REFERENCES port_zones (id) ON UPDATE CASCADE ON DELETE SET NULL,
   code VARCHAR(12) UNIQUE NOT NULL,
   name VARCHAR(120) NOT NULL,
   state CHAR(2),
@@ -12,6 +24,44 @@ CREATE TABLE IF NOT EXISTS ports (
   mx_url VARCHAR(512),
   tariff_url VARCHAR(512)
 );
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ports' AND column_name = 'zone_id'
+  ) THEN
+    ALTER TABLE ports ADD COLUMN zone_id INTEGER;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'ports_zone_id_fkey'
+  ) THEN
+    ALTER TABLE ports
+      ADD CONSTRAINT ports_zone_id_fkey FOREIGN KEY (zone_id)
+      REFERENCES port_zones (id)
+      ON UPDATE CASCADE ON DELETE SET NULL;
+  END IF;
+END $$;
+
+CREATE INDEX IF NOT EXISTS ports_zone_id_idx
+  ON ports (zone_id);
+
+CREATE TABLE IF NOT EXISTS terminals (
+  id SERIAL PRIMARY KEY,
+  port_id INTEGER NOT NULL REFERENCES ports (id) ON DELETE CASCADE,
+  code VARCHAR(24) UNIQUE NOT NULL,
+  name VARCHAR(200) NOT NULL,
+  operator_name VARCHAR(200),
+  is_public BOOLEAN DEFAULT FALSE,
+  notes TEXT
+);
+
+CREATE INDEX IF NOT EXISTS terminals_port_id_idx
+  ON terminals (port_id);
 
 CREATE TABLE IF NOT EXISTS port_documents (
   id SERIAL PRIMARY KEY,
