@@ -3,16 +3,32 @@ from typing import Optional
 import datetime
 from decimal import Decimal
 
-from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
-from sqlalchemy import String, Boolean, Numeric, Date, Integer, Text
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy import String, Boolean, Numeric, Date, Integer, Text, ForeignKey
 from sqlalchemy.dialects.postgresql import ARRAY
 
 class Base(DeclarativeBase):
     pass
 
+class PortZone(Base):
+    __tablename__ = "port_zones"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    code: Mapped[str] = mapped_column(String(12), unique=True)
+    name: Mapped[str] = mapped_column(String(120))
+    region: Mapped[Optional[str]] = mapped_column(String(48))
+    primary_state: Mapped[Optional[str]] = mapped_column(String(2))
+    country: Mapped[str] = mapped_column(String(2), default="US")
+    description: Mapped[Optional[str]] = mapped_column(Text)
+
+    ports: Mapped[list["Port"]] = relationship(back_populates="zone", cascade="all, delete-orphan")
+
+
 class Port(Base):
     __tablename__ = "ports"
+
     id: Mapped[int] = mapped_column(primary_key=True)
+    zone_id: Mapped[Optional[int]] = mapped_column(ForeignKey("port_zones.id", onupdate="CASCADE", ondelete="SET NULL"))
     code: Mapped[str] = mapped_column(String(12), unique=True)
     name: Mapped[str] = mapped_column(String(120))
     state: Mapped[Optional[str]] = mapped_column(String(2))
@@ -23,6 +39,23 @@ class Port(Base):
     pilotage_url: Mapped[Optional[str]] = mapped_column(String(512))
     mx_url: Mapped[Optional[str]] = mapped_column(String(512))
     tariff_url: Mapped[Optional[str]] = mapped_column(String(512))
+
+    zone: Mapped[Optional[PortZone]] = relationship(back_populates="ports")
+    terminals: Mapped[list["Terminal"]] = relationship(back_populates="port", cascade="all, delete-orphan")
+
+
+class Terminal(Base):
+    __tablename__ = "terminals"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    port_id: Mapped[int] = mapped_column(ForeignKey("ports.id", ondelete="CASCADE"))
+    code: Mapped[str] = mapped_column(String(24), unique=True)
+    name: Mapped[str] = mapped_column(String(200))
+    operator_name: Mapped[Optional[str]] = mapped_column(String(200))
+    is_public: Mapped[bool] = mapped_column(Boolean, default=False)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+    port: Mapped[Port] = relationship(back_populates="terminals")
 
 class Fee(Base):
     __tablename__ = "fees"
