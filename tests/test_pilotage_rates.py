@@ -5,7 +5,12 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from maritime_mvp.rules.fee_engine import FeeEngine, VesselSpecs, VoyageContext
+from maritime_mvp.rules.fee_engine import (
+    FeeEngine,
+    MovementLeg,
+    VesselSpecs,
+    VoyageContext,
+)
 from maritime_mvp.rules.rates_loader import (
     MISSING_RATE_FIELD,
     load_pilotage_rates,
@@ -95,22 +100,89 @@ def test_load_pilotage_rates_missing_field(tmp_path):
 def test_calc_pilotage_uses_registry(monkeypatch):
     engine = FeeEngine(MagicMock())
     port = SimpleNamespace(
-        code="LALB",
-        zone=SimpleNamespace(code="SOCAL"),
-        zone_code="SOCAL",
+        code="USOAK",
+        zone=SimpleNamespace(code="NORCAL"),
+        zone_code="NORCAL",
         state="CA",
     )
+    engine._get_port = MagicMock(return_value=port)
 
     vessel = VesselSpecs(name="Test Vessel", loa_meters=Decimal("300"), draft_meters=Decimal("12"))
     voyage = VoyageContext(
         previous_port_code="CNSHA",
-        arrival_port_code="LALB",
+        arrival_port_code="USOAK",
         eta=datetime(2024, 7, 4, 21, 0, 0),
     )
 
-    calc = engine._calc_pilotage(vessel, voyage, port)
+    legs = [
+        MovementLeg(sequence=1, leg_type="Bar Transit", from_location="Sea Buoy"),
+        MovementLeg(sequence=2, leg_type="Bay Transit", from_location="Golden Gate"),
+        MovementLeg(sequence=3, leg_type="River Transit", from_location="Carquinez Strait"),
+    ]
 
-    assert calc.code == "PILOTAGE"
-    assert calc.multipliers == {"holiday": Decimal("2.00")}
-    assert calc.final_amount == Decimal("33950.00")
-    assert "SOCAL rates effective" in calc.calculation_details
+    breakdown = engine.calculate_pilotage_breakdown(vessel, voyage, legs, port=port)
+
+    assert breakdown["port_zone"] == "NORCAL"
+    assert breakdown["effective_date"] == "2024-01-01"
+    assert breakdown["job_total"] == "48032.58"
+    classifications = [leg["classification"] for leg in breakdown["legs"]]
+    assert classifications == ["bar", "bay", "river"]
+    assert any(extra["code"] == "transportation" for extra in breakdown["legs"][0]["extras"])
+
+
+def test_pilotage_breakdown_classifies_puget_sound(monkeypatch):
+    engine = FeeEngine(MagicMock())
+    port = SimpleNamespace(
+        code="USSEA",
+        zone=SimpleNamespace(code="PUGET"),
+        zone_code="PUGET",
+        state="WA",
+    )
+    engine._get_port = MagicMock(return_value=port)
+
+    vessel = VesselSpecs(name="Puget Vessel", loa_meters=Decimal("300"), draft_meters=Decimal("12"))
+    voyage = VoyageContext(
+        previous_port_code="CNSHA",
+        arrival_port_code="USSEA",
+        eta=datetime(2024, 7, 4, 5, 0, 0),
+    )
+
+    legs = [
+        MovementLeg(sequence=1, leg_type="Harbor Shift"),
+        MovementLeg(sequence=2, leg_type="Inter-harbor Transfer"),
+    ]
+
+    breakdown = engine.calculate_pilotage_breakdown(vessel, voyage, legs, port=port)
+
+    assert breakdown["port_zone"] == "PUGET"
+    assert [leg["classification"] for leg in breakdown["legs"]] == ["bar", "bay"]
+    assert breakdown["job_total"] == "34995.61"
+
+
+def test_pilotage_breakdown_classifies_columbia_river(monkeypatch):
+    engine = FeeEngine(MagicMock())
+    port = SimpleNamespace(
+        code="USPDX",
+        zone=SimpleNamespace(code="COLUMBIA"),
+        zone_code="COLUMBIA",
+        state="OR",
+    )
+    engine._get_port = MagicMock(return_value=port)
+
+    vessel = VesselSpecs(name="Columbia Vessel", loa_meters=Decimal("300"), draft_meters=Decimal("12"))
+    voyage = VoyageContext(
+        previous_port_code="CNSHA",
+        arrival_port_code="USPDX",
+        eta=datetime(2024, 7, 4, 19, 0, 0),
+    )
+
+    legs = [
+        MovementLeg(sequence=1, leg_type="Bar Crossing"),
+        MovementLeg(sequence=2, leg_type="River Transit"),
+    ]
+
+    breakdown = engine.calculate_pilotage_breakdown(vessel, voyage, legs, port=port)
+
+    assert breakdown["port_zone"] == "COLUMBIA"
+    assert [leg["classification"] for leg in breakdown["legs"]] == ["bar", "river"]
+    assert breakdown["job_total"] == "30787.57"
