@@ -51,12 +51,13 @@ def test_comprehensive_excludes_legacy_optional_services_by_default():
         return_value=FeeCalculation(
             code="TUGBOAT",
             name="Tugboat Assist Services",
-            base_amount=Decimal("10000"),
-            final_amount=Decimal("10000"),
+            base_amount=Decimal("0"),
+            final_amount=Decimal("0"),
             confidence=Decimal("0.70"),
-            calculation_details="stub",
+            calculation_details="manual placeholder",
             is_optional=True,
-            estimated_range=(Decimal("8000"), Decimal("13000")),
+            estimated_range=None,
+            manual_entry=True,
         )
     )
 
@@ -77,8 +78,8 @@ def test_comprehensive_excludes_legacy_optional_services_by_default():
     }
 
     assert optional_codes == {"LINE_HANDLING", "TUGBOAT"}
-    assert result["totals"]["optional_low"] == str(Decimal("9000.00"))
-    assert result["totals"]["optional_high"] == str(Decimal("15500.00"))
+    assert result["totals"]["optional_low"] == str(Decimal("1000.00"))
+    assert result["totals"]["optional_high"] == str(Decimal("2500.00"))
 
 
 def test_estimate_endpoint_excludes_legacy_launch_service(monkeypatch):

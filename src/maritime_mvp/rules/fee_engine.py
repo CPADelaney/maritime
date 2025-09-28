@@ -127,6 +127,7 @@ class FeeCalculation:
     calculation_details: str = ""
     is_optional: bool = False
     estimated_range: Optional[Tuple[Decimal, Decimal]] = None
+    manual_entry: bool = False
 
 
 # -------------------------------
@@ -458,6 +459,7 @@ class FeeEngine:
         # Totals (recalculate from the filtered lists to ensure deprecated options stay excluded)
         mandatory_calcs = [c for c in calcs if not c.is_optional]
         optional_calcs = [c for c in calcs if c.is_optional]
+        optional_priced = [c for c in optional_calcs if not c.manual_entry]
         mandatory_total = _money(sum(c.final_amount for c in mandatory_calcs))
         opt_low = _money(
             sum(
@@ -466,7 +468,7 @@ class FeeEngine:
                     if c.estimated_range
                     else c.final_amount
                 )
-                for c in optional_calcs
+                for c in optional_priced
             )
         )
         opt_high = _money(
@@ -476,7 +478,7 @@ class FeeEngine:
                     if c.estimated_range
                     else c.final_amount
                 )
-                for c in optional_calcs
+                for c in optional_priced
             )
         )
 
@@ -517,6 +519,7 @@ class FeeEngine:
                     "confidence": str(c.confidence),
                     "details": c.calculation_details,
                     "is_optional": c.is_optional,
+                    "manual_entry": c.manual_entry,
                     "estimated_range": (
                         [str(_money(c.estimated_range[0])), str(_money(c.estimated_range[1]))]
                         if c.estimated_range else None
@@ -745,28 +748,18 @@ class FeeEngine:
         )
 
     def _estimate_tugboats(self, vessel: VesselSpecs, voyage: VoyageContext) -> FeeCalculation:
-        tugs_by_type = {
-            VesselType.CONTAINER: 2,
-            VesselType.TANKER: 3,
-            VesselType.LNG: 4,
-            VesselType.CRUISE: 3,
-            VesselType.BULK_CARRIER: 2,
-        }
-        num = tugs_by_type.get(vessel.vessel_type, 2)
-        hr_rate = _money(2500)
-        hours = Decimal("2")
-        base = _money(num * hr_rate * hours)
-        low = _money(base * Decimal("0.8"))
-        high = _money(base * Decimal("1.3"))
         return FeeCalculation(
             code="TUGBOAT",
             name="Tugboat Assist Services",
-            base_amount=base,
-            final_amount=base,
+            base_amount=Decimal("0"),
+            final_amount=Decimal("0"),
             confidence=Decimal("0.70"),
-            calculation_details=f"{num} tugs × {hours}h × ${hr_rate}/h",
+            calculation_details=(
+                "Manual placeholder — coordinate with local tug operators for negotiated pricing."
+            ),
             is_optional=True,
-            estimated_range=(low, high),
+            estimated_range=None,
+            manual_entry=True,
         )
 
     def _calc_mx(self, voyage: VoyageContext, port: Port) -> FeeCalculation:
