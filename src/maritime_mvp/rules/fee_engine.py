@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
-from typing import Optional, List, Dict, Tuple, Any
+from typing import Optional, List, Dict, Tuple, Any, Iterable
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -43,6 +43,47 @@ class LineItem:
     name: str
     amount: Decimal
     details: dict
+
+
+@dataclass
+class MovementLeg:
+    """Representation of a single pilotage leg.
+
+    This mirrors the attributes delivered by the movement event stream so that
+    the fee engine can perform per-leg classification and pricing.
+    """
+
+    sequence: int
+    leg_type: str
+    start_time: Optional[datetime] = None
+    end_time: Optional[datetime] = None
+    from_location: Optional[str] = None
+    to_location: Optional[str] = None
+    draft_feet: Optional[Decimal] = None
+    notes: Optional[str] = None
+    metadata: Dict[str, Any] = field(default_factory=dict)
+
+    def normalised_type(self) -> str:
+        txt = (self.leg_type or "").strip().lower()
+        return "_".join(part for part in txt.replace("-", " ").replace("/", " ").split() if part)
+
+    def to_metadata(self) -> Dict[str, Any]:
+        payload: Dict[str, Any] = {}
+        if self.from_location:
+            payload["from_location"] = self.from_location
+        if self.to_location:
+            payload["to_location"] = self.to_location
+        if self.start_time:
+            payload["start_time"] = self.start_time.isoformat()
+        if self.end_time:
+            payload["end_time"] = self.end_time.isoformat()
+        if self.draft_feet is not None:
+            payload["draft_feet"] = str(_money(self.draft_feet))
+        if self.notes:
+            payload["notes"] = self.notes
+        if self.metadata:
+            payload.update(self.metadata)
+        return payload
 
 
 # ---------- Back-compat context (existing callers use this) ----------
@@ -725,6 +766,247 @@ class FeeEngine:
             zone = port.code
         return str(zone)
 
+    def _default_legs_for_zone(self, zone: str) -> List[MovementLeg]:
+        zone_up = (zone or "").upper()
+        if zone_up in {"NORCAL", "SFBAY"}:
+            names = ["bar", "bay", "river"]
+        elif zone_up == "PUGET":
+            names = ["harbor", "inter_harbor"]
+        elif zone_up in {"COLUMBIA", "OREGON"}:
+            names = ["bar", "river"]
+        else:
+            names = ["bar", "bay", "river"]
+        return [MovementLeg(sequence=i + 1, leg_type=name) for i, name in enumerate(names)]
+
+    @staticmethod
+    def _classify_leg(zone: str, leg: MovementLeg) -> Tuple[Optional[str], str]:
+        z = (zone or "").upper()
+        key = leg.normalised_type()
+        mapping: Dict[str, str]
+        if z in {"NORCAL", "SFBAY"}:
+            mapping = {
+                "bar": "bar",
+                "bar_crossing": "bar",
+                "bar_transit": "bar",
+                "sea_buoy": "bar",
+                "golden_gate": "bar",
+                "bay": "bay",
+                "bay_transit": "bay",
+                "harbor": "bay",
+                "river": "river",
+                "river_transit": "river",
+                "delta": "river",
+            }
+        elif z == "PUGET":
+            mapping = {
+                "harbor": "bar",
+                "harbor_move": "bar",
+                "harbor_shift": "bar",
+                "inter_harbor": "bay",
+                "interharbor": "bay",
+                "inter_harbor_transfer": "bay",
+                "canal": "river",
+                "river": "river",
+                "river_transit": "river",
+            }
+        elif z in {"COLUMBIA", "OREGON"}:
+            mapping = {
+                "bar": "bar",
+                "bar_crossing": "bar",
+                "bar_transit": "bar",
+                "river": "river",
+                "river_transit": "river",
+                "willamette": "river",
+                "columbia": "river",
+            }
+        else:
+            mapping = {
+                "bar": "bar",
+                "bay": "bay",
+                "river": "river",
+            }
+        component = mapping.get(key)
+        if component is None:
+            if "bar" in key:
+                component = "bar"
+            elif "bay" in key or "harbor" in key:
+                component = "bay"
+            elif "river" in key or "delta" in key or "canal" in key:
+                component = "river"
+        return component, key
+
+    def _pilotage_component_amounts(
+        self, vessel: VesselSpecs, registry: Dict[str, Any]
+    ) -> Dict[str, Decimal]:
+        loa_feet = vessel.loa_feet
+        bar = registry["bar"]
+        bay = registry["bay"]
+        river = registry["river"]
+
+        bar_component = (bar["base_fee"] + (loa_feet * bar["per_foot_rate"])) * bar["draft_multiplier"]
+        bay_component = max(bay["minimum"], loa_feet * bay["per_foot_rate"])
+        river_component = max(river["minimum"], loa_feet * river["per_foot_rate"])
+
+        return {
+            "bar": _money(bar_component),
+            "bay": _money(bay_component),
+            "river": _money(river_component),
+        }
+
+    def _build_pilotage_breakdown(
+        self,
+        zone: str,
+        registry: Dict[str, Any],
+        vessel: VesselSpecs,
+        voyage: VoyageContext,
+        port: Port,
+        legs: Iterable[MovementLeg],
+    ) -> Dict[str, Any]:
+        supplied_legs = list(legs)
+        if not supplied_legs:
+            supplied_legs = self._default_legs_for_zone(zone)
+
+        components = self._pilotage_component_amounts(vessel, registry)
+
+        surcharges = registry["surcharges"]
+        weekend_mult = surcharges["weekend_multiplier"] if voyage.is_weekend_arrival else Decimal("1")
+        holiday = self._is_us_holiday(voyage.eta.date(), getattr(port, "state", None))
+        holiday_mult = surcharges["holiday_multiplier"] if holiday else Decimal("1")
+
+        applied_code = None
+        applied_multiplier = Decimal("1")
+        if weekend_mult > applied_multiplier:
+            applied_multiplier = weekend_mult
+            applied_code = "weekend"
+        if holiday_mult > applied_multiplier:
+            applied_multiplier = holiday_mult
+            applied_code = "holiday"
+
+        night_charge = Decimal("0")
+        if surcharges.get("night_flat") and (voyage.eta.hour < 6 or voyage.eta.hour >= 18):
+            night_charge = _money(surcharges["night_flat"])
+
+        extras_registry: Dict[str, Decimal] = dict(registry.get("extras", {}))
+
+        legs_out: List[Dict[str, Any]] = []
+        total = Decimal("0")
+        extras_applied: List[str] = []
+        first_component_assigned = False
+
+        for leg in sorted(supplied_legs, key=lambda l: l.sequence):
+            component, normalised = self._classify_leg(zone, leg)
+            base_charge = components.get(component or "", Decimal("0"))
+            leg_total = base_charge
+
+            sur_list: List[Dict[str, Any]] = []
+            if base_charge > 0 and applied_multiplier > 1:
+                surcharge_amt = _money(base_charge * (applied_multiplier - Decimal("1")))
+                leg_total += surcharge_amt
+                sur_list.append(
+                    {
+                        "code": applied_code,
+                        "multiplier": str(_money(applied_multiplier)),
+                        "amount": str(surcharge_amt),
+                    }
+                )
+
+            extras_list: List[Dict[str, Any]] = []
+            if base_charge > 0 and not first_component_assigned and extras_registry:
+                for code, amount in list(extras_registry.items()):
+                    extras_list.append(
+                        {
+                            "code": str(code),
+                            "amount": str(_money(amount)),
+                        }
+                    )
+                    leg_total += _money(amount)
+                    extras_applied.append(str(code))
+                    extras_registry.pop(code, None)
+                first_component_assigned = True
+
+            if base_charge > 0 and night_charge > 0:
+                extras_list.append(
+                    {
+                        "code": "night",
+                        "amount": str(night_charge),
+                    }
+                )
+                leg_total += night_charge
+                night_charge = Decimal("0")
+
+            leg_entry = {
+                "sequence": leg.sequence,
+                "leg_type": leg.leg_type,
+                "classification": component,
+                "base_charge": str(_money(base_charge)),
+                "surcharges": sur_list,
+                "extras": extras_list,
+                "total": str(_money(leg_total)),
+                "metadata": leg.to_metadata(),
+            }
+            legs_out.append(leg_entry)
+            total += _money(leg_total)
+
+        return {
+            "port_zone": zone,
+            "effective_date": registry["effective"].isoformat(),
+            "legs": legs_out,
+            "job_total": str(_money(total)),
+            "audit": {
+                "loa_feet": str(_money(vessel.loa_feet)),
+                "draft_feet": str(_money(vessel.draft_feet)),
+                "applied_multiplier": str(_money(applied_multiplier)),
+                "applied_multiplier_code": applied_code,
+                "extras_applied": extras_applied,
+            },
+        }
+
+    def calculate_pilotage_breakdown(
+        self,
+        vessel: VesselSpecs,
+        voyage: VoyageContext,
+        legs: Optional[Iterable[MovementLeg]] = None,
+        *,
+        port: Optional[Port] = None,
+    ) -> Dict[str, Any]:
+        port_obj = port or self._get_port(voyage.arrival_port_code)
+        zone = self._resolve_port_zone(port_obj)
+        on = voyage.eta.date()
+
+        try:
+            registry = load_pilotage_rates(zone, on)
+        except (MISSING_RATE_FIELD, KeyError, ValueError) as exc:
+            logger.warning(
+                "pilotage registry lookup failed for zone %s: %s; falling back",
+                zone,
+                exc,
+            )
+            fallback = self._calc_pilotage_fallback(vessel, voyage, port_obj)
+            return {
+                "port_zone": zone,
+                "effective_date": None,
+                "legs": [
+                    {
+                        "sequence": 1,
+                        "leg_type": "fallback",
+                        "classification": None,
+                        "base_charge": str(_money(fallback.base_amount)),
+                        "surcharges": [],
+                        "extras": [],
+                        "total": str(_money(fallback.final_amount)),
+                        "metadata": {"details": fallback.calculation_details},
+                    }
+                ],
+                "job_total": str(_money(fallback.final_amount)),
+                "audit": {
+                    "fallback": True,
+                    "reason": str(exc),
+                    "confidence": str(fallback.confidence),
+                },
+            }
+
+        return self._build_pilotage_breakdown(zone, registry, vessel, voyage, port_obj, legs or [])
+
     def _calc_pilotage_fallback(
         self, vessel: VesselSpecs, voyage: VoyageContext, port: Port
     ) -> FeeCalculation:
@@ -763,75 +1045,46 @@ class FeeEngine:
             is_optional=False,
         )
 
-    def _calc_pilotage(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
-        zone = self._resolve_port_zone(port)
-        on = voyage.eta.date()
+    def _calc_pilotage(
+        self,
+        vessel: VesselSpecs,
+        voyage: VoyageContext,
+        port: Port,
+        legs: Optional[Iterable[MovementLeg]] = None,
+    ) -> FeeCalculation:
+        breakdown = self.calculate_pilotage_breakdown(vessel, voyage, legs, port=port)
 
-        try:
-            registry = load_pilotage_rates(zone, on)
-        except (MISSING_RATE_FIELD, KeyError, ValueError) as exc:
-            logger.warning(
-                "pilotage registry lookup failed for zone %s: %s; falling back",
-                zone,
-                exc,
-            )
-            return self._calc_pilotage_fallback(vessel, voyage, port)
-
-        bar = registry["bar"]
-        bay = registry["bay"]
-        river = registry["river"]
-        surcharges = registry["surcharges"]
-        extras = registry["extras"]
-
-        loa_feet = vessel.loa_feet
-        bar_component = (bar["base_fee"] + (loa_feet * bar["per_foot_rate"])) * bar["draft_multiplier"]
-        bay_component = max(bay["minimum"], loa_feet * bay["per_foot_rate"])
-        river_component = max(river["minimum"], loa_feet * river["per_foot_rate"])
-
-        base_service = bar_component + bay_component + river_component
-        base_amount = _money(base_service)
-
-        is_holiday = self._is_us_holiday(on, getattr(port, "state", None))
+        total = _money(Decimal(str(breakdown["job_total"])))
+        base_total = _money(
+            sum(Decimal(str(entry["base_charge"])) for entry in breakdown["legs"])
+        )
 
         multipliers: Dict[str, Decimal] = {}
-        if voyage.is_weekend_arrival:
-            multipliers["weekend"] = surcharges["weekend_multiplier"]
-        if is_holiday:
-            multipliers["holiday"] = surcharges["holiday_multiplier"]
+        audit = breakdown.get("audit", {})
+        code = audit.get("applied_multiplier_code")
+        try:
+            mult_value = Decimal(str(audit.get("applied_multiplier", "1")))
+        except Exception:
+            mult_value = Decimal("1")
+        if code and mult_value > 1:
+            multipliers[code] = _money(mult_value)
 
-        final_multiplier = max(multipliers.values()) if multipliers else Decimal("1.0")
-        base_with_multiplier = base_service * final_multiplier
-        base_with_multiplier = max(bar["min_total"], base_with_multiplier)
-        base_with_multiplier = min(bar["max_total"], base_with_multiplier)
+        details = []
+        for leg in breakdown["legs"]:
+            details.append(
+                f"Leg {leg['sequence']} {leg.get('classification') or leg['leg_type']}: ${leg['total']}"
+            )
 
-        night_charge = Decimal("0")
-        if surcharges.get("night_flat") and (voyage.eta.hour < 6 or voyage.eta.hour >= 18):
-            night_charge = surcharges["night_flat"]
-
-        extras_total = sum(extras.values(), Decimal("0"))
-
-        final_amount = _money(base_with_multiplier + night_charge + extras_total)
-
-        detail_parts = [
-            f"Bar { _money(bar_component) }",
-            f"Bay { _money(bay_component) }",
-            f"River { _money(river_component) }",
-        ]
-        if extras_total:
-            detail_parts.append(f"Extras { _money(extras_total) }")
-        if night_charge:
-            detail_parts.append(f"Night surcharge { _money(night_charge) }")
-
-        details = ", ".join(str(p) for p in detail_parts)
+        calc_details = "; ".join(details)
 
         return FeeCalculation(
             code="PILOTAGE",
             name="Harbor Pilotage",
-            base_amount=_money(base_service),
+            base_amount=base_total,
             multipliers=multipliers,
-            final_amount=final_amount,
+            final_amount=total,
             confidence=Decimal("0.95"),
-            calculation_details=f"{zone} rates effective {registry['effective']:%Y-%m-%d}: {details}",
+            calculation_details=calc_details,
             is_optional=False,
         )
 
