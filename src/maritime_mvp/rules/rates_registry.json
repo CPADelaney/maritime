@@ -1,0 +1,145 @@
+{
+  "SOCAL": [
+    {
+      "effective": "2023-01-01",
+      "bar": {
+        "base_fee": 3400,
+        "per_foot_rate": 8.30,
+        "draft_multiplier": 1.12,
+        "min_total": 5000,
+        "max_total": 30000
+      },
+      "bay": {
+        "per_foot_rate": 6.10,
+        "minimum": 3200
+      },
+      "river": {
+        "per_foot_rate": 0.00,
+        "minimum": 0.00
+      },
+      "surcharges": {
+        "weekend_multiplier": 1.45,
+        "holiday_multiplier": 1.90,
+        "night_flat": 600
+      },
+      "extras": {
+        "transportation": 400,
+        "assistant_pilot": 800
+      }
+    },
+    {
+      "effective": "2024-03-15",
+      "bar": {
+        "base_fee": 3600,
+        "per_foot_rate": 8.60,
+        "draft_multiplier": 1.15,
+        "min_total": 5200,
+        "max_total": 32000
+      },
+      "bay": {
+        "per_foot_rate": 6.40,
+        "minimum": 3400
+      },
+      "river": {
+        "per_foot_rate": 0.00,
+        "minimum": 0.00
+      },
+      "surcharges": {
+        "weekend_multiplier": 1.50,
+        "holiday_multiplier": 2.00,
+        "night_flat": 650
+      },
+      "extras": {
+        "transportation": 425,
+        "assistant_pilot": 875
+      }
+    }
+  ],
+  "NORCAL": [
+    {
+      "effective": "2024-01-01",
+      "bar": {
+        "base_fee": 3550,
+        "per_foot_rate": 8.40,
+        "draft_multiplier": 1.14,
+        "min_total": 5000,
+        "max_total": 31000
+      },
+      "bay": {
+        "per_foot_rate": 6.10,
+        "minimum": 3300
+      },
+      "river": {
+        "per_foot_rate": 5.25,
+        "minimum": 2900
+      },
+      "surcharges": {
+        "weekend_multiplier": 1.45,
+        "holiday_multiplier": 1.90,
+        "night_flat": 575
+      },
+      "extras": {
+        "transportation": 410,
+        "harbor_security": 225
+      }
+    }
+  ],
+  "PUGET": [
+    {
+      "effective": "2024-01-01",
+      "bar": {
+        "base_fee": 3425,
+        "per_foot_rate": 7.95,
+        "draft_multiplier": 1.12,
+        "min_total": 4800,
+        "max_total": 29000
+      },
+      "bay": {
+        "per_foot_rate": 5.80,
+        "minimum": 3000
+      },
+      "river": {
+        "per_foot_rate": 4.75,
+        "minimum": 2700
+      },
+      "surcharges": {
+        "weekend_multiplier": 1.40,
+        "holiday_multiplier": 1.85,
+        "night_flat": 525
+      },
+      "extras": {
+        "transportation": 390,
+        "assist_boat": 210
+      }
+    }
+  ],
+  "COLUMBIA": [
+    {
+      "effective": "2024-01-01",
+      "bar": {
+        "base_fee": 3300,
+        "per_foot_rate": 7.50,
+        "draft_multiplier": 1.10,
+        "min_total": 4600,
+        "max_total": 28000
+      },
+      "bay": {
+        "per_foot_rate": 5.20,
+        "minimum": 3100
+      },
+      "river": {
+        "per_foot_rate": 4.50,
+        "minimum": 2600
+      },
+      "surcharges": {
+        "weekend_multiplier": 1.38,
+        "holiday_multiplier": 1.80,
+        "night_flat": 500
+      },
+      "extras": {
+        "transportation": 385,
+        "assistant_pilot": 780
+      }
+    }
+  ]
+}

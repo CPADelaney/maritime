@@ -12,6 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from ..models import Fee, Port
+from .rates_loader import (
+    MISSING_RATE_FIELD,
+    load_pilotage_rates,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -181,8 +185,8 @@ class FeeEngine:
         "STKN": Decimal("275"),
     }
 
-    # Pilotage formula fallbacks
-    PILOTAGE_PORT_RATES = {
+    # Pilotage formula fallbacks used when registry lookups fail.
+    _LEGACY_PILOTAGE_PORT_RATES = {
         "LALB": {"base": 3500, "per_foot": 8.50, "draft_mult": 1.15},
         "USOAK": {"base": 3200, "per_foot": 7.75, "draft_mult": 1.12},
         "USSFO": {"base": 4200, "per_foot": 9.50, "draft_mult": 1.16},
@@ -708,8 +712,23 @@ class FeeEngine:
             calculation_details="Fallback fixed per voyage",
         )
 
-    def _calc_pilotage(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
-        rates = self.PILOTAGE_PORT_RATES.get(
+    @staticmethod
+    def _resolve_port_zone(port: Port) -> str:
+        zone = None
+        if hasattr(port, "zone") and getattr(port, "zone") is not None:
+            zone = getattr(port.zone, "code", None)
+        if not zone:
+            zone = getattr(port, "zone_code", None)
+        if not zone:
+            zone = getattr(port, "region", None)
+        if not zone:
+            zone = port.code
+        return str(zone)
+
+    def _calc_pilotage_fallback(
+        self, vessel: VesselSpecs, voyage: VoyageContext, port: Port
+    ) -> FeeCalculation:
+        rates = self._LEGACY_PILOTAGE_PORT_RATES.get(
             voyage.arrival_port_code,
             {"base": 3500, "per_foot": 8.00, "draft_mult": 1.15},
         )
@@ -718,7 +737,6 @@ class FeeEngine:
         draft_mult = Decimal(str(rates["draft_mult"]))
         base_amt = _money(base + (loa_charge * draft_mult))
 
-        # Weekend / US holiday (federal + state) detection
         is_holiday = self._is_us_holiday(voyage.eta.date(), getattr(port, "state", None))
 
         multipliers: Dict[str, Decimal] = {}
@@ -738,12 +756,82 @@ class FeeEngine:
             base_amount=base_amt,
             multipliers=multipliers,
             final_amount=final_amt,
-            confidence=Decimal("0.85"),
+            confidence=Decimal("0.75"),
             calculation_details=(
-                f"LOA {vessel.loa_feet:.0f}ft × ${rates['per_foot']}/ft × draft factor {draft_mult}"
-                + (", weekend" if voyage.is_weekend_arrival else "")
-                + (", holiday" if is_holiday else "")
+                f"Registry fallback – LOA {vessel.loa_feet:.0f}ft × ${rates['per_foot']}/ft"
             ),
+            is_optional=False,
+        )
+
+    def _calc_pilotage(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
+        zone = self._resolve_port_zone(port)
+        on = voyage.eta.date()
+
+        try:
+            registry = load_pilotage_rates(zone, on)
+        except (MISSING_RATE_FIELD, KeyError, ValueError) as exc:
+            logger.warning(
+                "pilotage registry lookup failed for zone %s: %s; falling back",
+                zone,
+                exc,
+            )
+            return self._calc_pilotage_fallback(vessel, voyage, port)
+
+        bar = registry["bar"]
+        bay = registry["bay"]
+        river = registry["river"]
+        surcharges = registry["surcharges"]
+        extras = registry["extras"]
+
+        loa_feet = vessel.loa_feet
+        bar_component = (bar["base_fee"] + (loa_feet * bar["per_foot_rate"])) * bar["draft_multiplier"]
+        bay_component = max(bay["minimum"], loa_feet * bay["per_foot_rate"])
+        river_component = max(river["minimum"], loa_feet * river["per_foot_rate"])
+
+        base_service = bar_component + bay_component + river_component
+        base_amount = _money(base_service)
+
+        is_holiday = self._is_us_holiday(on, getattr(port, "state", None))
+
+        multipliers: Dict[str, Decimal] = {}
+        if voyage.is_weekend_arrival:
+            multipliers["weekend"] = surcharges["weekend_multiplier"]
+        if is_holiday:
+            multipliers["holiday"] = surcharges["holiday_multiplier"]
+
+        final_multiplier = max(multipliers.values()) if multipliers else Decimal("1.0")
+        base_with_multiplier = base_service * final_multiplier
+        base_with_multiplier = max(bar["min_total"], base_with_multiplier)
+        base_with_multiplier = min(bar["max_total"], base_with_multiplier)
+
+        night_charge = Decimal("0")
+        if surcharges.get("night_flat") and (voyage.eta.hour < 6 or voyage.eta.hour >= 18):
+            night_charge = surcharges["night_flat"]
+
+        extras_total = sum(extras.values(), Decimal("0"))
+
+        final_amount = _money(base_with_multiplier + night_charge + extras_total)
+
+        detail_parts = [
+            f"Bar { _money(bar_component) }",
+            f"Bay { _money(bay_component) }",
+            f"River { _money(river_component) }",
+        ]
+        if extras_total:
+            detail_parts.append(f"Extras { _money(extras_total) }")
+        if night_charge:
+            detail_parts.append(f"Night surcharge { _money(night_charge) }")
+
+        details = ", ".join(str(p) for p in detail_parts)
+
+        return FeeCalculation(
+            code="PILOTAGE",
+            name="Harbor Pilotage",
+            base_amount=_money(base_service),
+            multipliers=multipliers,
+            final_amount=final_amount,
+            confidence=Decimal("0.95"),
+            calculation_details=f"{zone} rates effective {registry['effective']:%Y-%m-%d}: {details}",
             is_optional=False,
         )
 
