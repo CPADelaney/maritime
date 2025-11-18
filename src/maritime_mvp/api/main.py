@@ -42,6 +42,7 @@ from ..connectors.live_sources import (
     get_cache_stats,
 )
 from ..models import Port, PortZone, Fee, Source
+from .holiday_calendar import get_upcoming_holidays
 
 # ---------------- Logging ----------------
 logging.basicConfig(
@@ -770,6 +771,9 @@ def _serialize_port_with_terminals(port: Port) -> Dict[str, Any]:
         "region": port.region,
         "is_california": port.is_california,
         "is_cascadia": port.is_cascadia,
+        "is_eca": bool(getattr(port, "is_eca", True)),
+        "latitude": float(port.latitude) if port.latitude is not None else None,
+        "longitude": float(port.longitude) if port.longitude is not None else None,
         "pilotage_url": port.pilotage_url,
         "mx_url": port.mx_url,
         "tariff_url": port.tariff_url,
@@ -862,7 +866,9 @@ def get_port(port_code: str) -> Dict[str, Any]:
             .first()
         )
         if zone:
-            return _serialize_zone(zone)
+            payload = _serialize_zone(zone)
+            payload["upcoming_holidays"] = get_upcoming_holidays(payload.get("zone_code"))
+            return payload
 
         port = (
             db.execute(
@@ -887,9 +893,13 @@ def get_port(port_code: str) -> Dict[str, Any]:
                 .first()
             )
             if zone:
-                return _serialize_zone(zone)
+                payload = _serialize_zone(zone)
+                payload["upcoming_holidays"] = get_upcoming_holidays(payload.get("zone_code"))
+                return payload
 
-        return _make_orphan_zone(port)
+        payload = _make_orphan_zone(port)
+        payload["upcoming_holidays"] = get_upcoming_holidays(payload.get("zone_code"))
+        return payload
     except HTTPException:
         raise
     except Exception:

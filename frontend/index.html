@@ -86,6 +86,30 @@
 
     /* Toggle Switch */
     .dot { transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1); }
+    [x-cloak] { display: none !important; }
+    .eca-alert {
+      background: #fef3c7;
+      color: #92400e;
+      border: 1px solid #fcd34d;
+    }
+    .print-hide {}
+    .print-only { display: none; }
+
+    @media print {
+      body { background: #fff; }
+      .print-hide,
+      .sidebar,
+      .inputs,
+      .buttons { display: none !important; }
+      .results-card {
+        background: #fff !important;
+        box-shadow: none !important;
+        border: 1px solid #0f172a !important;
+        padding: 2rem !important;
+      }
+      .results-card h3 { color: #0f172a !important; }
+      .print-only { display: block !important; }
+    }
   </style>
 </head>
 <body class="min-h-screen p-4 sm:p-6">
@@ -99,7 +123,7 @@
   <div class="max-w-7xl mx-auto" x-data="portCallApp()" x-init="init()">
 
     <!-- Header -->
-    <header class="flex items-center justify-between mb-8 animate-slide-up">
+    <header class="flex items-center justify-between mb-8 animate-slide-up print-hide">
       <div class="flex items-center gap-4">
         <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-700 flex items-center justify-center text-white text-2xl shadow-lg shadow-indigo-200">
           ⛴
@@ -123,10 +147,10 @@
     <div class="grid lg:grid-cols-3 gap-6">
       
       <!-- LEFT COLUMN: Controls -->
-      <div class="space-y-6">
+      <div class="space-y-6 sidebar print-hide">
 
         <!-- 1. Vessel Search -->
-        <div class="glass card p-5 animate-slide-up">
+        <div class="glass card p-5 animate-slide-up inputs">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
               <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -191,7 +215,7 @@
         </div>
 
         <!-- 2. Selected Vessel Card -->
-        <div x-show="selectedVessel" class="glass card p-5 animate-slide-up border-l-4 border-l-indigo-500">
+        <div x-show="selectedVessel" class="glass card p-5 animate-slide-up border-l-4 border-l-indigo-500 inputs">
           <div class="flex justify-between items-start mb-3">
             <h3 class="font-bold text-slate-800 text-lg" x-text="selectedVessel ? (selectedVessel.VesselName || 'Unknown') : ''"></h3>
             <div class="text-xs font-mono bg-slate-100 px-2 py-1 rounded text-slate-500" x-text="selectedVessel ? (selectedVessel.CallSign || '---') : ''"></div>
@@ -220,7 +244,7 @@
         </div>
 
         <!-- 3. Voyage Calculator (Tabbed) -->
-        <div class="glass card p-5 animate-slide-up" style="animation-delay: 0.1s;">
+        <div class="glass card p-5 animate-slide-up inputs" style="animation-delay: 0.1s;">
             
             <!-- Header & Toggle -->
             <div class="flex items-center justify-between mb-4">
@@ -292,17 +316,34 @@
                             <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
                         </button>
                     </div>
+                    <div x-show="selectedPortIsEca()" class="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold eca-alert">
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        <span>Low Sulfur Fuel Required (ECA)</span>
+                    </div>
                 </div>
-            
+
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">ETA</label>
                         <input x-model="eta" type="date" class="field" />
                     </div>
                     <div x-show="useV2">
-                        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Days</label>
+                        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Days Alongside</label>
                         <input x-model.number="daysAlongside" type="number" min="1" class="field" />
                     </div>
+                </div>
+
+                <div x-show="useV2" class="bg-white border border-amber-100 rounded-xl p-3 text-xs text-slate-600">
+                    <div class="font-semibold text-slate-700 mb-2">Laytime / Demurrage Calculator</div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Allowed Days
+                            <input x-model.number="laytimeAllowedDays" type="number" min="0" step="0.5" class="field mt-1" />
+                        </label>
+                        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Demurrage Rate ($/day)
+                            <input x-model.number="demurrageRate" type="number" min="0" step="100" class="field mt-1" />
+                        </label>
+                    </div>
+                    <div class="mt-2 text-slate-500">Potential Extra Cost: <span class="font-semibold text-rose-600" x-text="formatCurrency(potentialDemurrage())"></span></div>
                 </div>
 
                 <!-- V2 Route Inputs -->
@@ -416,7 +457,7 @@
             </div>
         
             <!-- Action Footer -->
-            <div class="mt-6 pt-5 border-t border-slate-100">
+            <div class="mt-6 pt-5 border-slate-100 buttons">
                 <button
                     @click="useV2 ? getEstimateV2() : getEstimate()"
                     :disabled="!selectedPort || estimateLoading || (useV2 && !previousPortCode.trim())"
@@ -428,6 +469,23 @@
                     </svg>
                 </button>
                 <div x-show="!selectedPort" class="text-center text-xs text-slate-400 mt-2">Please select a port to proceed</div>
+            </div>
+            <div class="mt-3 relative buttons print-hide" @click.away="historyDropdownOpen = false">
+                <button type="button" @click="historyDropdownOpen = !historyDropdownOpen" class="w-full btn btn-outline py-2 text-sm">History</button>
+                <div x-show="historyDropdownOpen" x-cloak class="absolute z-30 mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl text-left">
+                    <template x-if="!estimateHistory.length">
+                        <div class="px-4 py-3 text-xs text-slate-400">No recent estimates saved.</div>
+                    </template>
+                    <template x-for="item in estimateHistory" :key="item.id">
+                        <button type="button" @click="applyEstimateHistory(item)" class="w-full px-4 py-3 text-left hover:bg-indigo-50 border-b border-slate-100 last:border-0">
+                            <div class="font-semibold text-slate-800" x-text="item.portLabel || item.portCode"></div>
+                            <div class="text-[11px] text-slate-500 flex items-center justify-between mt-1">
+                                <span x-text="new Date(item.timestamp).toLocaleString()"></span>
+                                <span class="font-mono text-indigo-600 font-semibold" x-text="formatCurrency(item.totals?.total_high || item.totals?.mandatory || 0)"></span>
+                            </div>
+                        </button>
+                    </template>
+                </div>
             </div>
         </div>
       </div> <!-- End Left Column -->
@@ -454,6 +512,40 @@
           </ul>
         </div>
 
+        <div x-show="weatherSnapshot || selectedPortHolidays.length" class="glass card p-5 animate-slide-up" style="animation-delay:0.05s;">
+          <div class="flex flex-col gap-4">
+            <div x-show="weatherSnapshot" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div>
+                <div class="text-xs uppercase tracking-wide text-slate-400 font-semibold">Weather</div>
+                <div class="text-3xl font-bold text-slate-800" x-text="weatherSnapshot?.temperature != null ? `${Number(weatherSnapshot.temperature).toFixed(0)}°F` : '--'"></div>
+                <div class="text-sm text-slate-500" x-text="weatherSnapshot?.description"></div>
+              </div>
+              <div class="text-right text-sm text-slate-600">
+                <div class="font-semibold" x-text="weatherSnapshot?.wind_speed != null ? `${Number(weatherSnapshot.wind_speed).toFixed(0)} kt` : ''"></div>
+                <div class="text-xs text-slate-400">Wind Dir: <span x-text="weatherSnapshot?.wind_direction != null ? `${weatherSnapshot.wind_direction}°` : '—'"></span></div>
+              </div>
+            </div>
+            <div x-show="weatherSnapshot?.tide" class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-sm text-indigo-900">
+              Next high tide <strong x-text="formatLocalTime(weatherSnapshot.tide?.time)"></strong>
+              · <span class="font-semibold" x-text="weatherSnapshot?.tide?.height != null ? `${Number(weatherSnapshot.tide.height).toFixed(2)} m` : ''"></span>
+            </div>
+            <div x-show="selectedPortHolidays.length" class="text-sm text-slate-600">
+              <div class="text-xs uppercase font-semibold text-amber-600 mb-2">Upcoming Holidays</div>
+              <ul class="space-y-2">
+                <template x-for="holiday in selectedPortHolidays" :key="holiday.date + holiday.name">
+                  <li class="flex items-start gap-2">
+                    <span class="text-lg">⚠️</span>
+                    <div>
+                      <div class="font-semibold text-slate-800" x-text="`${holiday.name} · ${formatDate(holiday.date)}`"></div>
+                      <div class="text-xs text-slate-500" x-text="holiday.note"></div>
+                    </div>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </div>
+        </div>
+
         <!-- 2. Empty State -->
         <div x-show="!estimate && !estimateV2 && !mpResult" class="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center h-full min-h-[400px] flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 animate-slide-up">
             <div class="w-20 h-20 bg-white rounded-full shadow-sm flex items-center justify-center mb-6">
@@ -465,10 +557,14 @@
 
         <!-- 3. Estimate Results V2 (Modern) -->
         <template x-if="!!estimateV2">
-          <div class="glass card p-6 animate-slide-up">
+          <div class="glass card p-6 animate-slide-up results-card">
+            <div class="print-only mb-4 text-center border-b border-slate-200 pb-3">
+              <div class="text-xl font-bold text-slate-800">Maritime MVP</div>
+              <div class="text-sm text-slate-500">Proforma Port Call Estimate</div>
+            </div>
             <div class="flex items-center justify-between mb-6">
               <h3 class="text-xl font-bold text-slate-800">Fee Estimate</h3>
-              <div class="flex gap-3">
+              <div class="flex gap-3 items-center print-hide">
                  <div class="text-xs text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
                     <span>Confidence</span>
                     <span class="font-bold" :class="Number(estimateV2?.confidence) > 0.8 ? 'text-emerald-600' : 'text-amber-600'" x-text="Math.round(Number(estimateV2?.confidence)*100) + '%'"></span>
@@ -477,6 +573,7 @@
                     <button @click="clientExport('csv')" class="btn btn-outline px-3 py-1 text-xs h-8">CSV</button>
                     <button @click="clientExport('json')" class="btn btn-outline px-3 py-1 text-xs h-8">JSON</button>
                  </div>
+                 <button @click="printEstimate" class="btn btn-outline px-3 py-1 text-xs h-8">Print PDF</button>
               </div>
             </div>
 
@@ -541,16 +638,35 @@
                 <span x-text="estimateV2?.disclaimer"></span><br>
                 <span x-text="estimateV2?.accuracy_statement"></span>
             </p>
+
+            <div class="mt-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 text-sm text-rose-900">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-xs uppercase tracking-wide font-semibold">Potential Extra Cost</div>
+                  <div class="text-2xl font-bold mt-1" x-text="formatCurrency(potentialDemurrage())"></div>
+                </div>
+                <div class="text-xs text-rose-600">
+                  Based on <span class="font-semibold" x-text="daysAlongside"></span> days vs
+                  <span class="font-semibold" x-text="laytimeAllowedDays"></span> allowed @
+                  <span class="font-semibold" x-text="formatCurrency(demurrageRate)"></span>/day
+                </div>
+              </div>
+            </div>
           </div>
         </template>
 
         <!-- 4. Estimate Results V1 (Legacy) -->
         <template x-if="estimate && !estimateV2">
-          <div class="glass card p-6 animate-slide-up">
+          <div class="glass card p-6 animate-slide-up results-card">
+            <div class="print-only mb-4 text-center border-b border-slate-200 pb-3">
+              <div class="text-xl font-bold text-slate-800">Maritime MVP</div>
+              <div class="text-sm text-slate-500">Proforma Port Call Estimate</div>
+            </div>
             <div class="flex items-center justify-between mb-4">
               <h3 class="text-xl font-bold text-slate-800">Fee Estimate (Simple)</h3>
-              <div class="flex gap-2">
+              <div class="flex gap-2 print-hide">
                 <button @click="clientExport('csv')" class="btn btn-outline px-3 py-1 text-xs">CSV</button>
+                <button @click="printEstimate" class="btn btn-outline px-3 py-1 text-xs">Print PDF</button>
               </div>
             </div>
 
@@ -602,6 +718,19 @@
                    </div>
                  </template>
                </div>
+            </div>
+
+            <div class="mt-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 text-sm text-rose-900">
+              <div class="flex items-center justify-between">
+                <div>
+                  <div class="text-xs uppercase tracking-wide font-semibold">Potential Extra Cost</div>
+                  <div class="text-2xl font-bold mt-1" x-text="formatCurrency(potentialDemurrage())"></div>
+                </div>
+                <div class="text-xs text-rose-600">
+                  Using laytime cap of <span class="font-semibold" x-text="laytimeAllowedDays"></span> days @
+                  <span class="font-semibold" x-text="formatCurrency(demurrageRate)"></span>/day
+                </div>
+              </div>
             </div>
           </div>
         </template>
@@ -725,7 +854,7 @@
         </div>
 
         <!-- Quick Actions -->
-        <div class="flex gap-3 justify-end pt-4 border-t border-slate-200/50">
+        <div class="flex gap-3 justify-end pt-4 border-t border-slate-200/50 print-hide buttons">
           <button @click="refreshAll" class="text-xs btn btn-outline px-4 py-2">Refresh Data</button>
           <button @click="clearCache" class="text-xs btn btn-outline px-4 py-2 hover:text-red-600 hover:border-red-200">Clear Cache</button>
         </div>
@@ -733,7 +862,7 @@
       </div> <!-- End Right Column -->
     </div>
 
-    <footer class="mt-12 py-8 border-t border-slate-200 text-center">
+    <footer class="mt-12 py-8 border-t border-slate-200 text-center print-hide">
       <p class="text-sm text-slate-500">Maritime MVP &copy; 2025</p>
       <p class="text-xs text-slate-400 mt-1">Data sources: USCG PSIX, CBP, APHIS. Estimates for planning purposes only.</p>
     </footer>
@@ -773,6 +902,9 @@
         terminalLabels: {},
         selectedPortContext: null,
         selectedPort: '',
+        selectedPortDetails: null,
+        selectedPortHolidays: [],
+        portDetailCache: {},
         portQuery: '',
         filteredPorts: [],
         mpFilteredPorts: [],
@@ -791,6 +923,8 @@
         nextPortCode: '',
         etd: '',
         daysAlongside: 2,
+        laytimeAllowedDays: 2,
+        demurrageRate: 0,
         vesselType: 'general_cargo',
         grossTonnage: 0,
         loaMeters: 0,
@@ -822,10 +956,16 @@
         estimateV2: null,
         estimateLoading: false,
         liveData: null,
-  
+        weatherSnapshot: null,
+        weatherLoading: false,
+        weatherError: null,
+        estimateHistory: [],
+        historyDropdownOpen: false,
+
         async init() {
           await this.checkHealth();
           await this.loadPorts();
+          this.loadEstimateHistory();
         },
   
         async checkHealth() {
@@ -1065,6 +1205,90 @@
           };
         },
 
+        selectedPortIsEca() {
+          const ctx = this.selectedPortContext;
+          if (!ctx) return false;
+          if (ctx.port && typeof ctx.port.is_eca === 'boolean') return ctx.port.is_eca;
+          const zonePorts = Array.isArray(ctx.zone?.ports) ? ctx.zone.ports : [];
+          if (!zonePorts.length) return false;
+          const zoneCode = String(ctx.zoneCode || '').toUpperCase();
+          const match = zoneCode
+            ? zonePorts.find((p) => String(p.code || '').toUpperCase() === zoneCode)
+            : null;
+          if (match && typeof match.is_eca === 'boolean') return match.is_eca;
+          return zonePorts.some((p) => p.is_eca !== false);
+        },
+
+        getRepresentativePort() {
+          const ctx = this.selectedPortContext;
+          if (ctx?.port && (ctx.port.latitude || ctx.port.longitude)) return ctx.port;
+          const zonePorts = Array.isArray(ctx?.zone?.ports) ? ctx.zone.ports : [];
+          if (!zonePorts.length) return null;
+          const zoneCode = String(ctx?.zoneCode || '').toUpperCase();
+          if (zoneCode) {
+            const direct = zonePorts.find((p) => String(p.code || '').toUpperCase() === zoneCode);
+            if (direct) return direct;
+          }
+          return zonePorts[0] || null;
+        },
+
+        getSelectedCoordinates() {
+          const port = this.getRepresentativePort()
+            || (Array.isArray(this.selectedPortDetails?.ports) ? this.selectedPortDetails.ports[0] : null);
+          if (!port) return null;
+          const lat = Number(port.latitude);
+          const lon = Number(port.longitude);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+          return { lat, lon };
+        },
+
+        formatCurrency(value) {
+          const n = Number(value);
+          if (!Number.isFinite(n)) return '$0.00';
+          return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
+        },
+
+        potentialDemurrage() {
+          const days = Number(this.daysAlongside) || 0;
+          const allowed = Number(this.laytimeAllowedDays) || 0;
+          const rate = Number(this.demurrageRate) || 0;
+          const excess = Math.max(0, days - allowed);
+          return Math.max(0, excess * rate);
+        },
+
+        formatDate(dateString) {
+          if (!dateString) return '';
+          const d = new Date(dateString);
+          if (Number.isNaN(d.getTime())) return dateString;
+          return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        },
+
+        formatLocalTime(isoString) {
+          if (!isoString) return '';
+          const d = new Date(isoString);
+          if (Number.isNaN(d.getTime())) return isoString;
+          return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        },
+
+        describeWeather(code) {
+          const mapping = {
+            0: 'Clear',
+            1: 'Mainly clear',
+            2: 'Partly cloudy',
+            3: 'Overcast',
+            45: 'Fog',
+            48: 'Depositing rime fog',
+            51: 'Light drizzle',
+            61: 'Light rain',
+            63: 'Rain',
+            65: 'Heavy rain',
+            71: 'Snow',
+            80: 'Rain showers',
+            95: 'Thunderstorms'
+          };
+          return mapping[code] || 'Conditions unavailable';
+        },
+
         portResultTitle(entry) {
           return entry ? (entry.label || '') : '';
         },
@@ -1104,6 +1328,9 @@
             this.selectedPort = '';
             this.selectedPortContext = null;
           }
+          this.selectedPortDetails = null;
+          this.selectedPortHolidays = [];
+          this.weatherSnapshot = null;
         },
 
         rankPortMatches(tokens) {
@@ -1205,7 +1432,7 @@
           }
         },
 
-        selectPort(entry) {
+        async selectPort(entry) {
           if (!entry) return;
           const context = this.makeSelectionContext(entry);
           this.selectedPortContext = context;
@@ -1213,7 +1440,11 @@
           this.portQuery = context?.label || '';
           this.filteredPorts = [];
           this.showPortDropdown = false;
-          if (this.selectedPort) this.loadLiveData();
+          if (this.selectedPort) {
+            this.loadLiveData();
+            await this.fetchPortInsights(this.selectedPort);
+            await this.loadWeatherSnapshot();
+          }
         },
 
         // ---------- Normalizer (no out-before-init) ----------
@@ -1612,6 +1843,7 @@
               throw new Error(t || 'v2 estimate failed');
             }
             this.estimateV2 = await r.json();
+            this.saveEstimateToHistory(this.estimateV2, body);
             if (this.selectedVessel) await this.loadLiveData();
           } catch (e) {
             console.error('v2 estimate failed:', e);
@@ -1798,14 +2030,14 @@
         // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
-  
+
           const params = new URLSearchParams({
             vessel_name: this.selectedVessel.VesselName || '',
             port_code: this.selectedPort
           });
           const vid = this.selectedVessel.VesselID;
           if (vid) params.set('vessel_id', vid);
-  
+
           try {
             const r = await fetch(`${API_BASE}/live/portbundle?${params}`);
             if (!r.ok) throw new Error('Live data failed');
@@ -1813,6 +2045,98 @@
           } catch (e) {
             console.error('Live data failed:', e);
           }
+        },
+
+        async fetchPortInsights(zoneCode) {
+          const code = (zoneCode || '').trim().toUpperCase();
+          if (!code) {
+            this.selectedPortDetails = null;
+            this.selectedPortHolidays = [];
+            return;
+          }
+          if (this.portDetailCache[code]) {
+            this.selectedPortDetails = this.portDetailCache[code];
+            this.selectedPortHolidays = Array.isArray(this.portDetailCache[code]?.upcoming_holidays)
+              ? this.portDetailCache[code].upcoming_holidays
+              : [];
+            return;
+          }
+          try {
+            const r = await fetch(`${API_BASE}/ports/${code}`);
+            if (!r.ok) throw new Error(await r.text());
+            const data = await r.json();
+            this.portDetailCache[code] = data;
+            this.selectedPortDetails = data;
+            this.selectedPortHolidays = Array.isArray(data?.upcoming_holidays) ? data.upcoming_holidays : [];
+          } catch (e) {
+            console.error('Port detail load failed:', e);
+            this.selectedPortDetails = null;
+            this.selectedPortHolidays = [];
+          }
+        },
+
+        async loadWeatherSnapshot() {
+          const coords = this.getSelectedCoordinates();
+          if (!coords) {
+            this.weatherSnapshot = null;
+            return;
+          }
+          this.weatherLoading = true;
+          this.weatherError = null;
+          try {
+            const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current_weather=true&windspeed_unit=kn&temperature_unit=fahrenheit`;
+            const tideUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${coords.lat}&longitude=${coords.lon}&hourly=tide_height&timezone=auto`;
+            const [wxResp, tideResp] = await Promise.allSettled([fetch(wxUrl), fetch(tideUrl)]);
+            const wx = wxResp.status === 'fulfilled' && wxResp.value.ok ? await wxResp.value.json() : null;
+            const tide = tideResp.status === 'fulfilled' && tideResp.value.ok ? await tideResp.value.json() : null;
+            const current = wx?.current_weather || {};
+            const tideInfo = this.resolveHighTide(tide?.hourly);
+            this.weatherSnapshot = {
+              temperature: current.temperature ?? null,
+              wind_speed: current.windspeed ?? null,
+              wind_direction: current.winddirection ?? null,
+              description: this.describeWeather(current.weathercode),
+              tide: tideInfo
+            };
+          } catch (e) {
+            console.error('Weather fetch failed:', e);
+            this.weatherError = 'Weather unavailable';
+            this.weatherSnapshot = null;
+          } finally {
+            this.weatherLoading = false;
+          }
+        },
+
+        resolveHighTide(hourly) {
+          if (!hourly || !Array.isArray(hourly.time) || !Array.isArray(hourly.tide_height)) return null;
+          const now = new Date();
+          const { time, tide_height: heights } = hourly;
+          let candidate = null;
+          for (let i = 1; i < time.length - 1; i += 1) {
+            const height = heights[i];
+            if (height == null) continue;
+            const ts = new Date(time[i]);
+            if (ts <= now) continue;
+            const prev = heights[i - 1];
+            const next = heights[i + 1];
+            if (prev == null || next == null) continue;
+            if (height >= prev && height >= next) {
+              candidate = { time: ts.toISOString(), height };
+              break;
+            }
+          }
+          if (!candidate) {
+            for (let i = 0; i < time.length; i += 1) {
+              const ts = new Date(time[i]);
+              if (ts <= now) continue;
+              const height = heights[i];
+              if (height == null) continue;
+              if (!candidate || height > candidate.height) {
+                candidate = { time: ts.toISOString(), height };
+              }
+            }
+          }
+          return candidate;
         },
   
         // UN/LOCODE typeahead for previous/next/mp ports
@@ -1886,6 +2210,65 @@
           a.href = URL.createObjectURL(blob);
           a.download = `estimate_v1_${this.selectedPort}_${this.eta}.csv`;
           a.click();
+        },
+
+        loadEstimateHistory() {
+          try {
+            const raw = localStorage.getItem('maritime_estimate_history');
+            this.estimateHistory = raw ? JSON.parse(raw) : [];
+          } catch (e) {
+            console.warn('History load failed', e);
+            this.estimateHistory = [];
+          }
+        },
+
+        persistEstimateHistory() {
+          try {
+            localStorage.setItem('maritime_estimate_history', JSON.stringify(this.estimateHistory));
+          } catch (e) {
+            console.warn('History persist failed', e);
+          }
+        },
+
+        saveEstimateToHistory(estimate, requestBody) {
+          if (!estimate || !this.selectedPort) return;
+          const entry = {
+            id: Date.now(),
+            timestamp: new Date().toISOString(),
+            portCode: this.selectedPort,
+            portLabel: this.selectedPortContext?.label || this.selectedPort,
+            vesselName: this.selectedVessel?.VesselName || requestBody?.vessel_name || 'Unknown Vessel',
+            totals: estimate?.totals || null,
+            request: { ...requestBody }
+          };
+          this.estimateHistory = [entry, ...this.estimateHistory].slice(0, 5);
+          this.persistEstimateHistory();
+        },
+
+        applyEstimateHistory(entry) {
+          if (!entry) return;
+          this.useV2 = true;
+          this.historyDropdownOpen = false;
+          const req = entry.request || {};
+          this.previousPortCode = req.previous_port_code || '';
+          this.nextPortCode = req.next_port_code || '';
+          this.eta = req.eta ? req.eta.split('T')[0] : this.eta;
+          this.etd = req.etd ? req.etd.split('T')[0] : this.etd;
+          this.daysAlongside = Number(req.days_alongside) || this.daysAlongside;
+          this.grossTonnage = Number(req.gross_tonnage) || this.grossTonnage;
+          this.netTonnage = Number(req.net_tonnage) || this.netTonnage;
+          this.loaMeters = Number(req.loa_meters) || this.loaMeters;
+          this.beamMeters = Number(req.beam_meters) || this.beamMeters;
+          this.selectedPort = entry.portCode || '';
+          this.syncPortQueryWithSelection();
+          if (this.selectedPort) {
+            this.fetchPortInsights(this.selectedPort);
+            this.loadWeatherSnapshot();
+          }
+        },
+
+        printEstimate() {
+          window.print();
         },
   
         // Multi-port methods
@@ -1962,6 +2345,8 @@
           if (this.selectedPort && this.eta) {
             if (this.useV2) await this.getEstimateV2();
             else await this.getEstimate();
+            await this.fetchPortInsights(this.selectedPort);
+            await this.loadWeatherSnapshot();
           }
         },
   
