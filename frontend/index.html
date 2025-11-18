@@ -1,3 +1,4 @@
+<!-- frontend/index.html -->
 <!doctype html>
 <html lang="en">
 <head>
@@ -15,13 +16,15 @@
 
   <style>
     /* Modern Reset & Texture */
-    body { 
-      font-family: 'Inter', system-ui, -apple-system, sans-serif; 
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
       background-color: #f8fafc;
       background-image: radial-gradient(#6366f1 0.5px, transparent 0.5px);
       background-size: 24px 24px;
       color: #1e293b;
     }
+
+    [x-cloak] { display: none !important; }
 
     /* Animations */
     @keyframes slideUp { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
@@ -86,29 +89,54 @@
 
     /* Toggle Switch */
     .dot { transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1); }
-    [x-cloak] { display: none !important; }
+
+    .results-card {
+      position: relative;
+    }
+
+    .results-card .print-header,
+    .results-card .print-footer {
+      display: none;
+    }
+
     .eca-alert {
       background: #fef3c7;
       color: #92400e;
       border: 1px solid #fcd34d;
     }
-    .print-hide {}
-    .print-only { display: none; }
 
     @media print {
-      body { background: #fff; }
-      .print-hide,
-      .sidebar,
-      .inputs,
-      .buttons { display: none !important; }
+      body { background: #fff !important; }
+      .print-hidden, .sidebar, .inputs, .buttons, header, footer { display: none !important; }
       .results-card {
-        background: #fff !important;
         box-shadow: none !important;
-        border: 1px solid #0f172a !important;
-        padding: 2rem !important;
+        border: 1px solid #0f172a;
+        background: #fff;
+        page-break-inside: avoid;
+        padding: 0 !important;
+        border: none !important;
       }
-      .results-card h3 { color: #0f172a !important; }
-      .print-only { display: block !important; }
+      .results-card .print-header,
+      .results-card .print-footer {
+        display: flex;
+      }
+      .results-card .print-header {
+        justify-content: space-between;
+        align-items: center;
+        margin-bottom: 1rem;
+        padding-bottom: 0.75rem;
+        border-bottom: 1px solid #e2e8f0;
+      }
+      .results-card .print-footer {
+        justify-content: space-between;
+        font-size: 0.75rem;
+        color: #475569;
+        border-top: 1px solid #e2e8f0;
+        margin-top: 1rem;
+        padding-top: 0.75rem;
+      }
+      .bg-slate-800 { background: #f8fafc !important; color: #0f172a !important; border: 1px solid #e2e8f0; }
+      .text-white { color: #0f172a !important; }
     }
   </style>
 </head>
@@ -116,14 +144,14 @@
 
   <script>
     // 1) Default to same-origin API; 2) set OVERRIDE_API_BASE to hard-code a remote API if needed.
-    const OVERRIDE_API_BASE = ""; // e.g., "https://maritime-ee6i.onrender.com"
+    const OVERRIDE_API_BASE = ""; 
     const API_BASE = OVERRIDE_API_BASE || window.location.origin;
   </script>
 
   <div class="max-w-7xl mx-auto" x-data="portCallApp()" x-init="init()">
 
     <!-- Header -->
-    <header class="flex items-center justify-between mb-8 animate-slide-up print-hide">
+    <header class="flex items-center justify-between mb-8 animate-slide-up print-hidden">
       <div class="flex items-center gap-4">
         <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-700 flex items-center justify-center text-white text-2xl shadow-lg shadow-indigo-200">
           ⛴
@@ -147,7 +175,7 @@
     <div class="grid lg:grid-cols-3 gap-6">
       
       <!-- LEFT COLUMN: Controls -->
-      <div class="space-y-6 sidebar print-hide">
+      <div class="space-y-6 sidebar print-hidden">
 
         <!-- 1. Vessel Search -->
         <div class="glass card p-5 animate-slide-up inputs">
@@ -188,14 +216,12 @@
                     <span class="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600" x-show="v.Flag" x-text="v.Flag"></span>
                     <span x-text="v.VesselType"></span>
                   </div>
-                  <!-- Selected Indicator -->
                   <div x-show="selectedVessel && (selectedVessel.VesselID === v.VesselID || selectedVessel.VesselName === v.VesselName)" 
                        class="absolute top-3 right-3 w-2 h-2 bg-indigo-500 rounded-full"></div>
                 </button>
               </template>
             </div>
 
-            <!-- No Results -->
             <div x-show="!searchLoading && vesselResults.length === 0 && vesselSearched" class="text-sm text-center text-slate-500 py-4">
               No vessels found. Try a different name.
             </div>
@@ -226,6 +252,7 @@
             <div><span class="text-slate-400 text-xs uppercase block">Type</span> <span x-text="selectedVessel?.VesselType || '—'"></span></div>
             <div x-show="selectedVessel?.YearBuilt"><span class="text-slate-400 text-xs uppercase block">Built</span> <span x-text="selectedVessel.YearBuilt"></span></div>
             <div x-show="selectedVessel?.IMO"><span class="text-slate-400 text-xs uppercase block">IMO</span> <span x-text="selectedVessel.IMO"></span></div>
+            
             <div class="col-span-2 mt-2 pt-2 border-t border-slate-100 grid grid-cols-3 gap-2">
                 <div class="text-center bg-indigo-50/50 rounded p-1">
                     <div class="text-[10px] text-indigo-400 uppercase font-bold">LOA</div>
@@ -284,10 +311,10 @@
                     <div class="relative">
                         <input x-model="portQuery" 
                                @input="searchPorts(false, 'single')" 
-                               @focus="searchPorts(true)" 
+                               @focus="searchPorts(true, 'single')" 
                                @keydown.enter.prevent="selectFirstPortResult()"
                                class="field pl-9" 
-                               placeholder="Search port, zone, or terminal..." />
+                               placeholder="Select port..." />
                         <svg class="w-4 h-4 absolute left-3 top-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
                         <button x-show="portQuery" @click="clearPortQuery" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">✕</button>
                     </div>
@@ -317,11 +344,11 @@
                         </button>
                     </div>
                     <div x-show="selectedPortIsEca()" class="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold eca-alert">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 00-7.07 17.07A10 10 0 1012 2z"/></svg>
                         <span>Low Sulfur Fuel Required (ECA)</span>
                     </div>
                 </div>
-
+            
                 <div class="grid grid-cols-2 gap-4">
                     <div>
                         <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">ETA</label>
@@ -331,19 +358,6 @@
                         <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Days Alongside</label>
                         <input x-model.number="daysAlongside" type="number" min="1" class="field" />
                     </div>
-                </div>
-
-                <div x-show="useV2" class="bg-white border border-amber-100 rounded-xl p-3 text-xs text-slate-600">
-                    <div class="font-semibold text-slate-700 mb-2">Laytime / Demurrage Calculator</div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Allowed Days
-                            <input x-model.number="laytimeAllowedDays" type="number" min="0" step="0.5" class="field mt-1" />
-                        </label>
-                        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Demurrage Rate ($/day)
-                            <input x-model.number="demurrageRate" type="number" min="0" step="100" class="field mt-1" />
-                        </label>
-                    </div>
-                    <div class="mt-2 text-slate-500">Potential Extra Cost: <span class="font-semibold text-rose-600" x-text="formatCurrency(potentialDemurrage())"></span></div>
                 </div>
 
                 <!-- V2 Route Inputs -->
@@ -382,6 +396,19 @@
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <div x-show="useV2" class="bg-white border border-amber-100 rounded-xl p-3 text-xs text-slate-600">
+                    <div class="font-semibold text-slate-700 mb-2">Laytime / Demurrage Calculator</div>
+                    <div class="grid grid-cols-2 gap-3">
+                        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Allowed Days
+                            <input x-model.number="laytimeAllowedDays" type="number" min="0" step="0.5" class="field mt-1" />
+                        </label>
+                        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Demurrage Rate ($/day)
+                            <input x-model.number="demurrageRate" type="number" min="0" step="100" class="field mt-1" />
+                        </label>
+                    </div>
+                    <div class="mt-2 text-slate-500">Potential Extra Cost: <span class="font-semibold text-rose-600" x-text="formatCurrency(potentialDemurrage())"></span></div>
                 </div>
                 
                 <!-- Legacy Inputs -->
@@ -457,35 +484,37 @@
             </div>
         
             <!-- Action Footer -->
-            <div class="mt-6 pt-5 border-slate-100 buttons">
-                <button
-                    @click="useV2 ? getEstimateV2() : getEstimate()"
-                    :disabled="!selectedPort || estimateLoading || (useV2 && !previousPortCode.trim())"
-                    class="w-full btn btn-primary py-3.5 text-lg shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none">
-                    <span x-show="!estimateLoading">Calculate Fees</span>
-                    <svg x-show="estimateLoading" class="animate-spin h-5 w-5 text-white/80" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                    </svg>
-                </button>
-                <div x-show="!selectedPort" class="text-center text-xs text-slate-400 mt-2">Please select a port to proceed</div>
-            </div>
-            <div class="mt-3 relative buttons print-hide" @click.away="historyDropdownOpen = false">
-                <button type="button" @click="historyDropdownOpen = !historyDropdownOpen" class="w-full btn btn-outline py-2 text-sm">History</button>
-                <div x-show="historyDropdownOpen" x-cloak class="absolute z-30 mt-2 w-full bg-white border border-slate-200 rounded-xl shadow-xl text-left">
-                    <template x-if="!estimateHistory.length">
-                        <div class="px-4 py-3 text-xs text-slate-400">No recent estimates saved.</div>
-                    </template>
-                    <template x-for="item in estimateHistory" :key="item.id">
-                        <button type="button" @click="applyEstimateHistory(item)" class="w-full px-4 py-3 text-left hover:bg-indigo-50 border-b border-slate-100 last:border-0">
-                            <div class="font-semibold text-slate-800" x-text="item.portLabel || item.portCode"></div>
-                            <div class="text-[11px] text-slate-500 flex items-center justify-between mt-1">
-                                <span x-text="new Date(item.timestamp).toLocaleString()"></span>
-                                <span class="font-mono text-indigo-600 font-semibold" x-text="formatCurrency(item.totals?.total_high || item.totals?.mandatory || 0)"></span>
-                            </div>
-                        </button>
-                    </template>
+            <div class="mt-6 pt-5 border-t border-slate-100 buttons">
+                <div class="flex gap-2 items-stretch">
+                    <button
+                        @click="useV2 ? getEstimateV2() : getEstimate()"
+                        :disabled="!selectedPort || estimateLoading || (useV2 && !previousPortCode.trim())"
+                        class="flex-1 btn btn-primary py-3.5 text-lg shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none">
+                        <span x-show="!estimateLoading">Calculate Fees</span>
+                        <svg x-show="estimateLoading" class="animate-spin h-5 w-5 text-white/80" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                    </button>
+                    <div class="relative" @click.away="historyDropdownOpen = false">
+                        <button type="button" class="btn btn-outline px-4 py-2 text-sm h-full print-hidden" @click.stop="historyDropdownOpen = !historyDropdownOpen">History ▾</button>
+                        <div x-show="historyDropdownOpen" x-transition class="absolute right-0 top-full mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-40">
+                            <template x-if="!estimateHistory.length">
+                                <div class="p-4 text-xs text-slate-400">No saved estimates yet.</div>
+                            </template>
+                            <template x-for="item in estimateHistory" :key="item.id">
+                                <button type="button" @click="applyEstimateHistory(item)" class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-100 last:border-0">
+                                    <div class="text-sm font-semibold text-slate-800" x-text="item.portLabel || item.portCode"></div>
+                                    <div class="text-xs text-slate-500 flex justify-between mt-1">
+                                        <span x-text="formatDate(item.timestamp)"></span>
+                                        <span class="font-mono text-indigo-600 font-semibold" x-text="formatCurrency(item.totals?.total_high || item.totals?.mandatory || 0)"></span>
+                                    </div>
+                                </button>
+                            </template>
+                        </div>
+                    </div>
                 </div>
+                <div x-show="!selectedPort" class="text-center text-xs text-slate-400 mt-2">Please select a port to proceed</div>
             </div>
         </div>
       </div> <!-- End Left Column -->
@@ -494,7 +523,7 @@
       <div class="lg:col-span-2 space-y-6">
 
         <!-- 1. Compliance Alerts -->
-        <div x-show="liveData && liveData.alerts && liveData.alerts.length" class="bg-amber-50 border-l-4 border-amber-400 rounded-xl p-4 shadow-sm animate-slide-up">
+        <div x-show="liveData && liveData.alerts && liveData.alerts.length" class="bg-amber-50 border-l-4 border-amber-400 rounded-xl p-4 shadow-sm animate-slide-up print-hidden">
           <div class="flex items-center justify-between mb-2">
             <h4 class="font-bold text-amber-900 flex items-center gap-2">
                 <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
@@ -512,7 +541,8 @@
           </ul>
         </div>
 
-        <div x-show="weatherSnapshot || selectedPortHolidays.length" class="glass card p-5 animate-slide-up" style="animation-delay:0.05s;">
+        <!-- Weather & Tide Snapshot -->
+        <div x-show="weatherSnapshot || selectedPortHolidays.length" class="glass card p-5 animate-slide-up print-hidden" style="animation-delay:0.05s;">
           <div class="flex flex-col gap-4">
             <div x-show="weatherSnapshot" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
@@ -537,7 +567,7 @@
                     <span class="text-lg">⚠️</span>
                     <div>
                       <div class="font-semibold text-slate-800" x-text="`${holiday.name} · ${formatDate(holiday.date)}`"></div>
-                      <div class="text-xs text-slate-500" x-text="holiday.note"></div>
+                      <div class="text-xs text-slate-500" x-text="holiday.notes || holiday.note"></div>
                     </div>
                   </li>
                 </template>
@@ -558,13 +588,19 @@
         <!-- 3. Estimate Results V2 (Modern) -->
         <template x-if="!!estimateV2">
           <div class="glass card p-6 animate-slide-up results-card">
-            <div class="print-only mb-4 text-center border-b border-slate-200 pb-3">
-              <div class="text-xl font-bold text-slate-800">Maritime MVP</div>
-              <div class="text-sm text-slate-500">Proforma Port Call Estimate</div>
+            <div class="print-header">
+                <div>
+                    <div class="text-lg font-bold text-slate-900">Maritime MVP</div>
+                    <div class="text-xs text-slate-500">Proforma Estimate</div>
+                </div>
+                <div class="text-right text-xs text-slate-500">
+                    <div x-text="selectedPortContext?.label || selectedPort || '—'"></div>
+                    <div x-text="formatDate(estimateV2?.voyage?.eta)"></div>
+                </div>
             </div>
-            <div class="flex items-center justify-between mb-6">
+            <div class="flex items-center justify-between mb-6 print-hidden">
               <h3 class="text-xl font-bold text-slate-800">Fee Estimate</h3>
-              <div class="flex gap-3 items-center print-hide">
+              <div class="flex gap-3 items-center">
                  <div class="text-xs text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
                     <span>Confidence</span>
                     <span class="font-bold" :class="Number(estimateV2?.confidence) > 0.8 ? 'text-emerald-600' : 'text-amber-600'" x-text="Math.round(Number(estimateV2?.confidence)*100) + '%'"></span>
@@ -639,7 +675,7 @@
                 <span x-text="estimateV2?.accuracy_statement"></span>
             </p>
 
-            <div class="mt-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 text-sm text-rose-900">
+            <div class="mt-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 text-sm text-rose-900 print-hidden">
               <div class="flex items-center justify-between">
                 <div>
                   <div class="text-xs uppercase tracking-wide font-semibold">Potential Extra Cost</div>
@@ -652,19 +688,30 @@
                 </div>
               </div>
             </div>
+            
+            <div class="print-footer">
+                <span>Generated <span x-text="formatDate(new Date().toISOString())"></span></span>
+                <span>Maritime MVP • Planning use only</span>
+            </div>
           </div>
         </template>
 
         <!-- 4. Estimate Results V1 (Legacy) -->
         <template x-if="estimate && !estimateV2">
           <div class="glass card p-6 animate-slide-up results-card">
-            <div class="print-only mb-4 text-center border-b border-slate-200 pb-3">
-              <div class="text-xl font-bold text-slate-800">Maritime MVP</div>
-              <div class="text-sm text-slate-500">Proforma Port Call Estimate</div>
+             <div class="print-header">
+                <div>
+                    <div class="text-lg font-bold text-slate-900">Maritime MVP</div>
+                    <div class="text-xs text-slate-500">Proforma Estimate</div>
+                </div>
+                <div class="text-right text-xs text-slate-500">
+                    <div x-text="selectedPortContext?.label || selectedPort || '—'"></div>
+                    <div x-text="formatDate(estimate?.eta)"></div>
+                </div>
             </div>
-            <div class="flex items-center justify-between mb-4">
+            <div class="flex items-center justify-between mb-4 print-hidden">
               <h3 class="text-xl font-bold text-slate-800">Fee Estimate (Simple)</h3>
-              <div class="flex gap-2 print-hide">
+              <div class="flex gap-2">
                 <button @click="clientExport('csv')" class="btn btn-outline px-3 py-1 text-xs">CSV</button>
                 <button @click="printEstimate" class="btn btn-outline px-3 py-1 text-xs">Print PDF</button>
               </div>
@@ -709,18 +756,18 @@
                      </div>
                      <div class="text-right font-mono text-slate-600">
                         <template x-if="s.estimated_low">
-                            <span x-text="`$${Number(s.estimated_low).toLocaleString()} - $${Number(s.estimated_high).toLocaleString()}`"></span>
+                             <span x-text="`$${Number(s.estimated_low).toLocaleString()} - $${Number(s.estimated_high).toLocaleString()}`"></span>
                         </template>
                         <template x-if="s.manual_entry">
-                            <span class="text-xs font-sans text-amber-600 font-bold">Quote Req.</span>
+                             <span class="text-xs font-sans text-amber-600 font-bold">Quote Req.</span>
                         </template>
                      </div>
                    </div>
                  </template>
                </div>
             </div>
-
-            <div class="mt-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 text-sm text-rose-900">
+            
+            <div class="mt-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 text-sm text-rose-900 print-hidden">
               <div class="flex items-center justify-between">
                 <div>
                   <div class="text-xs uppercase tracking-wide font-semibold">Potential Extra Cost</div>
@@ -732,12 +779,17 @@
                 </div>
               </div>
             </div>
+
+            <div class="print-footer">
+                <span>Generated <span x-text="formatDate(new Date().toISOString())"></span></span>
+                <span>Maritime MVP • Planning use only</span>
+            </div>
           </div>
         </template>
 
         <!-- 5. Multi-Port Results -->
-        <div x-show="mpResult" class="glass card p-6 animate-slide-up">
-            <div class="flex items-center justify-between mb-4">
+        <div x-show="mpResult" class="glass card p-6 animate-slide-up results-card">
+            <div class="flex items-center justify-between mb-4 print-hidden">
                 <h3 class="text-xl font-bold text-slate-800">Multi-Port Voyage Plan</h3>
                 <div class="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg font-bold">
                     <span x-text="mpResult?.voyage_summary?.total_legs"></span> Legs
@@ -777,7 +829,7 @@
                 </div>
             </div>
 
-            <div class="mt-4 bg-blue-50 p-4 rounded-xl" x-show="mpResult?.optimization_suggestions?.length">
+            <div class="mt-4 bg-blue-50 p-4 rounded-xl print-hidden" x-show="mpResult?.optimization_suggestions?.length">
                 <h5 class="font-bold text-blue-800 text-sm mb-2">Optimization Suggestions</h5>
                 <ul class="list-disc list-inside text-sm text-blue-700 space-y-1">
                     <template x-for="s in (mpResult?.optimization_suggestions || [])" :key="s">
@@ -789,7 +841,7 @@
 
         <!-- Multi-Port Planner Input (Moved to Right Col for better flow if needed, or kept in left. Wait, design said Multi-Port is its own tool. I'll keep the input on the left? No, the user wants it here? Actually the original code had MP input on left? No, original code had MP input on RIGHT COL. I will keep it on the RIGHT COL as a separate tool/card below results.) -->
         <!-- Re-inserting Multi-Port Input Card here as per original structure -->
-        <div class="glass card p-6 animate-slide-up">
+        <div class="glass card p-6 animate-slide-up multi-port-card print-hidden">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold text-slate-800">Multi-Port Planner Tool</h3>
             <span class="badge bg-indigo-50 text-indigo-600">Beta</span>
@@ -854,7 +906,7 @@
         </div>
 
         <!-- Quick Actions -->
-        <div class="flex gap-3 justify-end pt-4 border-t border-slate-200/50 print-hide buttons">
+        <div class="flex gap-3 justify-end pt-4 border-t border-slate-200/50 print-hidden">
           <button @click="refreshAll" class="text-xs btn btn-outline px-4 py-2">Refresh Data</button>
           <button @click="clearCache" class="text-xs btn btn-outline px-4 py-2 hover:text-red-600 hover:border-red-200">Clear Cache</button>
         </div>
@@ -862,7 +914,7 @@
       </div> <!-- End Right Column -->
     </div>
 
-    <footer class="mt-12 py-8 border-t border-slate-200 text-center print-hide">
+    <footer class="mt-12 py-8 border-t border-slate-200 text-center print-hidden">
       <p class="text-sm text-slate-500">Maritime MVP &copy; 2025</p>
       <p class="text-xs text-slate-400 mt-1">Data sources: USCG PSIX, CBP, APHIS. Estimates for planning purposes only.</p>
     </footer>
@@ -957,11 +1009,12 @@
         estimateLoading: false,
         liveData: null,
         weatherSnapshot: null,
+        tideSnapshot: null,
         weatherLoading: false,
         weatherError: null,
         estimateHistory: [],
         historyDropdownOpen: false,
-
+  
         async init() {
           await this.checkHealth();
           await this.loadPorts();
@@ -1301,6 +1354,7 @@
           if (!this.selectedPort) {
             this.selectedPortContext = null;
             this.portQuery = '';
+            this.resetWeather();
             return;
           }
           if (!this.selectedPortContext || this.selectedPortContext.zoneCode !== this.selectedPort) {
@@ -1311,8 +1365,10 @@
           }
           if (this.selectedPortContext) {
             this.portQuery = this.selectedPortContext.label;
+            this.afterPortSelection();
           } else {
             this.portQuery = this.zoneLabels[this.selectedPort] || this.selectedPort;
+            this.resetWeather();
           }
         },
 
@@ -1408,12 +1464,13 @@
             this[cfg.timeoutProp] = null;
             const query = (cfg.getQuery() || '').trim().toLowerCase();
             if (!query) {
-              cfg.clear();
+              // SHOW ALL (top 12) if empty
+              cfg.apply(this.portSearchIndex.slice(0, 12));
               return;
             }
             const tokens = query.split(/[^a-z0-9]+/g).filter(Boolean);
             if (!tokens.length) {
-              cfg.clear();
+              cfg.apply(this.portSearchIndex.slice(0, 12));
               return;
             }
             const matches = this.rankPortMatches(tokens);
@@ -1778,11 +1835,12 @@
           params.set('previous_port_code', this.previousPortCode.trim().toUpperCase());
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
-  
+   
           try {
             const r = await fetch(`${API_BASE}/estimate?${params}`);
             if (!r.ok) throw new Error('Estimate failed');
             this.estimate = await r.json();
+            this.saveEstimateToHistory(this.estimate, { days_alongside: this.daysAlongside });
             if (this.selectedVessel) await this.loadLiveData();
           } catch (e) {
             console.error('Estimate failed:', e);
@@ -1831,7 +1889,7 @@
             ytd_cbp_paid: String(this.ytdCbpPaid || 0),
             tonnage_year_paid: "0"
           };
-  
+   
           try {
             const r = await fetch(`${API_BASE}/v2/estimate`, {
               method: 'POST',
@@ -1878,6 +1936,7 @@
             const n = Number(value);
             if (Number.isFinite(n) && n > 0) {
               this[field] = dp ? Number(n.toFixed(dp)) : n;
+              updated = true;
             }
           };
         
@@ -1998,6 +2057,8 @@
         
           // 3) Normalize + apply
           const aug = this.augment(merged || {});
+          // *** FIX: Update the main selectedVessel object so the card refreshes ***
+          this.selectedVessel = { ...this.selectedVessel, ...aug };
           let updated = false;
         
           if (needsTons) {
@@ -2030,14 +2091,14 @@
         // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
-
+  
           const params = new URLSearchParams({
             vessel_name: this.selectedVessel.VesselName || '',
             port_code: this.selectedPort
           });
           const vid = this.selectedVessel.VesselID;
           if (vid) params.set('vessel_id', vid);
-
+  
           try {
             const r = await fetch(`${API_BASE}/live/portbundle?${params}`);
             if (!r.ok) throw new Error('Live data failed');
