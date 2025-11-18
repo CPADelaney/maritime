@@ -20,10 +20,43 @@ CREATE TABLE IF NOT EXISTS ports (
   region VARCHAR(24),
   is_california BOOLEAN DEFAULT FALSE,
   is_cascadia BOOLEAN DEFAULT FALSE,
+  is_eca BOOLEAN DEFAULT TRUE,
+  latitude NUMERIC(10,6),
+  longitude NUMERIC(10,6),
   pilotage_url VARCHAR(512),
   mx_url VARCHAR(512),
   tariff_url VARCHAR(512)
 );
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ports' AND column_name = 'is_eca'
+  ) THEN
+    ALTER TABLE ports ADD COLUMN is_eca BOOLEAN DEFAULT TRUE;
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ports' AND column_name = 'latitude'
+  ) THEN
+    ALTER TABLE ports ADD COLUMN latitude NUMERIC(10,6);
+  END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_name = 'ports' AND column_name = 'longitude'
+  ) THEN
+    ALTER TABLE ports ADD COLUMN longitude NUMERIC(10,6);
+  END IF;
+END $$;
 
 DO $$
 BEGIN
