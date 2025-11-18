@@ -1646,7 +1646,8 @@
           const hasDraftInfo = (Number(this.draftForwardMeters) > 0) || (Number(this.draftAftMeters) > 0) || (Number(this.airDraftMeters) > 0);
           const needsDims = !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !hasDraftInfo;
           const needsTons = !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0);
-          if (!needsDims && !needsTons) return;
+          // Force run if we want to ensure we have the best data, even if we have basic search data
+          if (!needsDims && !needsTons && !this.autoGT && !this.autoNT && !this.autoLOA && !this.autoBeam) return;
         
           const sv = this.selectedVessel || {};
           const selToken = (sv.VesselID || sv.VesselName || '') + ':' + (sv.CallSign || '');
@@ -1654,7 +1655,8 @@
             ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + (this.selectedVessel?.CallSign || '')) === selToken;
         
           const setIf = (curr, next, flag, dp = 2) => {
-            if (Number(curr) > 0) return curr;
+            // Allow updating if the current value is auto-filled (this[flag] == true)
+            if (Number(curr) > 0 && !this[flag]) return curr;
             const n = Number(next);
             if (Number.isFinite(n) && n > 0) { this[flag] = true; return dp ? Number(n.toFixed(dp)) : n; }
             return curr;
@@ -1664,7 +1666,6 @@
             const n = Number(value);
             if (Number.isFinite(n) && n > 0) {
               this[field] = dp ? Number(n.toFixed(dp)) : n;
-              updated = true;
             }
           };
         
