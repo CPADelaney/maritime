@@ -12,7 +12,12 @@ from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from .dockage import DockageEngine
-from .tonnage_schedule import LOWER_RATE_PER_TON, LOWER_CAP_PER_TON_PER_YEAR
+from .tonnage_schedule import (
+    LOWER_RATE_PER_TON,
+    LOWER_CAP_PER_TON_PER_YEAR,
+    lower_annual_cap,
+    lower_entry_fee,
+)
 from ..models import Fee, Port, VesselTypeConfig, PilotageRate, ContractAdjustment
 from .rates_loader import (
     MISSING_RATE_FIELD,
@@ -892,8 +897,8 @@ class FeeEngine:
             details = "Net tonnage missing; unable to compute statutory tonnage tax, treating as zero."
         else:
             rate = LOWER_RATE_PER_TON
-            base = _money(vessel.net_tonnage * rate)
-            cap_total = _money(vessel.net_tonnage * LOWER_CAP_PER_TON_PER_YEAR)
+            base = lower_entry_fee(vessel.net_tonnage)
+            cap_total = lower_annual_cap(vessel.net_tonnage)
             remaining = max(Decimal("0"), cap_total - _money(self.tonnage_year_paid))
             final_amt = _money(min(base, remaining))
             details = (
