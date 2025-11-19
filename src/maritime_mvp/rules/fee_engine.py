@@ -495,40 +495,43 @@ class FeeEngine:
                     )
                 )
 
-        # ---- 4) Tonnage Tax ----
-        db_ton = self._active_fee("TONNAGE_TAX_PER_TON", ctx.arrival_date, port)
-        if db_ton and ctx.net_tonnage:
-            per_ton = _money(db_ton.rate)
-            amt = _money(Decimal(ctx.net_tonnage) * per_ton)
-            if db_ton.cap_amount and db_ton.cap_period and ctx.tonnage_year_paid is not None:
-                cap = _money(db_ton.cap_amount)
-                remaining = max(Decimal("0.00"), cap - _money(ctx.tonnage_year_paid))
-                amt = _money(min(amt, remaining))
+        # ---- 4) Tonnage Tax (reuse v2 logic for consistency) ----
+        if ctx.net_tonnage:
+            # Keep v1 in sync with the comprehensive engine by delegating to
+            # the same _calc_tonnage_tax helper that v2 uses.
+            try:
+                # Seed rolling cap state from the legacy context
+                self.tonnage_year_paid = _money(ctx.tonnage_year_paid or Decimal("0"))
+            except Exception:
+                self.tonnage_year_paid = Decimal("0.00")
+
+            dummy_vessel = VesselSpecs(
+                name="LegacyEstimate",
+                vessel_type=VesselType.GENERAL_CARGO,
+                gross_tonnage=ctx.net_tonnage,
+                net_tonnage=ctx.net_tonnage,
+            )
+
+            dummy_voyage = VoyageContext(
+                previous_port_code=(ctx.previous_port_code or "").strip().upper(),
+                arrival_port_code=ctx.port_code,
+                next_port_code=None,
+                eta=datetime.combine(ctx.arrival_date, datetime.min.time()),
+                etd=None,
+                days_alongside=1,
+            )
+
+            ton_calc = self._calc_tonnage_tax(dummy_vessel, dummy_voyage, port)
+
             items.append(
                 LineItem(
-                    code=db_ton.code,
-                    name=db_ton.name,
-                    amount=amt,
-                    details={"rate_per_ton": str(per_ton), "net_tonnage": str(ctx.net_tonnage), "cap_period": db_ton.cap_period},
-                )
-            )
-        elif ctx.net_tonnage:
-            vt_cfg = self._get_vessel_type_config("general_cargo")
-            if vt_cfg and vt_cfg.tonnage_rate is not None:
-                per_ton = _money(vt_cfg.tonnage_rate)
-            else:
-                per_ton = self.TONNAGE_RATES[VesselType.GENERAL_CARGO]
-            base = _money(Decimal(ctx.net_tonnage) * per_ton)
-            remaining = max(
-                Decimal("0.00"), Decimal("19100.00") - _money(ctx.tonnage_year_paid)
-            )
-            amt = _money(min(base, remaining))
-            items.append(
-                LineItem(
-                    code="TONNAGE_TAX",
-                    name="Tonnage Tax",
-                    amount=amt,
-                    details={"rate_per_ton": str(per_ton), "net_tonnage": str(ctx.net_tonnage), "cap_period": "tonnage_year"},
+                    code=ton_calc.code,
+                    name=ton_calc.name,
+                    amount=_money(ton_calc.final_amount),
+                    details={
+                        "net_tonnage": str(ctx.net_tonnage),
+                        "calculation": ton_calc.calculation_details,
+                    },
                 )
             )
 
