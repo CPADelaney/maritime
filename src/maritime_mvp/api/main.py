@@ -7,7 +7,7 @@ from datetime import date, datetime
 import re
 from decimal import Decimal
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Literal
+from typing import Any, Dict, List, Optional, Literal, Tuple
 
 from fastapi import FastAPI, HTTPException, Query, Response, Body, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -1031,15 +1031,111 @@ def estimate(
 
         optional_services: List[Dict[str, Any]] = []
         if include_optional:
-            optional_services = [
-                {"service": "Pilotage", "estimated_low": 5000, "estimated_high": 15000, "note": "Varies by size/draft"},
-                {
-                    "service": "Tugboat Assist",
-                    "manual_entry": True,
-                    "note": "Coordinate with local tug operator; add negotiated rate manually.",
-                },
-                {"service": "Line Handling", "estimated_low": 1000, "estimated_high": 2500, "note": "Mooring/unmooring"},
-            ]
+            # Derive pilotage/towage/line handling ranges from the comprehensive engine
+            try:
+                # Build a minimal synthetic vessel + voyage for the v2 engine.
+                # We only have net_tonnage and the arrival date here, so we keep
+                # geometry conservative: LOA/draft = 0 → base fees only.
+                eta_dt = datetime.combine(eta, datetime.min.time())
+                gross = net_tonnage or Decimal("0")
+
+                vessel_specs = VesselSpecs(
+                    name="Unknown Vessel",
+                    vessel_type=VesselType.GENERAL_CARGO,
+                    gross_tonnage=gross,
+                    net_tonnage=net_tonnage or Decimal("0"),
+                    loa_meters=Decimal("0"),
+                    beam_meters=Decimal("0"),
+                    draft_meters=Decimal("0"),
+                )
+
+                voyage_ctx = VoyageContext(
+                    previous_port_code=prev_unloc or "",
+                    arrival_port_code=port_code,
+                    next_port_code=None,
+                    eta=eta_dt,
+                    etd=None,
+                    days_alongside=2,
+                )
+
+                comp = engine.calculate_comprehensive(vessel_specs, voyage_ctx)
+                calcs = comp.get("calculations", [])
+
+                def _find_calc(code: str) -> Optional[Dict[str, Any]]:
+                    for c in calcs:
+                        if c.get("code") == code:
+                            return c
+                    return None
+
+                pilot_calc = _find_calc("PILOTAGE")
+                towage_calc = _find_calc("TOWAGE") or _find_calc("TUGBOAT")
+                line_calc = _find_calc("LINE_HANDLING")
+
+                def _range_from_calc(c: Dict[str, Any], spread: Decimal) -> Optional[Tuple[Decimal, Decimal]]:
+                    try:
+                        amt = Decimal(str(c.get("final_amount", "0")))
+                    except Exception:
+                        return None
+                    low = (amt * (Decimal("1") - spread)).quantize(Decimal("0.01"))
+                    high = (amt * (Decimal("1") + spread)).quantize(Decimal("0.01"))
+                    return low, high
+
+                if pilot_calc:
+                    r = _range_from_calc(pilot_calc, Decimal("0.15"))
+                    if r:
+                        low, high = r
+                        optional_services.append(
+                            {
+                                "service": "Pilotage",
+                                "estimated_low": low,
+                                "estimated_high": high,
+                                "note": "Derived from tariff-aware pilotage engine.",
+                            }
+                        )
+
+                if towage_calc:
+                    r = _range_from_calc(towage_calc, Decimal("0.20"))
+                    if r:
+                        low, high = r
+                        optional_services.append(
+                            {
+                                "service": "Tugboat Assist",
+                                "estimated_low": low,
+                                "estimated_high": high,
+                                "note": "Algorithmic tug cost estimate.",
+                            }
+                        )
+
+                if line_calc:
+                    r = _range_from_calc(line_calc, Decimal("0.20"))
+                    if r:
+                        low, high = r
+                        optional_services.append(
+                            {
+                                "service": "Line Handling",
+                                "estimated_low": low,
+                                "estimated_high": high,
+                                "note": "Standard mooring/unmooring assumption.",
+                            }
+                        )
+
+            except Exception:
+                # If anything goes sideways, fall back to the old coarse ranges.
+                logger.exception("Failed to derive optional services from comprehensive engine; using static defaults")
+                optional_services = [
+                    {"service": "Pilotage", "estimated_low": 5000, "estimated_high": 15000, "note": "Varies by size/draft"},
+                    {
+                        "service": "Tugboat Assist",
+                        "manual_entry": True,
+                        "note": "Coordinate with local tug operator; add negotiated rate manually.",
+                    },
+                    {
+                        "service": "Line Handling",
+                        "estimated_low": 1000,
+                        "estimated_high": 2500,
+                        "note": "Mooring/unmooring",
+                    },
+                ]
 
         optional_estimates = [
             svc
