@@ -1244,7 +1244,13 @@
             if (b.score !== a.score) return b.score - a.score;
             return (a.entry.label || '').localeCompare(b.entry.label || '');
           });
-          return matches.slice(0, 12).map((m) => m.entry);
+
+          const prioritized = [
+            ...matches.filter((m) => m.entry.type === 'terminal' || m.entry.type === 'port'),
+            ...matches.filter((m) => m.entry.type !== 'terminal' && m.entry.type !== 'port'),
+          ];
+
+          return prioritized.slice(0, 12).map((m) => m.entry);
         },
 
         searchPorts(immediate = false, target = 'single') {
