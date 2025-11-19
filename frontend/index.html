@@ -172,10 +172,10 @@
       </div>
     </header>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 relative">
       
       <!-- LEFT COLUMN: Controls -->
-      <div class="space-y-6 sidebar print-hidden">
+      <div class="space-y-6 sidebar print-hidden relative z-30">
 
         <!-- 1. Vessel Search -->
         <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up inputs">
@@ -326,7 +326,7 @@
                     </div>
 
                     <!-- Dropdown -->
-                    <div x-show="showPortDropdown" class="absolute z-30 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll">
+                    <div x-show="showPortDropdown" class="absolute z-50 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll">
                         <template x-for="p in filteredPorts" :key="`single-${p.zoneCode}-${p.portCode}-${p.terminalCode}`">
                             <button type="button" class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-50 last:border-0 group" @click="selectPort(p)">
                                 <div class="font-medium text-slate-800 group-hover:text-indigo-700" x-text="portResultTitle(p)"></div>
@@ -371,11 +371,13 @@
                     <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Voyage Route (UN/LOCODE)</label>
                     <div class="flex items-center gap-2">
                         <div class="flex-1 relative">
-                            <input x-model="previousPortCode" @input.debounce.300ms="searchUnloc('prev')" placeholder="PREV (e.g. CNSHA)" class="field text-xs uppercase font-mono text-center" />
+                            <input x-model="previousPortCode"
+                                   @focus="searchUnloc('prev')"
+                                   @input.debounce.300ms="searchUnloc('prev')" placeholder="PREV (e.g. CNSHA)" class="field text-xs uppercase font-mono text-center" />
                             <!-- Unloc Dropdown Prev -->
-                            <div x-show="unlocPrev.length"
-                                 @focusin.stop
-                                 class="absolute bottom-full mb-1 left-0 w-48 bg-white shadow-lg rounded-lg border border-slate-100 text-xs z-20 max-h-32 overflow-y-auto">
+                             <div x-show="unlocPrev.length"
+                                  @focusin.stop
+                                 class="absolute bottom-full mb-1 left-0 w-48 bg-white shadow-lg rounded-lg border border-slate-100 text-xs z-40 max-h-32 overflow-y-auto">
                                 <template x-for="p in unlocPrev">
                                     <div @click="previousPortCode=p.locode; unlocPrev=[]" class="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-slate-50 last:border-0">
                                         <span class="font-bold text-indigo-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
@@ -393,11 +395,13 @@
                         <div class="text-slate-300">→</div>
 
                         <div class="flex-1 relative">
-                            <input x-model="nextPortCode" @input.debounce.300ms="searchUnloc('next')" placeholder="NEXT (Opt)" class="field text-xs uppercase font-mono text-center" />
+                            <input x-model="nextPortCode"
+                                   @focus="searchUnloc('next')"
+                                   @input.debounce.300ms="searchUnloc('next')" placeholder="NEXT (Opt)" class="field text-xs uppercase font-mono text-center" />
                             <!-- Unloc Dropdown Next -->
                              <div x-show="unlocNext.length"
                                   @focusin.stop
-                                  class="absolute bottom-full mb-1 right-0 w-48 bg-white shadow-lg rounded-lg border border-slate-100 text-xs z-20 max-h-32 overflow-y-auto">
+                                  class="absolute bottom-full mb-1 right-0 w-48 bg-white shadow-lg rounded-lg border border-slate-100 text-xs z-40 max-h-32 overflow-y-auto">
                                 <template x-for="p in unlocNext">
                                     <div @click="nextPortCode=p.locode; unlocNext=[]" class="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-slate-50 last:border-0">
                                         <span class="font-bold text-indigo-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
@@ -507,17 +511,38 @@
                         </svg>
                     </button>
                     <div class="relative" @click.away="historyDropdownOpen = false">
-                        <button type="button" class="btn btn-outline px-4 py-2 text-sm h-full print-hidden" @click.stop="historyDropdownOpen = !historyDropdownOpen">History ▾</button>
-                        <div x-show="historyDropdownOpen" x-transition class="absolute right-0 top-full mt-2 w-64 bg-white border border-slate-200 rounded-xl shadow-xl z-40">
+                        <button type="button"
+                                class="btn btn-outline px-4 py-2 text-sm h-full print-hidden"
+                                @click.stop="historyDropdownOpen = !historyDropdownOpen">
+                          History ▾
+                        </button>
+                        <div x-show="historyDropdownOpen"
+                             x-transition
+                             class="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50">
                             <template x-if="!estimateHistory.length">
                                 <div class="p-4 text-xs text-slate-400">No saved estimates yet.</div>
                             </template>
                             <template x-for="item in estimateHistory" :key="item.id">
-                                <button type="button" @click="applyEstimateHistory(item)" class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-100 last:border-0">
-                                    <div class="text-sm font-semibold text-slate-800" x-text="item.portLabel || item.portCode"></div>
-                                    <div class="text-xs text-slate-500 flex justify-between mt-1">
-                                        <span x-text="formatDate(item.timestamp)"></span>
-                                        <span class="font-mono text-indigo-600 font-semibold" x-text="formatCurrency(item.totals?.total_high || item.totals?.mandatory || 0)"></span>
+                                <button type="button" @click="applyEstimateHistory(item); historyDropdownOpen = false" class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-100 last:border-0">
+                                    <div class="flex items-start justify-between gap-2">
+                                      <div class="flex-1">
+                                        <div class="text-sm font-semibold text-slate-800"
+                                             x-text="item.portLabel || item.portCode"></div>
+                                        <div class="text-xs text-slate-500 mt-0.5">
+                                          <span x-text="item.vesselName || 'Unknown Vessel'"></span>
+                                          · <span x-text="formatDate(item.timestamp)"></span>
+                                        </div>
+                                        <div class="text-xs text-slate-500 mt-0.5">
+                                          <span class="font-mono text-indigo-600 font-semibold"
+                                                x-text="formatCurrency(item.totals?.total_high || item.totals?.mandatory || 0)"></span>
+                                        </div>
+                                      </div>
+                                      <button type="button"
+                                              @click.stop="toggleEstimateFavorite(item.id)"
+                                              class="text-xs px-1 py-0.5 rounded"
+                                              :class="item.favorite ? 'text-amber-500' : 'text-slate-400 hover:text-slate-600'">
+                                        <span x-text="item.favorite ? '★' : '☆'"></span>
+                                      </button>
                                     </div>
                                 </button>
                             </template>
@@ -529,10 +554,17 @@
         </div>
 
         <!-- 4. Multi-Port Planner (Controls) -->
-        <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up multi-port-card print-hidden">
+        <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up multi-port-card print-hidden relative">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold text-slate-800">Multi-Port Planner Tool</h3>
-            <span class="badge bg-indigo-50 text-indigo-600">Beta</span>
+            <div class="flex items-center gap-2">
+              <button type="button"
+                      class="btn btn-outline px-2 py-1 text-xs print-hidden"
+                      @click.stop="mpHistoryDropdownOpen = !mpHistoryDropdownOpen">
+                History ▾
+              </button>
+              <span class="badge bg-indigo-50 text-indigo-600">Beta</span>
+            </div>
           </div>
 
           <div class="grid sm:grid-cols-2 gap-4 mb-4">
@@ -591,6 +623,33 @@
           </div>
 
           <button @click="submitMultiPort" :disabled="mpPorts.length < 2" class="w-full btn btn-primary py-2 disabled:opacity-50">Calculate Voyage Fees</button>
+
+          <!-- Multi-port history dropdown -->
+          <div class="relative mt-2" @click.away="mpHistoryDropdownOpen = false">
+            <div x-show="mpHistoryDropdownOpen"
+                 x-transition
+                 class="absolute right-0 top-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50">
+              <template x-if="!mpHistory.length">
+                <div class="p-4 text-xs text-slate-400">No multi-port voyages saved yet.</div>
+              </template>
+              <template x-for="item in mpHistory" :key="item.id">
+                <button type="button"
+                        @click="applyMultiPortHistory(item); mpHistoryDropdownOpen = false"
+                        class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-100 last:border-0">
+                  <div class="flex justify-between items-start">
+                    <div>
+                      <div class="text-sm font-semibold text-slate-800" x-text="(item.ports || []).join(' → ')"></div>
+                      <div class="text-xs text-slate-500 mt-0.5">
+                        <span x-text="item.vesselName || 'Unknown Vessel'"></span>
+                        · <span x-text="formatDate(item.timestamp)"></span>
+                      </div>
+                    </div>
+                    <div class="text-xs font-mono text-indigo-600" x-text="formatCurrency(item.totalMandatory || 0)"></div>
+                  </div>
+                </button>
+              </template>
+            </div>
+          </div>
         </div>
 
       </div> <!-- End Left Column -->
@@ -1020,6 +1079,8 @@
         mpPortInput: '',
         mpPorts: [],
         mpResult: null,
+        mpHistory: [],
+        mpHistoryDropdownOpen: false,
   
         // results
         estimate: null,
@@ -1037,6 +1098,7 @@
           await this.checkHealth();
           await this.loadPorts();
           this.loadEstimateHistory();
+          this.loadMultiPortHistory();
         },
   
         async checkHealth() {
@@ -2364,10 +2426,68 @@
             portLabel: this.selectedPortContext?.label || this.selectedPort,
             vesselName: this.selectedVessel?.VesselName || requestBody?.vessel_name || 'Unknown Vessel',
             totals: estimate?.totals || null,
-            request: { ...requestBody }
+            request: { ...requestBody },
+            favorite: false,
           };
           this.estimateHistory = [entry, ...this.estimateHistory].slice(0, 5);
           this.persistEstimateHistory();
+        },
+
+        toggleEstimateFavorite(id) {
+          this.estimateHistory = this.estimateHistory.map((item) =>
+            item.id === id ? { ...item, favorite: !item.favorite } : item
+          );
+          this.persistEstimateHistory();
+        },
+
+        // Multi-port history helpers
+        loadMultiPortHistory() {
+          try {
+            const raw = localStorage.getItem('maritime_multiport_history');
+            this.mpHistory = raw ? JSON.parse(raw) : [];
+          } catch (e) {
+            console.warn('Multi-port history load failed', e);
+            this.mpHistory = [];
+          }
+        },
+
+        persistMultiPortHistory() {
+          try {
+            localStorage.setItem('maritime_multiport_history', JSON.stringify(this.mpHistory));
+          } catch (e) {
+            console.warn('Multi-port history persist failed', e);
+          }
+        },
+
+        saveMultiPortToHistory(mpResult, request, vessel) {
+          if (!mpResult || !request || !Array.isArray(request.ports) || !request.ports.length) return;
+          const entry = {
+            id: Date.now(),
+            timestamp: new Date().toISOString(),
+            ports: request.ports.slice(),
+            startDate: request.start_date,
+            daysInPort: request.days_in_port,
+            vesselName: vessel.name || this.mpVesselName || 'Unknown Vessel',
+            totalMandatory: Number(mpResult?.total_voyage_cost?.mandatory || 0),
+          };
+          this.mpHistory = [entry, ...this.mpHistory].slice(0, 8);
+          this.persistMultiPortHistory();
+        },
+
+        applyMultiPortHistory(item) {
+          this.mpVesselName = item.vesselName || this.mpVesselName;
+          this.mpStartDate = item.startDate || this.mpStartDate;
+          this.mpDaysInPort = item.daysInPort || this.mpDaysInPort;
+
+          // Rebuild mpPorts from stored zone codes using the portSearchIndex
+          const ports = Array.isArray(item.ports) ? item.ports : [];
+          this.mpPorts = ports
+            .map((z) => {
+              const entry = this.portSearchIndex.find((e) => e.type === 'zone' && e.zoneCode === z)
+                || this.portSearchIndex.find((e) => e.zoneCode === z);
+              return entry ? this.makeSelectionContext(entry) : null;
+            })
+            .filter(Boolean);
         },
 
         applyEstimateHistory(entry) {
@@ -2459,6 +2579,7 @@
             });
             if (!r.ok) throw new Error(await r.text());
             this.mpResult = await r.json();
+            this.saveMultiPortToHistory(this.mpResult, request, vessel);
           } catch (e) {
             console.error('Multi-port failed:', e);
             alert('Failed to calculate multi-port voyage.');
@@ -2489,5 +2610,6 @@
       }
     }
   </script>
+
 </body>
 </html>
