@@ -525,52 +525,6 @@
             </div>
         </div>
 
-        <!-- Weather Widget (compact, high-contrast) -->
-        <div
-          x-show="weatherSnapshot"
-          class="card p-3 sm:p-4 flex items-center justify-between gap-3 sm:gap-4 no-print animate-enter"
-        >
-          <!-- Left: Icon + Temp + Description -->
-          <div class="flex items-center gap-3">
-            <div class="text-2xl sm:text-3xl">
-              🌤
-            </div>
-            <div>
-              <div
-                class="text-lg sm:text-xl font-semibold text-slate-900"
-                x-text="weatherSnapshot?.temperature != null ? `${Number(weatherSnapshot.temperature).toFixed(0)}°F` : '--'"
-              ></div>
-              <div
-                class="text-xs sm:text-sm text-slate-500"
-                x-text="weatherSnapshot?.description || 'Local conditions unavailable'"
-              ></div>
-            </div>
-          </div>
-
-          <!-- Right: Wind + Tide (if present) -->
-          <div class="flex flex-col items-end gap-1 text-xs sm:text-sm text-slate-600">
-            <div class="flex items-center gap-2">
-              <span class="uppercase tracking-wide text-[10px] text-slate-400">Wind</span>
-              <span class="font-mono font-medium text-slate-800"
-                    x-text="weatherSnapshot?.wind_speed != null ? `${Number(weatherSnapshot.wind_speed).toFixed(0)} kt` : '--'">
-              </span>
-              <span class="text-[10px] text-slate-400">
-                dir <span x-text="weatherSnapshot?.wind_direction != null ? `${weatherSnapshot.wind_direction}°` : '—'"></span>
-              </span>
-            </div>
-
-            <div class="flex items-center gap-2" x-show="weatherSnapshot?.tide">
-              <span class="uppercase tracking-wide text-[10px] text-slate-400">High tide</span>
-              <span class="font-mono text-slate-800"
-                    x-text="formatLocalTime(weatherSnapshot?.tide?.time)">
-              </span>
-              <span class="font-mono text-slate-700"
-                    x-text="weatherSnapshot?.tide?.height != null ? `${Number(weatherSnapshot.tide.height).toFixed(2)} m` : ''">
-              </span>
-            </div>
-          </div>
-        </div>
-
         <!-- Empty State -->
         <div x-show="!estimateV2 && !mpResult" class="h-96 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 no-print">
             <svg class="w-16 h-16 mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
@@ -802,10 +756,6 @@
         estimateV2: null,
         estimateLoading: false,
         liveData: null,
-        weatherSnapshot: null,
-        tideSnapshot: null,
-        weatherLoading: false,
-        weatherError: null,
         estimateHistory: [],
         historyDropdownOpen: false,
   
@@ -1043,17 +993,11 @@
           return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
         },
 
-        describeWeather(code) {
-          const mapping = { 0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Depositing rime fog', 51: 'Light drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 71: 'Snow', 80: 'Rain showers', 95: 'Thunderstorms' };
-          return mapping[code] || 'Conditions unavailable';
-        },
-
         portResultTitle(entry) { return entry ? (entry.label || '') : ''; },
         portResultDescription(entry) { return entry ? (entry.description || '') : ''; },
 
         async afterPortSelection() {
           if (!this.selectedPort) {
-            this.resetWeather();
             this.selectedPortDetails = null;
             this.selectedPortHolidays = [];
             return;
@@ -1061,7 +1005,6 @@
           try {
             this.loadLiveData();
             await this.fetchPortInsights(this.selectedPort);
-            await this.loadWeatherSnapshot();
           } catch (e) { console.error('afterPortSelection failed:', e); }
         },
 
@@ -1069,7 +1012,6 @@
           if (!this.selectedPort) {
             this.selectedPortContext = null;
             this.portQuery = '';
-            this.resetWeather();
             return;
           }
           
@@ -1087,7 +1029,6 @@
             this.afterPortSelection();
           } else {
             this.portQuery = this.zoneLabels[code] || code;
-            this.resetWeather();
           }
         },
 
@@ -1099,7 +1040,6 @@
           if (this.selectedPort) { this.selectedPort = ''; this.selectedPortContext = null; }
           this.selectedPortDetails = null;
           this.selectedPortHolidays = [];
-          this.weatherSnapshot = null;
         },
 
         clearVoyage() {
@@ -1119,7 +1059,6 @@
 
           this.selectedPortDetails = null;
           this.selectedPortHolidays = [];
-          this.weatherSnapshot = null;
           this.liveData = null;
         },
 
@@ -1204,8 +1143,6 @@
           this.showPortDropdown = false;
           await this.afterPortSelection();
         },
-
-        resetWeather() { this.weatherSnapshot = null; this.weatherError = null; this.weatherLoading = false; },
 
         // ---------- Normalizer ----------
         augment(v) {
@@ -1529,38 +1466,6 @@
           } catch (e) { console.error('Port detail load failed:', e); this.selectedPortDetails = null; this.selectedPortHolidays = []; }
         },
 
-        async loadWeatherSnapshot() {
-          const coords = this.getSelectedCoordinates();
-          if (!coords) { this.weatherSnapshot = null; return; }
-          this.weatherLoading = true; this.weatherError = null;
-          try {
-            const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current_weather=true&windspeed_unit=kn&temperature_unit=fahrenheit`;
-            const tideUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${coords.lat}&longitude=${coords.lon}&hourly=tide_height&timezone=auto`;
-            const [wxResp, tideResp] = await Promise.allSettled([fetch(wxUrl), fetch(tideUrl)]);
-            const wx = wxResp.status === 'fulfilled' && wxResp.value.ok ? await wxResp.value.json() : null;
-            const tide = tideResp.status === 'fulfilled' && tideResp.value.ok ? await tideResp.value.json() : null;
-            const current = wx?.current_weather || {};
-            this.weatherSnapshot = { temperature: current.temperature ?? null, wind_speed: current.windspeed ?? null, wind_direction: current.winddirection ?? null, description: this.describeWeather(current.weathercode), tide: this.resolveHighTide(tide?.hourly) };
-          } catch (e) { console.error('Weather fetch failed:', e); this.weatherError = 'Weather unavailable'; this.weatherSnapshot = null; } finally { this.weatherLoading = false; }
-        },
-
-        resolveHighTide(hourly) {
-          if (!hourly || !Array.isArray(hourly.time) || !Array.isArray(hourly.tide_height)) return null;
-          const now = new Date(); const { time, tide_height: heights } = hourly; let candidate = null;
-          for (let i = 1; i < time.length - 1; i += 1) {
-            const height = heights[i]; if (height == null) continue; const ts = new Date(time[i]); if (ts <= now) continue;
-            const prev = heights[i - 1]; const next = heights[i + 1]; if (prev == null || next == null) continue;
-            if (height >= prev && height >= next) { candidate = { time: ts.toISOString(), height }; break; }
-          }
-          if (!candidate) {
-            for (let i = 0; i < time.length; i += 1) {
-              const ts = new Date(time[i]); if (ts <= now) continue; const height = heights[i]; if (height == null) continue;
-              if (!candidate || height > candidate.height) { candidate = { time: ts.toISOString(), height }; }
-            }
-          }
-          return candidate;
-        },
-  
         // UN/LOCODE typeahead
         async searchUnloc(current = 'prev') {
           const base = current === 'prev' ? this.previousPortCode : this.nextPortCode;
