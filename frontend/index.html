@@ -299,7 +299,7 @@
             <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
               <label class="label-text mb-2">Voyage Route (UN/LOCODE)</label>
               <div class="flex items-center gap-2">
-                <div class="flex-1 relative">
+                <div class="flex-1 relative" @click.away="unlocPrev = []">
                   <input x-model="previousPortCode" 
                          @input.debounce.300ms="searchUnloc('prev')" 
                          @focus="searchUnloc('prev')"
@@ -324,7 +324,7 @@
                 
                 <div class="text-slate-300">→</div>
                 
-                <div class="flex-1 relative">
+                <div class="flex-1 relative" @click.away="unlocNext = []">
                   <input x-model="nextPortCode" 
                          @input.debounce.300ms="searchUnloc('next')" 
                          @focus="searchUnloc('next')"
@@ -1199,7 +1199,7 @@
           if (!entry) return;
           const context = this.makeSelectionContext(entry);
           this.selectedPortContext = context;
-          // Prefer portCode if we have a concrete port; fall back to zoneCode
+          // Use the actual port code for API calls; fall back to zone if we ever select a pure zone row.
           this.selectedPort = context?.portCode || context?.zoneCode || '';
           this.portQuery = context?.label || '';
           this.filteredPorts = [];
@@ -1533,19 +1533,22 @@
         async searchUnloc(current = 'prev') {
           const base = current === 'prev' ? this.previousPortCode : this.nextPortCode;
           const q = (base || '').trim();
-          
+
           // Default suggestions if empty
           if (q.length === 0) {
-             const defaults = [
-                 { locode: 'SGSIN', port_name: 'Singapore' },
-                 { locode: 'CNSHA', port_name: 'Shanghai' },
-                 { locode: 'NLRTM', port_name: 'Rotterdam' },
-                 { locode: 'USNYC', port_name: 'New York' },
-                 { locode: 'USLAX', port_name: 'Los Angeles' },
-                 { locode: 'KRPUS', port_name: 'Busan' }
-             ];
-             if (current === 'prev') this.unlocPrev = defaults; else this.unlocNext = defaults;
-             return;
+            const defaults = [
+              { locode: 'USLAX', port_name: 'Los Angeles' },
+              { locode: 'USLGB', port_name: 'Long Beach' },
+              { locode: 'USOAK', port_name: 'Oakland' },
+              { locode: 'USSFO', port_name: 'San Francisco' },
+              { locode: 'USSEA', port_name: 'Seattle' },
+              { locode: 'USTAC', port_name: 'Tacoma' },
+              { locode: 'USPDX', port_name: 'Portland' },
+              { locode: 'USAST', port_name: 'Astoria' },
+            ];
+            if (current === 'prev') this.unlocPrev = defaults;
+            else this.unlocNext = defaults;
+            return;
           }
 
           if (q.length < 2) {
@@ -1553,10 +1556,19 @@
             return;
           }
           try {
-            const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(q)}&limit=8`);
+            const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(q)}&limit=50&country=US`);
             if (!r.ok) throw new Error('UN/LOCODE search failed');
             const rows = await r.json();
-            if (current === 'prev') this.unlocPrev = rows; else this.unlocNext = rows;
+            const allowed = new Set([
+              'USLAX','USLGB','USOAK','USSFO',
+              'USSEA','USTAC','USPDX','USAST'
+            ]);
+            const filtered = (rows || []).filter(r => {
+              const code = String(r.locode || '').toUpperCase();
+              return allowed.has(code);
+            });
+            if (current === 'prev') this.unlocPrev = filtered;
+            else this.unlocNext = filtered;
           } catch (e) { console.error('UN/LOCODE search error:', e); }
         },
   
