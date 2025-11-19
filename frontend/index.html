@@ -326,7 +326,7 @@
                     </div>
 
                     <!-- Dropdown -->
-                    <div x-show="showPortDropdown" class="absolute z-30 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll overflow-hidden">
+                    <div x-show="showPortDropdown" class="absolute z-30 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll">
                         <template x-for="p in filteredPorts" :key="`single-${p.zoneCode}-${p.portCode}-${p.terminalCode}`">
                             <button type="button" class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-50 last:border-0 group" @click="selectPort(p)">
                                 <div class="font-medium text-slate-800 group-hover:text-indigo-700" x-text="portResultTitle(p)"></div>
@@ -879,7 +879,7 @@
                            @keydown.enter.prevent="addMpPort()"
                            class="field" placeholder="Add port..." />
                     <!-- MP Dropdown -->
-                    <div x-show="showMpDropdown" class="absolute z-20 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll overflow-hidden">
+                    <div x-show="showMpDropdown" class="absolute z-20 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll">
                         <template x-for="p in mpFilteredPorts" :key="`multi-${p.zoneCode}-${p.portCode}`">
                             <button type="button" class="w-full text-left px-4 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0" @click="addMpPort(p)">
                                 <div class="font-medium text-slate-800" x-text="portResultTitle(p)"></div>
