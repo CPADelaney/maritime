@@ -11,6 +11,7 @@ from typing import Optional, List, Dict, Tuple, Any, Iterable
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .dockage import DockageEngine
 from ..models import Fee, Port
 from .rates_loader import (
     MISSING_RATE_FIELD,
@@ -489,13 +490,16 @@ class FeeEngine:
         # 5) Pilotage (weekend/holiday multipliers, state-aware holiday detection)
         calcs.append(self._calc_pilotage(vessel, voyage, port))
 
-        # 6) Tugboats (optional estimate)
-        calcs.append(self._estimate_tugboats(vessel, voyage))
+        # 6) Dockage / Berth Hire
+        calcs.append(self._calc_dockage(vessel, voyage, port))
 
-        # 7) Marine Exchange / VTS
+        # 7) Tugboats (algorithmic estimate)
+        calcs.append(self._calc_tugboats(vessel, voyage))
+
+        # 8) Marine Exchange / VTS
         calcs.append(self._calc_mx(voyage, port))
 
-        # 8) Optional services (water, garbage, launch, lines, etc.)
+        # 9) Optional services (water, garbage, launch, lines, etc.)
         optional_calcs = self._optional_services(
             voyage, include_legacy=self.show_legacy_optional
         )
@@ -753,6 +757,29 @@ class FeeEngine:
             calculation_details="Fallback fixed per voyage",
         )
 
+    def _calc_dockage(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
+        """
+        Approximate dockage / berth hire for the alongside period.
+        Uses a port/zone-specific table from DockageEngine.
+        """
+        days = voyage.days_alongside or 1
+        res = DockageEngine.calculate(port.code, vessel.loa_meters, days)
+
+        base = res["base_daily_rate"]
+        total = res["total_amount"]
+        loa_display = f"{float(vessel.loa_meters or Decimal('0')):.1f}"
+        return FeeCalculation(
+            code="DOCKAGE",
+            name="Dockage / Berth Hire",
+            base_amount=base,
+            final_amount=total,
+            confidence=Decimal("0.90"),
+            calculation_details=(
+                f"{res['tariff_ref']}: LOA {loa_display}m @ ${base}/day × {res['billable_periods']} days"
+            ),
+            is_optional=False,
+        )
+
     @staticmethod
     def _resolve_port_zone(port: Port) -> str:
         zone = None
@@ -865,6 +892,93 @@ class FeeEngine:
         supplied_legs = list(legs)
         if not supplied_legs:
             supplied_legs = self._default_legs_for_zone(zone)
+
+        zone_up = (zone or "").upper()
+
+        # --- Special case: San Francisco Bar Pilots (NORCAL) using mill rates ---
+        extras = dict(registry.get("extras", {}))
+        if zone_up == "NORCAL" and "mill_rate_per_grt" in extras:
+
+            grt = vessel.gross_tonnage
+            draft_ft = vessel.draft_feet
+
+            # Mill rates per GRT
+            mill_rate = extras.get("mill_rate_per_grt", Decimal("0.09243"))
+            pension = extras.get("pension_mill_rate", Decimal("0.04468"))
+            boat = extras.get("pilot_boat_surcharge", Decimal("0.00200"))
+            total_mill = mill_rate + pension + boat
+
+            tonnage_charge = _money(grt * total_mill)
+
+            # Draft-based component
+            draft_rate = registry["bar"]["per_foot_rate"]
+            draft_charge = _money(draft_ft * draft_rate)
+
+            bar_subtotal = _money(tonnage_charge + draft_charge)
+
+            # Board ops percent
+            board_ops_pct = extras.get("board_ops_percent", Decimal("0.065"))
+            board_ops = _money(bar_subtotal * board_ops_pct)
+
+            # Flat continuing education + trainee fees
+            flats = _money(
+                extras.get("continuing_ed_flat", Decimal("45"))
+                + extras.get("trainee_flat", Decimal("20"))
+            )
+
+            total = _money(max(bar_subtotal + board_ops + flats, Decimal("3000")))
+
+            legs_out: List[Dict[str, Any]] = [
+                {
+                    "sequence": 1,
+                    "leg_type": "Bar Pilotage",
+                    "classification": "bar",
+                    "base_charge": str(bar_subtotal),
+                    "surcharges": [],
+                    "extras": [],
+                    "total": str(bar_subtotal),
+                    "metadata": {},
+                },
+                {
+                    "sequence": 2,
+                    "leg_type": "Board Ops Surcharge",
+                    "classification": "surcharge",
+                    "base_charge": str(board_ops),
+                    "surcharges": [],
+                    "extras": [],
+                    "total": str(board_ops),
+                    "metadata": {},
+                },
+                {
+                    "sequence": 3,
+                    "leg_type": "Flat Surcharges",
+                    "classification": "flat",
+                    "base_charge": str(flats),
+                    "surcharges": [],
+                    "extras": [],
+                    "total": str(flats),
+                    "metadata": {},
+                },
+            ]
+
+            return {
+                "port_zone": zone,
+                "effective_date": registry["effective"].isoformat(),
+                "legs": legs_out,
+                "job_total": str(total),
+                "audit": {
+                    "loa_feet": str(_money(vessel.loa_feet)),
+                    "draft_feet": str(_money(draft_ft)),
+                    "mill_rate_applied": str(_money(total_mill)),
+                    "applied_multiplier": str(_money(Decimal("1"))),
+                    "applied_multiplier_code": None,
+                    "extras_applied": [
+                        "board_ops_percent",
+                        "continuing_ed_flat",
+                        "trainee_flat",
+                    ],
+                },
+            }
 
         components = self._pilotage_component_amounts(vessel, registry)
 
@@ -1088,19 +1202,65 @@ class FeeEngine:
             is_optional=False,
         )
 
-    def _estimate_tugboats(self, vessel: VesselSpecs, voyage: VoyageContext) -> FeeCalculation:
+    def _calc_tugboats(self, vessel: VesselSpecs, voyage: VoyageContext) -> FeeCalculation:
+        """
+        Algorithmic tugboat cost estimate.
+
+        Assumptions:
+          - 2 moves (arrival + departure)
+          - ~2.5h per tug job including transit
+          - Hourly rate and tug count scale with GRT
+          - Fuel surcharge applied as a percentage uplift
+        """
+        try:
+            gt = float(vessel.gross_tonnage)
+        except Exception:
+            gt = 0.0
+
+        if gt <= 0:
+            # No meaningful GRT: keep as a soft placeholder
+            return FeeCalculation(
+                code="TUGBOAT",
+                name="Tugboat Services (Estimate)",
+                base_amount=Decimal("0"),
+                final_amount=Decimal("0"),
+                confidence=Decimal("0.40"),
+                calculation_details="Insufficient GRT data – manual tug quote required.",
+                is_optional=True,
+                manual_entry=True,
+            )
+
+        if gt < 20000:
+            hourly_rate = 1800.0
+            tugs_per_move = 1.5
+        elif gt < 60000:
+            hourly_rate = 2400.0
+            tugs_per_move = 2.0
+        else:
+            hourly_rate = 3200.0
+            tugs_per_move = 2.5
+
+        moves = 2
+        hours_per_tug_job = 2.5
+        total_tug_hours = moves * tugs_per_move * hours_per_tug_job
+
+        fuel_surcharge_pct = 0.18  # ~18% FSC common in 2024/25
+
+        base_cost = Decimal(str(total_tug_hours * hourly_rate))
+        total_cost = base_cost * Decimal(str(1 + fuel_surcharge_pct))
+
         return FeeCalculation(
-            code="TUGBOAT",
-            name="Tugboat Assist Services",
-            base_amount=Decimal("0"),
-            final_amount=Decimal("0"),
-            confidence=Decimal("0.70"),
+            code="TOWAGE",
+            name="Tugboat Services (Estimate)",
+            base_amount=_money(hourly_rate),
+            final_amount=_money(total_cost),
+            confidence=Decimal("0.75"),
             calculation_details=(
-                "Manual placeholder — coordinate with local tug operators for negotiated pricing."
+                f"Est. {int(tugs_per_move)} tugs in/out @ ${int(hourly_rate)}/hr/tug "
+                f"for {total_tug_hours:.1f} tug-hours + {int(fuel_surcharge_pct*100)}% FSC."
             ),
-            is_optional=True,
-            estimated_range=None,
-            manual_entry=True,
+            is_optional=False,
+            manual_entry=False,
         )
 
     def _calc_mx(self, voyage: VoyageContext, port: Port) -> FeeCalculation:
