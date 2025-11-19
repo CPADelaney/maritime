@@ -523,6 +523,72 @@
                 <div x-show="!selectedPort" class="text-center text-xs text-slate-400 mt-2">Please select a port to proceed</div>
             </div>
         </div>
+
+        <!-- 4. Multi-Port Planner (Controls) -->
+        <div class="glass card p-6 animate-slide-up multi-port-card print-hidden">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="text-lg font-bold text-slate-800">Multi-Port Planner Tool</h3>
+            <span class="badge bg-indigo-50 text-indigo-600">Beta</span>
+          </div>
+
+          <div class="grid sm:grid-cols-2 gap-4 mb-4">
+            <div class="sm:col-span-2">
+               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Vessel Name Override</label>
+               <input x-model="mpVesselName" class="field" :placeholder="selectedVessel?.VesselName || 'Optional'" />
+            </div>
+            <div>
+               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Start Date</label>
+               <input x-model="mpStartDate" type="date" class="field" />
+            </div>
+            <div>
+               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Port Stay (Days)</label>
+               <input x-model.number="mpDaysInPort" type="number" min="1" class="field" />
+            </div>
+          </div>
+
+          <div class="mb-4">
+             <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Itinerary Sequence</label>
+             <!-- Port Adder -->
+             <div class="flex gap-2 mb-3 relative" @click.away="showMpDropdown = false">
+                <div class="relative flex-1">
+                    <input x-model="mpPortInput" 
+                           @input="searchPorts(false, 'multi')" 
+                           @focus="searchPorts(true, 'multi')" 
+                           @keydown.enter.prevent="addMpPort()"
+                           class="field" placeholder="Add port..." />
+                    <!-- MP Dropdown -->
+                    <div x-show="showMpDropdown" class="absolute z-20 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll">
+                        <template x-for="p in mpFilteredPorts" :key="`multi-${p.zoneCode}-${p.portCode}`">
+                            <button type="button" class="w-full text-left px-4 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0" @click="addMpPort(p)">
+                                <div class="font-medium text-slate-800" x-text="portResultTitle(p)"></div>
+                            </button>
+                        </template>
+                    </div>
+                </div>
+                <button @click="addMpPort()" class="btn btn-soft px-4">Add</button>
+             </div>
+
+             <!-- List -->
+             <div class="space-y-2 bg-slate-50 rounded-xl p-3 min-h-[60px]">
+                <template x-for="(item, i) in mpPorts" :key="`${item.zoneCode}-${i}`">
+                    <div class="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-sm">
+                        <div class="flex items-center gap-3">
+                            <div class="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500" x-text="i+1"></div>
+                            <div>
+                                <div class="text-sm font-medium text-slate-800" x-text="item.zoneCode"></div>
+                                <div class="text-[10px] text-slate-400" x-text="item.label"></div>
+                            </div>
+                        </div>
+                        <button @click="removeMpPort(i)" class="text-slate-400 hover:text-red-500">✕</button>
+                    </div>
+                </template>
+                <div x-show="mpPorts.length === 0" class="text-center text-xs text-slate-400 py-2">Add at least 2 ports to calculate voyage</div>
+             </div>
+          </div>
+
+          <button @click="submitMultiPort" :disabled="mpPorts.length < 2" class="w-full btn btn-primary py-2 disabled:opacity-50">Calculate Voyage Fees</button>
+        </div>
+
       </div> <!-- End Left Column -->
 
       <!-- RIGHT COLUMN: Results -->
@@ -843,72 +909,6 @@
                     </template>
                 </ul>
             </div>
-        </div>
-
-        <!-- Multi-Port Planner Input (Moved to Right Col for better flow if needed, or kept in left. Wait, design said Multi-Port is its own tool. I'll keep the input on the left? No, the user wants it here? Actually the original code had MP input on left? No, original code had MP input on RIGHT COL. I will keep it on the RIGHT COL as a separate tool/card below results.) -->
-        <!-- Re-inserting Multi-Port Input Card here as per original structure -->
-        <div class="glass card p-6 animate-slide-up multi-port-card print-hidden">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-bold text-slate-800">Multi-Port Planner Tool</h3>
-            <span class="badge bg-indigo-50 text-indigo-600">Beta</span>
-          </div>
-
-          <div class="grid sm:grid-cols-2 gap-4 mb-4">
-            <div class="sm:col-span-2">
-               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Vessel Name Override</label>
-               <input x-model="mpVesselName" class="field" :placeholder="selectedVessel?.VesselName || 'Optional'" />
-            </div>
-            <div>
-               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Start Date</label>
-               <input x-model="mpStartDate" type="date" class="field" />
-            </div>
-            <div>
-               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Port Stay (Days)</label>
-               <input x-model.number="mpDaysInPort" type="number" min="1" class="field" />
-            </div>
-          </div>
-
-          <div class="mb-4">
-             <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Itinerary Sequence</label>
-             <!-- Port Adder -->
-             <div class="flex gap-2 mb-3 relative" @click.away="showMpDropdown = false">
-                <div class="relative flex-1">
-                    <input x-model="mpPortInput" 
-                           @input="searchPorts(false, 'multi')" 
-                           @focus="searchPorts(true, 'multi')" 
-                           @keydown.enter.prevent="addMpPort()"
-                           class="field" placeholder="Add port..." />
-                    <!-- MP Dropdown -->
-                    <div x-show="showMpDropdown" class="absolute z-20 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll">
-                        <template x-for="p in mpFilteredPorts" :key="`multi-${p.zoneCode}-${p.portCode}`">
-                            <button type="button" class="w-full text-left px-4 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0" @click="addMpPort(p)">
-                                <div class="font-medium text-slate-800" x-text="portResultTitle(p)"></div>
-                            </button>
-                        </template>
-                    </div>
-                </div>
-                <button @click="addMpPort()" class="btn btn-soft px-4">Add</button>
-             </div>
-
-             <!-- List -->
-             <div class="space-y-2 bg-slate-50 rounded-xl p-3 min-h-[60px]">
-                <template x-for="(item, i) in mpPorts" :key="`${item.zoneCode}-${i}`">
-                    <div class="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-sm">
-                        <div class="flex items-center gap-3">
-                            <div class="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500" x-text="i+1"></div>
-                            <div>
-                                <div class="text-sm font-medium text-slate-800" x-text="item.zoneCode"></div>
-                                <div class="text-[10px] text-slate-400" x-text="item.label"></div>
-                            </div>
-                        </div>
-                        <button @click="removeMpPort(i)" class="text-slate-400 hover:text-red-500">✕</button>
-                    </div>
-                </template>
-                <div x-show="mpPorts.length === 0" class="text-center text-xs text-slate-400 py-2">Add at least 2 ports to calculate voyage</div>
-             </div>
-          </div>
-
-          <button @click="submitMultiPort" :disabled="mpPorts.length < 2" class="w-full btn btn-primary py-2 disabled:opacity-50">Calculate Voyage Fees</button>
         </div>
 
         <!-- Quick Actions -->
