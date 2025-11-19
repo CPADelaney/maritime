@@ -150,13 +150,18 @@
             <input
               x-model="vesselQuery"
               @keyup.enter="searchVessel(1)"
-              class="field pl-12"
+              class="field pl-9"
               placeholder="Search by Name, IMO, or Callsign..."
               :disabled="searchLoading"
             />
-            <div class="absolute left-3 top-2.5 text-slate-400 pointer-events-none select-none">
-              <svg x-show="!searchLoading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-              <svg x-show="searchLoading" class="w-4 h-4 animate-spin text-ocean-600" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+              <svg x-show="!searchLoading" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+              </svg>
+              <svg x-show="searchLoading" class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
+              </svg>
             </div>
           </div>
 
@@ -211,9 +216,18 @@
         <div class="card p-5 animate-enter z-20" style="animation-delay: 0.1s;">
           <div class="flex items-center justify-between mb-5">
             <h3 class="font-bold text-slate-800">Voyage Details</h3>
-            <span class="text-[10px] uppercase tracking-wider font-semibold text-ocean-600 bg-ocean-50 border border-ocean-100 px-2 py-1 rounded-full">
-              Comprehensive (v2)
-            </span>
+            <div class="flex items-center gap-2">
+              <span class="text-[10px] uppercase tracking-wider font-semibold text-ocean-600 bg-ocean-50 border border-ocean-100 px-2 py-1 rounded-full">
+                Comprehensive (v2)
+              </span>
+              <button
+                type="button"
+                @click="clearVoyage"
+                class="text-[11px] text-slate-400 hover:text-red-500"
+              >
+                Clear
+              </button>
+            </div>
           </div>
 
           <!-- Tabs -->
@@ -237,11 +251,13 @@
                   @input="searchPorts(false, 'single')"
                   @focus="searchPorts(true, 'single')"
                   @keydown.enter.prevent="selectFirstPortResult()"
-                  class="field pl-12"
+                  class="field pl-9"
                   placeholder="Search port name or code..."
                 />
-                <div class="absolute left-3 top-2.5 text-slate-400 pointer-events-none select-none">
-                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <div class="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none text-slate-400">
+                  <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                  </svg>
                 </div>
                 <button x-show="portQuery" @click="clearPortQuery" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">✕</button>
               </div>
@@ -1086,6 +1102,27 @@
           this.weatherSnapshot = null;
         },
 
+        clearVoyage() {
+          this.previousPortCode = '';
+          this.nextPortCode = '';
+          this.eta = new Date().toISOString().split('T')[0];
+          this.etd = '';
+          this.daysAlongside = 2;
+          this.laytimeAllowedDays = 2;
+          this.demurrageRate = 0;
+
+          this.selectedPort = '';
+          this.selectedPortContext = null;
+          this.portQuery = '';
+          this.filteredPorts = [];
+          this.showPortDropdown = false;
+
+          this.selectedPortDetails = null;
+          this.selectedPortHolidays = [];
+          this.weatherSnapshot = null;
+          this.liveData = null;
+        },
+
         rankPortMatches(tokens) {
           const matches = [];
           for (const entry of this.portSearchIndex) {
@@ -1587,32 +1624,76 @@
 
         saveEstimateToHistory(estimate, requestBody) {
           if (!estimate || !this.selectedPort) return;
+
+          const req = requestBody || {};
+
+          // Try very hard to get a real vessel name
+          const fromSelected =
+            (this.selectedVessel && (this.selectedVessel.VesselName || this.selectedVessel.name)) || null;
+
+          const fromRequest =
+            (req.vessel_name && req.vessel_name !== 'Unknown Vessel')
+              ? String(req.vessel_name).trim()
+              : null;
+
+          const fromQuery =
+            (this.vesselQuery && this.vesselQuery.trim().length)
+              ? this.vesselQuery.trim()
+              : null;
+
+          const vesselName = fromSelected || fromRequest || fromQuery || null;
+
           const entry = {
-            id: Date.now(), timestamp: new Date().toISOString(), portCode: this.selectedPort,
+            id: Date.now(),
+            timestamp: new Date().toISOString(),
+            portCode: this.selectedPort,
             portLabel: this.selectedPortContext?.label || this.selectedPort,
-            vesselName: this.selectedVessel?.VesselName || requestBody?.vessel_name || 'Unknown Vessel',
-            totals: estimate?.totals || null, request: { ...requestBody }
+            vesselName: vesselName || 'Unknown Vessel',
+            totals: estimate?.totals || null,
+            request: { ...req },
           };
+
           this.estimateHistory = [entry, ...this.estimateHistory].slice(0, 5);
           this.persistEstimateHistory();
         },
 
         applyEstimateHistory(entry) {
           if (!entry) return;
+          this.useV2 = true; // harmless even if you killed the toggle
           this.historyDropdownOpen = false;
 
-          // Show the vessel used for this run in the search box
-          this.selectedVessel = null;
-          this.vesselQuery = entry.vesselName || '';
           const req = entry.request || {};
-          this.previousPortCode = req.previous_port_code || ''; this.nextPortCode = req.next_port_code || '';
-          this.eta = req.eta ? req.eta.split('T')[0] : this.eta; this.etd = req.etd ? req.etd.split('T')[0] : this.etd;
+
+          // Restore vessel search text if it's not a useless placeholder
+          if (entry.vesselName && entry.vesselName !== 'Unknown Vessel') {
+            this.vesselQuery = entry.vesselName;
+
+            // Give the UI something to show in the vessel card
+            if (!this.selectedVessel || !this.selectedVessel.VesselName) {
+              this.selectedVessel = {
+                ...(this.selectedVessel || {}),
+                VesselName: entry.vesselName,
+              };
+            }
+          }
+
+          this.previousPortCode = req.previous_port_code || '';
+          this.nextPortCode = req.next_port_code || '';
+          this.eta = req.eta ? req.eta.split('T')[0] : this.eta;
+          this.etd = req.etd ? req.etd.split('T')[0] : this.etd;
           this.daysAlongside = Number(req.days_alongside) || this.daysAlongside;
-          this.grossTonnage = Number(req.gross_tonnage) || this.grossTonnage; this.netTonnage = Number(req.net_tonnage) || this.netTonnage;
-          this.loaMeters = Number(req.loa_meters) || this.loaMeters; this.beamMeters = Number(req.beam_meters) || this.beamMeters;
+          this.grossTonnage = Number(req.gross_tonnage) || this.grossTonnage;
+          this.netTonnage = Number(req.net_tonnage) || this.netTonnage;
+          this.loaMeters = Number(req.loa_meters) || this.loaMeters;
+          this.beamMeters = Number(req.beam_meters) || this.beamMeters;
+
           this.selectedPort = entry.portCode || '';
           this.syncPortQueryWithSelection();
-          if (this.selectedPort) { this.fetchPortInsights(this.selectedPort); this.loadWeatherSnapshot(); }
+
+          if (this.selectedPort) {
+            this.fetchPortInsights(this.selectedPort);
+            this.loadWeatherSnapshot();
+          }
         },
 
         // Multi-port History
