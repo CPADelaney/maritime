@@ -250,8 +250,14 @@
           <div class="grid grid-cols-2 gap-y-2 gap-x-4 text-sm">
             <div><span class="text-slate-400 text-xs uppercase block">Flag</span> <span x-text="selectedVessel?.Flag || '—'"></span></div>
             <div><span class="text-slate-400 text-xs uppercase block">Type</span> <span x-text="selectedVessel?.VesselType || '—'"></span></div>
-            <div x-show="selectedVessel?.YearBuilt"><span class="text-slate-400 text-xs uppercase block">Built</span> <span x-text="selectedVessel.YearBuilt"></span></div>
-            <div x-show="selectedVessel?.IMO"><span class="text-slate-400 text-xs uppercase block">IMO</span> <span x-text="selectedVessel.IMO"></span></div>
+            <div x-show="selectedVessel?.YearBuilt">
+              <span class="text-slate-400 text-xs uppercase block">Built</span>
+              <span x-text="selectedVessel?.YearBuilt ?? ''"></span>
+            </div>
+            <div x-show="selectedVessel?.IMO">
+              <span class="text-slate-400 text-xs uppercase block">IMO</span>
+              <span x-text="selectedVessel?.IMO ?? ''"></span>
+            </div>
             
             <div class="col-span-2 mt-2 pt-2 border-t border-slate-100 grid grid-cols-3 gap-2">
                 <div class="text-center bg-indigo-50/50 rounded p-1">
@@ -556,7 +562,7 @@
               </div>
             </div>
             <div x-show="weatherSnapshot?.tide" class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-sm text-indigo-900">
-              Next high tide <strong x-text="formatLocalTime(weatherSnapshot.tide?.time)"></strong>
+              Next high tide <strong x-text="formatLocalTime(weatherSnapshot?.tide?.time)"></strong>
               · <span class="font-semibold" x-text="weatherSnapshot?.tide?.height != null ? `${Number(weatherSnapshot.tide.height).toFixed(2)} m` : ''"></span>
             </div>
             <div x-show="selectedPortHolidays.length" class="text-sm text-slate-600">
@@ -1036,8 +1042,19 @@
         async loadPorts() {
           try {
             const r = await fetch(`${API_BASE}/ports`);
-            const zones = await r.json();
-            this.buildPortCaches(Array.isArray(zones) ? zones : []);
+            const payload = await r.json();
+
+            // Accept several backend response shapes:
+            //   [ ...zones ]
+            //   { zones: [ ... ] }
+            //   { data: [ ... ] }
+            const zones = Array.isArray(payload)
+              ? payload
+              : Array.isArray(payload.zones)
+                ? payload.zones
+                : Array.isArray(payload.data) ? payload.data : [];
+
+            this.buildPortCaches(zones);
             this.filteredPorts = [];
             this.mpFilteredPorts = [];
             this.showPortDropdown = false;
@@ -1350,6 +1367,23 @@
           return entry ? (entry.description || '') : '';
         },
 
+        async afterPortSelection() {
+          if (!this.selectedPort) {
+            this.resetWeather();
+            this.selectedPortDetails = null;
+            this.selectedPortHolidays = [];
+            return;
+          }
+
+          try {
+            this.loadLiveData();
+            await this.fetchPortInsights(this.selectedPort);
+            await this.loadWeatherSnapshot();
+          } catch (e) {
+            console.error('afterPortSelection failed:', e);
+          }
+        },
+
         syncPortQueryWithSelection() {
           if (!this.selectedPort) {
             this.selectedPortContext = null;
@@ -1497,11 +1531,13 @@
           this.portQuery = context?.label || '';
           this.filteredPorts = [];
           this.showPortDropdown = false;
-          if (this.selectedPort) {
-            this.loadLiveData();
-            await this.fetchPortInsights(this.selectedPort);
-            await this.loadWeatherSnapshot();
-          }
+          await this.afterPortSelection();
+        },
+
+        resetWeather() {
+          this.weatherSnapshot = null;
+          this.weatherError = null;
+          this.weatherLoading = false;
         },
 
         // ---------- Normalizer (no out-before-init) ----------
