@@ -27,7 +27,10 @@ engine = create_engine(
     pool_recycle=300,
     # psycopg3 specific options
     connect_args={
-        "options": "-c statement_timeout=30000"  # 30 second timeout
+        "options": "-c statement_timeout=30000",  # 30 second timeout
+        # Prevent duplicate prepared statement errors across pooled connections
+        # by disabling psycopg's automatic server-side prepared statements.
+        "prepare_threshold": 0,
     }
 )
 
