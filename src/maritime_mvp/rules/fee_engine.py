@@ -684,7 +684,36 @@ class FeeEngine:
         else:
             risk = "medium_risk"
 
-        base = self.APHIS_RISK_RATES.get(risk, self.APHIS_RISK_RATES["medium_risk"])
+        # Attempt to use live APHIS AQI vessel fees from USDA.
+        dyn_base: Optional[Decimal] = None
+        try:
+            from ..connectors.live_sources import fetch_aphis_vessel_fees
+
+            fees = fetch_aphis_vessel_fees()
+            std = fees.get("standard_fee")
+            cas = fees.get("cascadia_fee")
+
+            is_cascadia = bool(getattr(port, "is_cascadia", False))
+
+            if is_cascadia and isinstance(cas, Decimal):
+                dyn_base = _money(cas)
+            elif isinstance(std, Decimal):
+                dyn_base = _money(std)
+        except Exception:
+            logger.debug("APHIS live vessel fee lookup failed; using static fallback", exc_info=True)
+
+        if dyn_base is None:
+            base = self.APHIS_RISK_RATES.get(risk, self.APHIS_RISK_RATES["medium_risk"])
+            details = (
+                f"Fallback risk='{risk}' from prev='{prev}' "
+                f"(port.is_cascadia={bool(getattr(port, 'is_cascadia', False))})"
+            )
+        else:
+            base = dyn_base
+            details = (
+                f"Derived from APHIS AQI commercial vessel fee schedule "
+                f"(risk='{risk}', prev='{prev}', is_cascadia={bool(getattr(port, 'is_cascadia', False))})"
+            )
 
         return FeeCalculation(
             code="APHIS_AQI",
@@ -692,7 +721,7 @@ class FeeEngine:
             base_amount=_money(base),
             final_amount=_money(base),
             confidence=Decimal("0.95"),
-            calculation_details=f"Fallback risk='{risk}' from prev='{prev}' (port.is_cascadia={bool(getattr(port, 'is_cascadia', False))})",
+            calculation_details=details,
         )
 
     def _calc_tonnage_tax(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
