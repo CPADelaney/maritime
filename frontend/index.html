@@ -211,11 +211,9 @@
         <div class="card p-5 animate-enter z-20" style="animation-delay: 0.1s;">
           <div class="flex items-center justify-between mb-5">
             <h3 class="font-bold text-slate-800">Voyage Details</h3>
-            <!-- Mode Toggle -->
-            <div class="flex bg-slate-100 p-1 rounded-lg">
-                <button @click="useV2 = false" :class="!useV2 ? 'bg-white text-ocean-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-3 py-1 text-xs font-semibold rounded-md transition-all">Basic</button>
-                <button @click="useV2 = true" :class="useV2 ? 'bg-white text-ocean-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-3 py-1 text-xs font-semibold rounded-md transition-all">Advanced</button>
-            </div>
+            <span class="text-[10px] uppercase tracking-wider font-semibold text-ocean-600 bg-ocean-50 border border-ocean-100 px-2 py-1 rounded-full">
+              Comprehensive (v2)
+            </span>
           </div>
 
           <!-- Tabs -->
@@ -263,10 +261,26 @@
                 <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
                 <span><strong>ECA Zone:</strong> Low Sulfur Fuel Required</span>
               </div>
+              <div class="mt-2 flex items-center justify-between text-xs text-slate-500">
+                <button
+                  type="button"
+                  class="inline-flex items-center gap-1 text-[11px] font-semibold text-ocean-700 hover:text-ocean-800"
+                  :disabled="!selectedPortContext"
+                  @click="addMpPortFromCurrent()"
+                >
+                  <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
+                  </svg>
+                  Add to itinerary
+                </button>
+                <span x-show="mpPorts.length" class="text-[11px] text-slate-400">
+                  Itinerary ports: <span class="font-mono" x-text="mpPorts.length"></span>
+                </span>
+              </div>
             </div>
 
-            <!-- Route (V2 Only) -->
-            <div x-show="useV2" class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+            <!-- Route -->
+            <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
               <label class="label-text mb-2">Voyage Route (UN/LOCODE)</label>
               <div class="flex items-center gap-2">
                 <div class="flex-1 relative">
@@ -301,15 +315,25 @@
                          placeholder="NEXT" 
                          class="field text-center font-mono uppercase text-sm" />
                    <!-- Unloc Dropdown Next -->
-                   <div x-show="unlocNext.length" class="absolute bottom-full mb-1 right-0 w-48 bg-white shadow-xl rounded-lg border border-slate-200 text-xs z-50 max-h-40 overflow-y-auto custom-scroll">
-                    <div class="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase bg-slate-50">Suggestions</div>
-                    <template x-for="p in unlocNext">
-                        <div @click="nextPortCode=p.locode; unlocNext=[]" class="px-3 py-2 hover:bg-ocean-50 cursor-pointer border-b border-slate-50 last:border-0">
-                            <span class="font-bold text-ocean-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
-                        </div>
-                    </template>
-                </div>
-                </div>
+                  <div x-show="unlocNext.length" class="absolute bottom-full mb-1 right-0 w-48 bg-white shadow-xl rounded-lg border border-slate-200 text-xs z-50 max-h-40 overflow-y-auto custom-scroll">
+                   <div class="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase bg-slate-50">Suggestions</div>
+                   <template x-for="p in unlocNext">
+                       <div @click="nextPortCode=p.locode; unlocNext=[]" class="px-3 py-2 hover:bg-ocean-50 cursor-pointer border-b border-slate-50 last:border-0">
+                           <span class="font-bold text-ocean-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
+                       </div>
+                   </template>
+               </div>
+               </div>
+              </div>
+              <div class="mt-2 flex items-center gap-2 text-xs" x-show="derivedArrivalType()">
+                <span class="uppercase tracking-wide text-slate-400 font-semibold">Arrival Type</span>
+                <span
+                  class="inline-flex items-center px-2 py-0.5 rounded-full font-semibold"
+                  :class="derivedArrivalType() === 'COASTWISE'
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                    : 'bg-sky-50 text-sky-700 border border-sky-100'"
+                  x-text="derivedArrivalType()"
+                ></span>
               </div>
             </div>
 
@@ -318,21 +342,14 @@
                 <label class="label-text">ETA</label>
                 <input x-model="eta" type="date" class="field" />
               </div>
-              <div x-show="useV2">
+              <div>
                 <label class="label-text">Days Alongside</label>
                 <input x-model.number="daysAlongside" type="number" min="1" class="field" />
-              </div>
-              <div x-show="!useV2">
-                <label class="label-text">Arrival Type</label>
-                <select x-model="arrivalType" class="field">
-                  <option value="FOREIGN">Foreign</option>
-                  <option value="COASTWISE">Coastwise</option>
-                </select>
               </div>
             </div>
 
             <!-- Demurrage Calculator -->
-            <div x-show="useV2" class="border-t border-slate-100 pt-4">
+            <div class="border-t border-slate-100 pt-4">
               <button @click="$el.nextElementSibling.classList.toggle('hidden')" class="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-ocean-600 mb-2">
                 <span>Laytime & Demurrage Settings</span>
                 <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
@@ -393,8 +410,8 @@
           <!-- Action Button -->
           <div class="mt-6 pt-4 border-t border-slate-100">
             <button
-              @click="useV2 ? getEstimateV2() : getEstimate()"
-              :disabled="!selectedPort || estimateLoading || (useV2 && !previousPortCode.trim())"
+              @click="getEstimateV2()"
+              :disabled="!selectedPort || estimateLoading || !previousPortCode.trim()"
               class="w-full bg-ocean-600 hover:bg-ocean-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3.5 px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2">
               <span x-show="!estimateLoading">Calculate Port Fees</span>
               <svg x-show="estimateLoading" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -539,7 +556,7 @@
         </div>
 
         <!-- Empty State -->
-        <div x-show="!estimate && !estimateV2 && !mpResult" class="h-96 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 no-print">
+        <div x-show="!estimateV2 && !mpResult" class="h-96 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 no-print">
             <svg class="w-16 h-16 mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
             <h3 class="text-lg font-semibold text-slate-600">Ready to Calculate</h3>
             <p class="text-sm max-w-xs text-center mt-2">Select a vessel and configure the voyage details on the left to generate a fee estimate.</p>
@@ -556,6 +573,14 @@
                             <span x-text="selectedPortContext?.label || selectedPort"></span>
                             <span>•</span>
                             <span x-text="formatDate(estimateV2?.voyage?.eta)"></span>
+                            <span>•</span>
+                            <span
+                              class="inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-semibold uppercase tracking-wide"
+                              :class="(estimateV2?.meta?.arrival_type || '').toUpperCase() === 'COASTWISE'
+                                ? 'bg-emerald-50 text-emerald-700 border border-emerald-100'
+                                : 'bg-sky-50 text-sky-700 border border-sky-100'"
+                              x-text="(estimateV2?.meta?.arrival_type || 'FOREIGN')"
+                            ></span>
                         </div>
                     </div>
                     <div class="flex gap-2 no-print">
@@ -628,43 +653,6 @@
                 <!-- Print Footer -->
                 <div class="print-only border-t border-slate-200 p-4 text-center text-xs text-slate-400">
                     Generated by Maritime MVP on <span x-text="new Date().toLocaleDateString()"></span>
-                </div>
-            </div>
-        </template>
-
-        <!-- RESULT: V1 Estimate (Legacy) -->
-        <template x-if="estimate && !estimateV2">
-            <div class="card overflow-hidden animate-enter">
-                <div class="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
-                    <h2 class="text-lg font-bold text-slate-800">Fee Estimate (Basic)</h2>
-                    <div class="flex gap-2 no-print">
-                        <button @click="clientExport('csv')" class="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded hover:bg-slate-50">CSV</button>
-                        <button @click="printEstimate" class="px-3 py-1 text-xs font-medium bg-white border border-slate-300 rounded hover:bg-slate-50">Print</button>
-                    </div>
-                </div>
-                <div class="p-0">
-                    <table class="min-w-full divide-y divide-slate-200">
-                        <thead class="bg-slate-50">
-                            <tr>
-                                <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Fee</th>
-                                <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase">Amount</th>
-                            </tr>
-                        </thead>
-                        <tbody class="divide-y divide-slate-100 bg-white">
-                            <template x-for="item in (estimate?.line_items || [])" :key="item.code">
-                                <tr>
-                                    <td class="px-6 py-3 text-sm text-slate-700" x-text="item.name"></td>
-                                    <td class="px-6 py-3 text-right text-sm font-mono text-slate-600" x-text="`$${item.amount}`"></td>
-                                </tr>
-                            </template>
-                        </tbody>
-                        <tfoot class="bg-slate-50 font-bold text-slate-800">
-                            <tr>
-                                <td class="px-6 py-4">Total Mandatory</td>
-                                <td class="px-6 py-4 text-right text-ocean-600" x-text="`$${estimate.total}`"></td>
-                            </tr>
-                        </tfoot>
-                    </table>
                 </div>
             </div>
         </template>
@@ -757,12 +745,10 @@
         portSearchTimeout: null,
         mpPortSearchTimeout: null,
         eta: new Date().toISOString().split('T')[0],
-        arrivalType: 'FOREIGN',
         netTonnage: '',
         ytdCbpPaid: '0',
-  
+
         // v2 fields
-        useV2: false,
         previousPortCode: '',
         nextPortCode: '',
         etd: '',
@@ -795,9 +781,8 @@
         mpPorts: [],
         mpResult: null,
         mpHistory: [],
-  
+
         // results
-        estimate: null,
         estimateV2: null,
         estimateLoading: false,
         liveData: null,
@@ -1006,6 +991,12 @@
           const lon = Number(port.longitude);
           if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
           return { lat, lon };
+        },
+
+        derivedArrivalType() {
+          const prev = (this.previousPortCode || '').trim().toUpperCase();
+          if (!prev) return null;
+          return prev.startsWith('US') ? 'COASTWISE' : 'FOREIGN';
         },
 
         formatCurrency(value) {
@@ -1315,29 +1306,10 @@
           if (this.selectedPort) this.loadLiveData();
         },
   
-        // ----- v1 estimator -----
-        async getEstimate() {
-          if (!this.selectedPort || !this.eta) return;
-          // FIX: Basic mode does not require previous port
-          this.estimateLoading = true; this.estimate = null; this.estimateV2 = null;
-          const params = new URLSearchParams({ port_code: this.selectedPort, eta: this.eta, arrival_type: this.arrivalType, include_optional: 'true' });
-          if (this.previousPortCode.trim()) params.set('previous_port_code', this.previousPortCode.trim().toUpperCase());
-          if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
-          if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
-   
-          try {
-            const r = await fetch(`${API_BASE}/estimate?${params}`);
-            if (!r.ok) throw new Error('Estimate failed');
-            this.estimate = await r.json();
-            this.saveEstimateToHistory(this.estimate, { days_alongside: this.daysAlongside });
-            if (this.selectedVessel) await this.loadLiveData();
-          } catch (e) { console.error('Estimate failed:', e); alert('Failed to calculate estimate: ' + (e.message || 'request error')); } finally { this.estimateLoading = false; }
-        },
-  
         // ----- v2 estimator -----
         async getEstimateV2() {
           if (!this.selectedPort || !this.eta || !this.previousPortCode.trim()) { alert('Previous port (UN/LOCODE), arrival port, and ETA are required for v2.'); return; }
-          this.estimateLoading = true; this.estimate = null; this.estimateV2 = null;
+          this.estimateLoading = true; this.estimateV2 = null;
           const fwdDraft = Number(this.draftForwardMeters) || 0; const aftDraft = Number(this.draftAftMeters) || 0; const airDraft = Number(this.airDraftMeters) || 0;
           const draftSamples = [fwdDraft, aftDraft].filter(v => v > 0);
           const representativeDraft = draftSamples.length ? Number((draftSamples.reduce((sum, v) => sum + v, 0) / draftSamples.length).toFixed(2)) : (fwdDraft || aftDraft || 0);
@@ -1585,34 +1557,21 @@
   
         // Client-side export
         clientExport(format = 'csv') {
-          if (this.estimateV2) {
-            if (format === 'json') {
-              const blob = new Blob([JSON.stringify(this.estimateV2, null, 2)], { type: 'application/json' });
-              const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v2_${this.selectedPort}_${this.eta}.json`; a.click(); return;
-            }
-            const rows = [['Code','Name','Final Amount','Base','Confidence','Optional','Details']];
-            for (const c of (this.estimateV2.calculations || [])) {
-              rows.push([c.code, c.name, c.final_amount, c.base_amount, c.confidence, c.is_optional ? 'yes' : 'no', (c.details || '').replace(/\n/g, ' ')]);
-            }
-            const t = this.estimateV2?.totals || {};
-            rows.push(['', 'TOTAL MANDATORY', t.mandatory ?? '', '', '', '', '']);
-            rows.push(['', 'TOTAL HIGH', t.total_high ?? '', '', '', '', '']);
-            const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
-            const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v2_${this.selectedPort}_${this.eta}.csv`; a.click();
-            return;
-          }
-          if (!this.estimate) return;
+          if (!this.estimateV2) return;
           if (format === 'json') {
-            const blob = new Blob([JSON.stringify(this.estimate, null, 2)], { type: 'application/json' });
-            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v1_${this.selectedPort}_${this.eta}.json`; a.click(); return;
+            const blob = new Blob([JSON.stringify(this.estimateV2, null, 2)], { type: 'application/json' });
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v2_${this.selectedPort}_${this.eta}.json`; a.click(); return;
           }
-          const rows = [['Code','Name','Amount']];
-          for (const item of (this.estimate.line_items || [])) { rows.push([item.code, item.name, item.amount]); }
-          rows.push(['TOTAL','','' + (this.estimate.total || '0.00')]);
+          const rows = [['Code','Name','Final Amount','Base','Confidence','Optional','Details']];
+          for (const c of (this.estimateV2.calculations || [])) {
+            rows.push([c.code, c.name, c.final_amount, c.base_amount, c.confidence, c.is_optional ? 'yes' : 'no', (c.details || '').replace(/\n/g, ' ')]);
+          }
+          const t = this.estimateV2?.totals || {};
+          rows.push(['', 'TOTAL MANDATORY', t.mandatory ?? '', '', '', '', '']);
+          rows.push(['', 'TOTAL HIGH', t.total_high ?? '', '', '', '', '']);
           const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
           const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v1_${this.selectedPort}_${this.eta}.csv`; a.click();
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v2_${this.selectedPort}_${this.eta}.csv`; a.click();
         },
 
         loadEstimateHistory() {
@@ -1640,7 +1599,6 @@
 
         applyEstimateHistory(entry) {
           if (!entry) return;
-          this.useV2 = true;
           this.historyDropdownOpen = false;
 
           // Show the vessel used for this run in the search box
@@ -1679,8 +1637,33 @@
         },
 
         printEstimate() { window.print(); },
-  
+
         // Multi-port methods
+        addMpPortFromCurrent() {
+          if (!this.selectedPortContext) return;
+          const ctx = this.selectedPortContext;
+          const entry = this.makeSelectionContext({
+            type: ctx.type || (ctx.terminal ? 'terminal' : ctx.port ? 'port' : 'zone'),
+            zoneCode: ctx.zoneCode,
+            zoneName: ctx.zoneName,
+            portCode: ctx.portCode || (ctx.port && ctx.port.code) || null,
+            portName: ctx.portName || (ctx.port && ctx.port.name) || null,
+            terminalCode: ctx.terminalCode || null,
+            terminalName: ctx.terminalName || null,
+            zone: ctx.zone,
+            port: ctx.port,
+            terminal: ctx.terminal,
+            label: ctx.label,
+            description: ctx.description,
+            operator: ctx.operator || '',
+            haystack: ctx.haystack || ''
+          });
+
+          const last = this.mpPorts[this.mpPorts.length - 1];
+          if (!last || last.zoneCode !== entry.zoneCode) {
+            this.mpPorts.push(entry);
+          }
+        },
         addMpPort(entry = null) {
           let context = entry ? this.makeSelectionContext(entry) : null;
           if (!context) {
@@ -1729,7 +1712,7 @@
         async refreshAll() {
           await this.checkHealth();
           if (this.selectedPort && this.eta) {
-            if (this.useV2) await this.getEstimateV2(); else await this.getEstimate();
+            await this.getEstimateV2();
             await this.fetchPortInsights(this.selectedPort); await this.loadWeatherSnapshot();
           }
         },
