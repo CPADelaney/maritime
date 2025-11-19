@@ -1869,10 +1869,6 @@
         // ----- v1 estimator (GET /estimate) -----
         async getEstimate() {
           if (!this.selectedPort || !this.eta) return;
-          if (!this.previousPortCode.trim()) {
-            alert('Previous port UN/LOCODE is required.');
-            return;
-          }
           this.estimateLoading = true;
           this.estimate = null;
           this.estimateV2 = null;
@@ -1883,7 +1879,11 @@
             arrival_type: this.arrivalType,
             include_optional: 'true'
           });
-          params.set('previous_port_code', this.previousPortCode.trim().toUpperCase());
+          // In basic mode, previous port is optional; when provided, it refines
+          // arrival_type inference on the backend.
+          if (this.previousPortCode && this.previousPortCode.trim()) {
+            params.set('previous_port_code', this.previousPortCode.trim().toUpperCase());
+          }
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
    
