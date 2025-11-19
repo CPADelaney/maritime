@@ -1237,7 +1237,22 @@
               haystack: tokenize(zoneTokenCollector),
             };
 
-            index.push(zoneEntry, ...zoneEntries);
+            // Avoid duplicate-looking entries where the zone and its only port
+            // share the exact same display name (e.g., "Los Angeles/Long Beach").
+            let redundantZone = false;
+            if (portCount === 1) {
+              const onlyPort = ports[0] || {};
+              const zName = (zoneName || '').trim().toLowerCase();
+              const pName = (onlyPort.name || '').trim().toLowerCase();
+              if (zName && pName && zName === pName) {
+                redundantZone = true;
+              }
+            }
+
+            if (!redundantZone) {
+              index.push(zoneEntry);
+            }
+            index.push(...zoneEntries);
           }
 
           this.portSearchIndex = index;
