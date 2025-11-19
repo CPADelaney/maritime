@@ -29,7 +29,7 @@ from ..rules.fee_engine import (
     VoyageContext,
     VesselType,
 )
-from ..models import Port, PortZone, Terminal
+from ..models import Port, PortZone, Terminal, ContractAdjustment
 
 logger = logging.getLogger("maritime-api")
 
@@ -83,6 +83,29 @@ class DocumentRequirement(BaseModel):
     lead_time_hours: int
     authority: str
     description: Optional[str] = None
+
+
+class ContractAdjustmentIn(BaseModel):
+    fee_code: str = Field(..., example="PILOTAGE")
+    port_code: Optional[str] = Field(
+        None, example="SFBAY", description="Internal port code, or null for all ports"
+    )
+    multiplier: Decimal = Field(
+        Decimal("1.0"),
+        example="0.90",
+        description="Multiply the fee by this factor (e.g., 0.9 for 10% discount)",
+    )
+    offset: Optional[Decimal] = Field(
+        None, example="-500.00", description="Fixed USD offset to add (can be negative)"
+    )
+    effective_start: date = Field(..., example="2025-01-01")
+    effective_end: Optional[date] = Field(None, example="2026-01-01")
+    notes: Optional[str] = Field(None, example="10% pilotage discount for Customer A")
+
+
+class ContractAdjustmentOut(ContractAdjustmentIn):
+    id: int
+    profile: str
 
 
 # Basic static fallback rules for common U.S. arrival documents when
@@ -673,6 +696,137 @@ async def get_document_requirements(
     db: Session = Depends(get_db),
 ):
     return _document_requirements_core(db, port_code, vessel_type, previous_port)
+
+
+# ============ Contract Adjustments (Profiles) ============
+
+
+@router.get("/contracts/{profile}", response_model=List[ContractAdjustmentOut], tags=["Contracts"])
+async def list_contract_adjustments(
+    profile: str,
+    db: Session = Depends(get_db),
+):
+    """List all contract adjustments for a given profile."""
+
+    rows = (
+        db.execute(
+            select(ContractAdjustment)
+            .where(ContractAdjustment.profile == profile)
+            .order_by(
+                ContractAdjustment.fee_code,
+                ContractAdjustment.port_code.nullsfirst(),
+                ContractAdjustment.effective_start.desc(),
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        ContractAdjustmentOut(
+            id=r.id,
+            profile=r.profile,
+            fee_code=r.fee_code,
+            port_code=r.port_code,
+            multiplier=r.multiplier,
+            offset=r.offset,
+            effective_start=r.effective_start,
+            effective_end=r.effective_end,
+            notes=r.notes,
+        )
+        for r in rows
+    ]
+
+
+@router.post("/contracts/{profile}/upsert", response_model=ContractAdjustmentOut, tags=["Contracts"])
+async def upsert_contract_adjustment(
+    profile: str,
+    body: ContractAdjustmentIn,
+    db: Session = Depends(get_db),
+):
+    """
+    Create or update a contract adjustment for a given profile + fee_code + port_code.
+
+    If a current row exists (effective_end is null and same fee_code/port_code),
+    it is updated in-place. Otherwise, a new row is inserted.
+    """
+
+    port_clause = (
+        ContractAdjustment.port_code.is_(None)
+        if body.port_code is None
+        else ContractAdjustment.port_code == body.port_code
+    )
+
+    existing = (
+        db.execute(
+            select(ContractAdjustment).where(
+                ContractAdjustment.profile == profile,
+                ContractAdjustment.fee_code == body.fee_code,
+                port_clause,
+                ContractAdjustment.effective_end.is_(None),
+            )
+        )
+        .scalars()
+        .first()
+    )
+
+    if existing:
+        existing.multiplier = body.multiplier
+        existing.offset = body.offset
+        existing.effective_start = body.effective_start
+        existing.effective_end = body.effective_end
+        existing.notes = body.notes
+        row = existing
+    else:
+        row = ContractAdjustment(
+            profile=profile,
+            fee_code=body.fee_code,
+            port_code=body.port_code,
+            multiplier=body.multiplier,
+            offset=body.offset,
+            effective_start=body.effective_start,
+            effective_end=body.effective_end,
+            notes=body.notes,
+        )
+        db.add(row)
+
+    db.commit()
+    db.refresh(row)
+
+    return ContractAdjustmentOut(
+        id=row.id,
+        profile=row.profile,
+        fee_code=row.fee_code,
+        port_code=row.port_code,
+        multiplier=row.multiplier,
+        offset=row.offset,
+        effective_start=row.effective_start,
+        effective_end=row.effective_end,
+        notes=row.notes,
+    )
+
+
+@router.delete("/contracts/{profile}/{fee_code}", tags=["Contracts"])
+async def delete_contract_adjustments(
+    profile: str,
+    fee_code: str,
+    port_code: Optional[str] = Query(None, description="Optional internal port code filter"),
+    db: Session = Depends(get_db),
+):
+    """
+    Delete contract adjustments for a profile + fee_code, optionally scoped to a specific port_code.
+    """
+
+    q = select(ContractAdjustment).where(
+        ContractAdjustment.profile == profile, ContractAdjustment.fee_code == fee_code
+    )
+    if port_code:
+        q = q.where(ContractAdjustment.port_code == port_code)
+
+    rows = db.execute(q).scalars().all()
+    for r in rows:
+        db.delete(r)
+    db.commit()
+    return {"deleted": len(rows)}
 
 
 # ============ Multi-Port Voyage Planning ============
