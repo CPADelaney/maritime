@@ -1195,17 +1195,38 @@
         },
 
         portDocuments() {
-          if (!this.selectedPortDetails) return [];
-          const candidates = [
-            this.selectedPortDetails.documents,
-            this.selectedPortDetails.document_requirements,
-            this.selectedPortDetails.documents_required,
-            this.selectedPortDetails.required_documents,
-          ];
-          for (const docs of candidates) {
-            if (Array.isArray(docs) && docs.length) return docs;
+          const out = [];
+
+          // Port-level docs from /ports/{code}
+          if (this.selectedPortDetails) {
+            const candidates = [
+              this.selectedPortDetails.documents,
+              this.selectedPortDetails.document_requirements,
+              this.selectedPortDetails.documents_required,
+              this.selectedPortDetails.required_documents,
+            ];
+            for (const docs of candidates) {
+              if (Array.isArray(docs)) {
+                out.push(...docs);
+                break;
+              }
+            }
           }
-          return [];
+
+          // Live bundle docs (if backend sticks anything useful in there)
+          if (this.liveData && Array.isArray(this.liveData.documents)) {
+            out.push(...this.liveData.documents);
+          }
+
+          // Very cheap dedupe by (code + name)
+          const seen = new Set();
+          const key = (d) => `${d.document_code || d.code || ''}::${d.document_name || d.name || d.title || ''}`;
+          return out.filter((d) => {
+            const k = key(d);
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
         },
 
         portResultTitle(entry) { return entry ? (entry.label || '') : ''; },
@@ -1219,7 +1240,14 @@
           }
           try {
             this.loadLiveData();
-            await this.fetchPortInsights(this.selectedPort);
+            // Use the zone code for /ports/{code}, not the internal port code
+            const insightCode = this.selectedPortContext?.zoneCode || this.selectedPort;
+            if (insightCode) {
+              await this.fetchPortInsights(insightCode);
+            } else {
+              this.selectedPortDetails = null;
+              this.selectedPortHolidays = [];
+            }
           } catch (e) { console.error('afterPortSelection failed:', e); }
         },
 
@@ -1830,7 +1858,12 @@
           this.syncPortQueryWithSelection();
 
           if (this.selectedPort) {
-            this.fetchPortInsights(this.selectedPort);
+            const insightCode = this.selectedPortContext?.zoneCode || this.selectedPort;
+            if (insightCode) {
+              this.fetchPortInsights(insightCode);
+            } else {
+              this.selectedPortDetails = null;
+            }
           }
         },
 
@@ -1915,9 +1948,30 @@
 
           try {
             this.mpExpandedLeg = null;
-            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request, vessel }) });
+            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ request, vessel })
+            });
             if (!r.ok) throw new Error(await r.text());
-            this.mpResult = await r.json();
+
+            const raw = await r.json();
+            console.log('[multi-port] raw response', raw);
+
+            // Normalize a couple of common shapes:
+            //  1) { legs: [...] }
+            //  2) { voyage: { legs: [...] } }
+            //  3) { result: { legs: [...] } }
+            let mp = raw;
+            if (!Array.isArray(mp.legs)) {
+              if (Array.isArray(raw?.voyage?.legs)) {
+                mp = raw.voyage;
+              } else if (Array.isArray(raw?.result?.legs)) {
+                mp = raw.result;
+              }
+            }
+
+            this.mpResult = mp;
             this.mpExpandedLeg = null;
             this.saveMpHistory(this.mpPorts);
           } catch (e) { console.error('Multi-port failed:', e); alert('Failed to calculate multi-port voyage.'); }
@@ -1927,7 +1981,10 @@
           await this.checkHealth();
           if (this.selectedPort && this.eta) {
             await this.getEstimateV2();
-            await this.fetchPortInsights(this.selectedPort);
+            const insightCode = this.selectedPortContext?.zoneCode || this.selectedPort;
+            if (insightCode) {
+              await this.fetchPortInsights(insightCode);
+            }
           }
         },
   
