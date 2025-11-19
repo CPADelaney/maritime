@@ -347,7 +347,12 @@
                 <div class="text-slate-300">→</div>
                 
                 <div class="w-16 h-9 flex items-center justify-center bg-white border border-slate-300 rounded-md text-xs font-bold text-ocean-600 shadow-sm">
-                  <span x-text="selectedPortContext?.portCode || 'ARR'"></span>
+                  @-- Effective arrival code:
+                       1) selectedPort (internal code used by estimator)
+                       2) portCode from context
+                       3) zoneCode from context
+                  --
+                  <span x-text="selectedPort || selectedPortContext?.portCode || selectedPortContext?.zoneCode || 'ARR'"></span>
                 </div>
                 
                 <div class="text-slate-300">→</div>
