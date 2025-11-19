@@ -71,6 +71,9 @@ class ComprehensiveEstimateRequest(BaseModel):
     ytd_cbp_paid: Decimal = Field(Decimal("0"))
     tonnage_year_paid: Decimal = Field(Decimal("0"))
     include_optional_services: bool = Field(True)
+    contract_profile: Optional[str] = Field(
+        None, description="Optional contract profile key for fee adjustments"
+    )
 
 
 class DocumentRequirement(BaseModel):
@@ -488,6 +491,7 @@ async def calculate_comprehensive_estimate(
     engine = FeeEngine(db)
     engine.ytd_cbp_paid = _dec(request.ytd_cbp_paid)
     engine.tonnage_year_paid = _dec(request.tonnage_year_paid)
+    engine.contract_profile = request.contract_profile
 
     result = engine.calculate_comprehensive(vessel, voyage)
 

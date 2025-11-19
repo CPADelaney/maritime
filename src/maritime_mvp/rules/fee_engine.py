@@ -6,14 +6,14 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
-from typing import Optional, List, Dict, Tuple, Any, Iterable, cast
+from typing import Optional, List, Dict, Tuple, Any, Iterable, cast, Union
 
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.orm import Session
 
 from .dockage import DockageEngine
 from .tonnage_schedule import LOWER_RATE_PER_TON, LOWER_CAP_PER_TON_PER_YEAR
-from ..models import Fee, Port, VesselTypeConfig, PilotageRate
+from ..models import Fee, Port, VesselTypeConfig, PilotageRate, ContractAdjustment
 from .rates_loader import (
     MISSING_RATE_FIELD,
     load_pilotage_rates,
@@ -250,6 +250,12 @@ class FeeEngine:
         self._vessel_type_cache: Dict[str, Optional[VesselTypeConfig]] = {}
         # key: (port_code, date)
         self._pilotage_rate_cache: Dict[Tuple[str, date], Optional[PilotageRate]] = {}
+        # Optional contract profile for this calculation run
+        self.contract_profile: Optional[str] = None
+        # cache for contract adjustments keyed by (profile, port_code)
+        self._contract_adj_cache: Dict[
+            Tuple[str, str], Dict[str, Tuple[Decimal, Optional[Decimal]]]
+        ] = {}
         # Legacy optional services (launch, garbage, fresh water) are hidden by default.
         self.show_legacy_optional = show_legacy_optional
 
@@ -311,13 +317,15 @@ class FeeEngine:
 
     # ------------- DB-backed config helpers -------------
 
-    def _get_vessel_type_config(self, vessel: VesselSpecs) -> Optional[VesselTypeConfig]:
-        """
-        Look up vessel-type configuration (tonnage_rate, pilotage_multiplier,
-        typical_tug_count) from vessel_types table based on vessel.vessel_type.
-        """
+    def _get_vessel_type_config(
+        self, vessel_or_type: Union[VesselSpecs, str]
+    ) -> Optional[VesselTypeConfig]:
+        """Look up vessel-type configuration for a VesselSpecs or type-code."""
 
-        code = vessel.vessel_type.value
+        if isinstance(vessel_or_type, VesselSpecs):
+            code = vessel_or_type.vessel_type.value
+        else:
+            code = str(vessel_or_type)
         if code in self._vessel_type_cache:
             return self._vessel_type_cache[code]
 
@@ -357,6 +365,42 @@ class FeeEngine:
 
         self._pilotage_rate_cache[key] = row
         return row
+
+    def _get_contract_adjustments(
+        self, profile: str, port: Port, on: date
+    ) -> Dict[str, Tuple[Decimal, Optional[Decimal]]]:
+        """Return mapping fee_code -> (multiplier, offset) for contract adjustments."""
+
+        cache_key = (profile, port.code)
+        if cache_key in self._contract_adj_cache:
+            return self._contract_adj_cache[cache_key]
+
+        rows = (
+            self.db.execute(
+                select(ContractAdjustment).where(
+                    ContractAdjustment.profile == profile,
+                    ContractAdjustment.effective_start <= on,
+                    or_(
+                        ContractAdjustment.effective_end.is_(None),
+                        ContractAdjustment.effective_end >= on,
+                    ),
+                    or_(
+                        ContractAdjustment.port_code.is_(None),
+                        ContractAdjustment.port_code == port.code,
+                    ),
+                )
+            )
+            .scalars()
+            .all()
+        )
+
+        mapping: Dict[str, Tuple[Decimal, Optional[Decimal]]] = {}
+        for row in rows:
+            multiplier = row.multiplier or Decimal("1")
+            mapping[row.fee_code] = (multiplier, row.offset)
+
+        self._contract_adj_cache[cache_key] = mapping
+        return mapping
 
     # ------------- Back-compat: simple API -------------
 
@@ -469,9 +513,15 @@ class FeeEngine:
                 )
             )
         elif ctx.net_tonnage:
-            per_ton = self.TONNAGE_RATES[VesselType.GENERAL_CARGO]
+            vt_cfg = self._get_vessel_type_config("general_cargo")
+            if vt_cfg and vt_cfg.tonnage_rate is not None:
+                per_ton = _money(vt_cfg.tonnage_rate)
+            else:
+                per_ton = self.TONNAGE_RATES[VesselType.GENERAL_CARGO]
             base = _money(Decimal(ctx.net_tonnage) * per_ton)
-            remaining = max(Decimal("0.00"), Decimal("19100.00") - _money(ctx.tonnage_year_paid))
+            remaining = max(
+                Decimal("0.00"), Decimal("19100.00") - _money(ctx.tonnage_year_paid)
+            )
             amt = _money(min(base, remaining))
             items.append(
                 LineItem(
@@ -558,6 +608,33 @@ class FeeEngine:
             voyage, include_legacy=self.show_legacy_optional
         )
         calcs.extend(optional_calcs)
+
+        # Apply contract adjustments before computing totals
+        if self.contract_profile:
+            adj_map = self._get_contract_adjustments(
+                self.contract_profile, port, voyage.eta.date()
+            )
+            if adj_map:
+                for calc in calcs:
+                    adj = adj_map.get(calc.code)
+                    if not adj:
+                        continue
+                    mult, offset = adj
+                    if mult is not None and mult != Decimal("1"):
+                        existing = calc.multipliers.get("contract", Decimal("1"))
+                        calc.multipliers["contract"] = _money(existing * mult)
+                        calc.final_amount = _money(calc.final_amount * mult)
+                    if offset:
+                        calc.final_amount = _money(calc.final_amount + offset)
+                    if (mult is not None and mult != Decimal("1")) or offset:
+                        tag = []
+                        if mult is not None and mult != Decimal("1"):
+                            tag.append(f"x{mult}")
+                        if offset:
+                            tag.append(f"+{offset}")
+                        detail = "[contract " + " ".join(tag) + "]"
+                        calc.calculation_details = (calc.calculation_details or "").rstrip()
+                        calc.calculation_details = (calc.calculation_details + " " + detail).strip()
 
         # Totals (recalculate from the filtered lists to ensure deprecated options stay excluded)
         mandatory_calcs = [c for c in calcs if not c.is_optional]
