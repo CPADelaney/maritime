@@ -82,6 +82,61 @@ class DocumentRequirement(BaseModel):
     description: Optional[str] = None
 
 
+# Basic static fallback rules for common U.S. arrival documents when
+# the structured port_documents table is not available.
+#
+# These are deliberately high-level and meant as planning aids, not a
+# full implementation of CBP/USCG requirements.
+def _static_fallback_documents(
+    port_code: str,
+    vessel_type: Optional[str],
+    previous_port: Optional[str],
+) -> List[DocumentRequirement]:
+    docs: List[DocumentRequirement] = []
+    prev = (previous_port or "").strip().upper()
+    is_foreign = bool(prev) and not prev.startswith("US")
+
+    if not is_foreign:
+        return docs
+
+    # Customs declaration for foreign arrivals.
+    docs.append(
+        DocumentRequirement(
+            document_name="Customs Declaration for Foreign Arrival",
+            document_code="CBP-1300",
+            is_mandatory=True,
+            lead_time_hours=24,
+            authority="CBP",
+            description="Standard customs declaration for arrivals from foreign ports.",
+        )
+    )
+
+    # Notice of Arrival/Departure (NOA/NOAD) – typical 96-hour window for foreign voyages.
+    docs.append(
+        DocumentRequirement(
+            document_name="Notice of Arrival/Departure (NOA/NOAD)",
+            document_code="NOA/NOAD",
+            is_mandatory=True,
+            lead_time_hours=96,
+            authority="USCG",
+            description="Advance notice of arrival/departure; commonly 96 hours for foreign voyages.",
+        )
+    )
+
+    # Ballast water management/reporting – broadly required for seagoing vessels.
+    docs.append(
+        DocumentRequirement(
+            document_name="Ballast Water Management Report",
+            document_code="BWMR",
+            is_mandatory=True,
+            lead_time_hours=24,
+            authority="USCG",
+            description="Ballast water management/reporting in accordance with U.S. regulations.",
+        )
+    )
+
+    return docs
+
 class PortSequenceRequest(BaseModel):
     vessel_name: str
     ports: List[str] = Field(..., example=["CNSHA", "USOAK", "USSEA", "USLAX"])
@@ -527,19 +582,9 @@ def _document_requirements_core(
     """
     docs: List[DocumentRequirement] = []
     if not _use_port_documents(db):
-        # If table missing, just add the foreign-arrival rule when applicable
-        if previous_port and not previous_port.strip().upper().startswith("US"):
-            docs.append(
-                DocumentRequirement(
-                    document_name="Customs Declaration for Foreign Arrival",
-                    document_code="CBP-1300",
-                    is_mandatory=True,
-                    lead_time_hours=24,
-                    authority="CBP",
-                    description="Required for all arrivals from foreign ports.",
-                )
-            )
-        return docs
+        # If the structured port_documents table is missing, fall back to a
+        # small set of common U.S. arrival docs derived from public guidance.
+        return _static_fallback_documents(port_code_input, vessel_type, previous_port)
 
     port_code = (port_code_input or "").strip().upper()
     vt = (vessel_type or "").strip().lower() or None
