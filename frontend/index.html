@@ -280,7 +280,7 @@
             </div>
 
             <!-- Itinerary controls (single place to manage multi-port route) -->
-            <div x-show="useV2" x-cloak class="mt-3 flex items-center justify-between text-xs text-slate-500">
+            <div class="mt-3 flex items-center justify-between text-xs text-slate-500">
               <div class="flex flex-wrap gap-1 items-center">
                 <span class="font-semibold text-slate-600">Itinerary:</span>
 
@@ -347,11 +347,6 @@
                 <div class="text-slate-300">→</div>
                 
                 <div class="w-16 h-9 flex items-center justify-center bg-white border border-slate-300 rounded-md text-xs font-bold text-ocean-600 shadow-sm">
-                  @-- Effective arrival code:
-                       1) selectedPort (internal code used by estimator)
-                       2) portCode from context
-                       3) zoneCode from context
-                  --
                   <span x-text="selectedPort || selectedPortContext?.portCode || selectedPortContext?.zoneCode || 'ARR'"></span>
                 </div>
                 
@@ -634,91 +629,6 @@
 
                     <div class="mt-6 text-center">
                         <p class="text-xs text-slate-400" x-text="estimateV2?.disclaimer"></p>
-                    </div>
-
-                    <!-- Voyage Itinerary (Multi-Port) -->
-                    <div
-                      x-show="mpResult && mpResult.legs && mpResult.legs.length"
-                      class="mt-8 pt-5 border-t border-dashed border-slate-200 space-y-4"
-                    >
-                      <div class="flex items-center justify-between gap-3">
-                        <div>
-                          <div class="text-xs font-bold uppercase tracking-wider text-slate-500">
-                            Voyage Itinerary
-                          </div>
-                          <div class="text-[11px] text-slate-400 mt-0.5" x-show="mpResult?.voyage_summary">
-                            <span x-text="mpResult.voyage_summary.start_date"></span>
-                            <span>→</span>
-                            <span x-text="mpResult.voyage_summary.end_date"></span>
-                            <span class="hidden sm:inline"> · </span>
-                            <span class="hidden sm:inline" x-text="(mpResult.voyage_summary.total_legs || 0) + ' legs'"></span>
-                          </div>
-                        </div>
-                        <div class="text-right text-[11px] text-slate-500">
-                          <div class="font-semibold text-slate-700"
-                               x-text="mpResult?.vessel_name || selectedVessel?.VesselName || 'Vessel'"></div>
-                          <div x-text="'Type: ' + (vesselType || 'general_cargo')"></div>
-                        </div>
-                      </div>
-
-                      <div class="border border-slate-200 rounded-lg overflow-hidden">
-                        <table class="min-w-full divide-y divide-slate-200">
-                          <thead class="bg-slate-50">
-                            <tr>
-                              <th class="px-4 sm:px-6 py-2.5 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">Leg</th>
-                              <th class="px-4 sm:px-6 py-2.5 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">Route</th>
-                              <th class="px-4 sm:px-6 py-2.5 text-left text-[11px] font-bold text-slate-500 uppercase tracking-wider">ETA</th>
-                              <th class="px-4 sm:px-6 py-2.5 text-right text-[11px] font-bold text-slate-500 uppercase tracking-wider">Mandatory</th>
-                              <th class="px-4 sm:px-6 py-2.5 text-right text-[11px] font-bold text-slate-500 uppercase tracking-wider">With Optional</th>
-                              <th class="px-4 sm:px-6 py-2.5 text-right text-[11px] font-bold text-slate-500 uppercase tracking-wider">Flags</th>
-                            </tr>
-                          </thead>
-                          <tbody class="bg-white divide-y divide-slate-100">
-                            <template x-for="leg in (mpResult?.legs || [])" :key="leg.leg">
-                              <tr class="hover:bg-slate-50/60">
-                                <td class="px-4 sm:px-6 py-2.5 text-xs text-slate-500" x-text="'Leg ' + leg.leg"></td>
-                                <td class="px-4 sm:px-6 py-2.5 text-sm font-medium text-slate-800"
-                                    x-text="`${leg.from_port} → ${leg.to_port}`"></td>
-                                <td class="px-4 sm:px-6 py-2.5 text-xs text-slate-500"
-                                    x-text="(leg.eta || '').split('T')[0]"></td>
-                                <td class="px-4 sm:px-6 py-2.5 text-right text-xs font-mono text-slate-700"
-                                    x-text="formatCurrency(leg.fees?.mandatory || 0)"></td>
-                                <td class="px-4 sm:px-6 py-2.5 text-right text-xs font-mono text-ocean-700 font-semibold"
-                                    x-text="formatCurrency((Number(leg.fees?.mandatory||0) + Number(leg.fees?.optional_high||0)) || 0)"></td>
-                                <td class="px-4 sm:px-6 py-2.5 text-right text-[11px] text-slate-500">
-                                  <span x-text="leg.arrival_type === 'COASTWISE' ? 'Coastwise' : 'Foreign'"></span>
-                                  <span x-show="leg.weekend_arrival" class="ml-1 text-amber-600">· Wknd</span>
-                                  <span x-show="leg.documents_required"
-                                        class="ml-1 text-slate-400"
-                                        x-text="`· Docs: ${leg.documents_required}`"></span>
-                                </td>
-                              </tr>
-                            </template>
-                          </tbody>
-                        </table>
-                      </div>
-
-                      <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-xs mt-2">
-                        <div class="text-slate-500" x-show="mpResult?.total_voyage_cost">
-                          <div>
-                            <span class="font-semibold text-slate-700">Voyage mandatory total:</span>
-                            <span class="font-mono" x-text="formatCurrency(mpResult.total_voyage_cost.mandatory || 0)"></span>
-                          </div>
-                          <div class="mt-0.5 text-slate-500">
-                            <span>With optional:</span>
-                            <span class="font-mono" x-text="formatCurrency(mpResult.total_voyage_cost.with_optional || 0)"></span>
-                          </div>
-                        </div>
-
-                        <div x-show="mpResult?.optimization_suggestions?.length" class="text-slate-500 max-w-md">
-                          <div class="font-semibold text-slate-700 mb-1">Optimization notes</div>
-                          <ul class="list-disc pl-4 space-y-0.5">
-                            <template x-for="(s, idx) in mpResult.optimization_suggestions" :key="idx">
-                              <li x-text="s"></li>
-                            </template>
-                          </ul>
-                        </div>
-                      </div>
                     </div>
                 </div>
                 
@@ -1795,7 +1705,6 @@
 
         saveEstimateToHistory(estimate, requestBody) {
           if (!estimate || !this.selectedPort) return;
-
           const req = requestBody || {};
 
           // Try very hard to get a real vessel name
@@ -1830,9 +1739,7 @@
 
         applyEstimateHistory(entry) {
           if (!entry) return;
-          this.useV2 = true; // harmless even if you killed the toggle
           this.historyDropdownOpen = false;
-
           const req = entry.request || {};
 
           // restore vessel info for UX clarity
@@ -1948,7 +1855,7 @@
           await this.checkHealth();
           if (this.selectedPort && this.eta) {
             await this.getEstimateV2();
-            await this.fetchPortInsights(this.selectedPort); await this.loadWeatherSnapshot();
+            await this.fetchPortInsights(this.selectedPort);
           }
         },
   
