@@ -580,7 +580,7 @@
                         <p class="text-xs text-slate-400 mt-2">Baseline port costs</p>
                     </div>
                     <div class="bg-white border border-slate-200 rounded-xl p-5">
-                        <p class="text-xs font-bold text-ocean-600 uppercase tracking-wider mb-1">Total (High Estimate)</p>
+                        <p class="text-xs font-bold text-ocean-600 uppercase tracking-wider mb-1">Best case (with optional)</p>
                         <p class="text-3xl font-bold text-slate-900 tracking-tight" x-text="formatCurrency(profileTotals().total_high)"></p>
                         <p class="text-xs text-slate-500 mt-2">Includes optional services & contingencies</p>
                     </div>
@@ -1699,7 +1699,7 @@
           }
           const t = this.estimateV2?.totals || {};
           rows.push(['', 'TOTAL MANDATORY', t.mandatory ?? '', '', '', '', '']);
-          rows.push(['', 'TOTAL HIGH', t.total_high ?? '', '', '', '', '']);
+          rows.push(['', 'TOTAL BEST CASE', t.total_high ?? '', '', '', '', '']);
           const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
           const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
           const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v2_${this.selectedPort}_${this.eta}.csv`; a.click();
