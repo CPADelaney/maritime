@@ -894,7 +894,25 @@ async def calculate_multi_port_voyage(
         weekend_arrival = eta.weekday() >= 5  # Sat/Sun
         docs = _document_requirements_core(db, arrival_port_raw, vessel.vessel_type, prev_port)
 
-        fees_totals = leg_estimate.get("totals", {})
+        fees_totals = leg_estimate.get("totals", {}) or {}
+
+        # Slimmed per-fee breakdown for this leg
+        fee_breakdown = []
+        for c in leg_estimate.get("calculations", []) or []:
+            try:
+                fee_breakdown.append(
+                    {
+                        "code": c.get("code"),
+                        "name": c.get("name"),
+                        "final_amount": str(_dec(c.get("final_amount", "0"))),
+                        "base_amount": str(_dec(c.get("base_amount", "0"))),
+                        "is_optional": bool(c.get("is_optional")),
+                    }
+                )
+            except Exception:
+                # If anything is weird, don't blow up the whole leg
+                continue
+
         voyage_legs.append(
             {
                 "leg": i + 1,
@@ -909,6 +927,14 @@ async def calculate_multi_port_voyage(
                     "optional_low": str(_dec(fees_totals.get("optional_low", "0"))),
                     "optional_high": str(_dec(fees_totals.get("optional_high", "0"))),
                 },
+                "totals": {
+                    "mandatory": str(_dec(fees_totals.get("mandatory", "0"))),
+                    "optional_low": str(_dec(fees_totals.get("optional_low", "0"))),
+                    "optional_high": str(_dec(fees_totals.get("optional_high", "0"))),
+                    "total_low": str(_dec(fees_totals.get("total_low", "0"))),
+                    "total_high": str(_dec(fees_totals.get("total_high", "0"))),
+                },
+                "fee_breakdown": fee_breakdown,
                 "arrival_type": arr_type,
                 "weekend_arrival": weekend_arrival,
                 "documents_required": len(docs),
