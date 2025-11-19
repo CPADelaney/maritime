@@ -279,6 +279,50 @@
               </div>
             </div>
 
+            <!-- Itinerary controls (single place to manage multi-port route) -->
+            <div x-show="useV2" x-cloak class="mt-3 flex items-center justify-between text-xs text-slate-500">
+              <div class="flex flex-wrap gap-1 items-center">
+                <span class="font-semibold text-slate-600">Itinerary:</span>
+
+                <template x-if="!mpPorts.length">
+                  <span class="text-slate-400">No ports added yet</span>
+                </template>
+
+                <template x-for="(p, i) in mpPorts" :key="p.zoneCode + '-' + (p.portCode || '')">
+                  <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-slate-200 bg-slate-50 text-[11px]">
+                    <span x-text="p.zoneCode"></span>
+                    <button
+                      type="button"
+                      class="text-slate-400 hover:text-red-500"
+                      @click="removeMpPort(i)"
+                    >
+                      ×
+                    </button>
+                  </span>
+                </template>
+              </div>
+
+              <div class="flex items-center gap-2">
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-md border border-ocean-200 text-[11px] font-semibold text-ocean-700 hover:bg-ocean-50 disabled:opacity-40"
+                  @click="addMpPortFromCurrent()"
+                  :disabled="!selectedPortContext"
+                >
+                  Add current port
+                </button>
+
+                <button
+                  type="button"
+                  class="px-2.5 py-1 rounded-md border border-slate-200 bg-white text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                  @click="submitMultiPort()"
+                  :disabled="mpPorts.length < 2 || estimateLoading"
+                >
+                  Estimate voyage
+                </button>
+              </div>
+            </div>
+
             <!-- Route -->
             <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
               <label class="label-text mb-2">Voyage Route (UN/LOCODE)</label>
@@ -366,75 +410,6 @@
               </div>
             </div>
 
-            <!-- Itinerary Builder (V2 only) -->
-            <div x-show="useV2" class="mt-4 border-t border-slate-100 pt-4 space-y-3">
-              <div class="flex items-center justify-between">
-                <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide">
-                  Voyage Itinerary
-                </div>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    @click="addCurrentPortToItinerary"
-                    :disabled="!selectedPort"
-                    class="px-3 py-1.5 rounded-md bg-ocean-600 text-white text-xs font-semibold shadow-sm hover:bg-ocean-700 disabled:bg-slate-300 disabled:cursor-not-allowed">
-                    + Add arrival port
-                  </button>
-                  <button
-                    type="button"
-                    @click="clearItinerary"
-                    :disabled="!mpPorts.length"
-                    class="px-2.5 py-1.5 rounded-md border border-slate-200 text-xs text-slate-500 hover:bg-slate-100 disabled:opacity-40">
-                    Clear
-                  </button>
-                </div>
-              </div>
-
-              <div class="bg-slate-50 rounded-lg p-2 min-height-[72px] space-y-2">
-                <template x-for="(item, i) in mpPorts" :key="i">
-                  <div class="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-sm text-sm">
-                    <div class="flex items-center gap-2">
-                      <span
-                        class="w-5 h-5 rounded-full bg-ocean-100 text-ocean-700 flex items-center justify-center text-xs font-bold"
-                        x-text="i + 1">
-                      </span>
-                      <span class="font-medium text-slate-700"
-                            x-text="item.label || item.portCode || item.zoneCode">
-                      </span>
-                    </div>
-                    <button
-                      type="button"
-                      @click="removeMpPort(i)"
-                      class="text-slate-400 hover:text-red-500 text-base leading-none">
-                      ×
-                    </button>
-                  </div>
-                </template>
-
-                <div x-show="mpPorts.length === 0" class="text-center text-xs text-slate-400 py-3">
-                  No ports in itinerary yet. Select an arrival port and click “Add arrival port”.
-                </div>
-              </div>
-
-              <button
-                type="button"
-                @click="submitMultiPort"
-                :disabled="mpPorts.length < 2 || estimateLoading"
-                class="w-full mt-2 bg-white border border-ocean-200 text-ocean-700 hover:bg-ocean-50 font-semibold py-2 rounded-lg text-sm disabled:opacity-40 flex items-center justify-center gap-2">
-                <template x-if="!estimateLoading">
-                  <span>Calculate Itinerary</span>
-                </template>
-                <template x-if="estimateLoading">
-                  <span class="flex items-center gap-2">
-                    <svg class="animate-spin h-4 w-4 text-ocean-600" viewBox="0 0 24 24" fill="none">
-                      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"></path>
-                    </svg>
-                    <span>Calculating…</span>
-                  </span>
-                </template>
-              </button>
-            </div>
           </div>
 
           <!-- Tab: Specs -->
@@ -882,6 +857,16 @@
         },
 
         buildPortCaches(zones) {
+          const allowedStates = new Set(['CA', 'OR', 'WA', 'AK', 'HI']);
+          const isWestCoastZone = (zone) => {
+            const state = String(zone?.primary_state || '').trim().toUpperCase();
+            const region = String(zone?.region || '').toLowerCase();
+            const country = String(zone?.country || '').trim().toUpperCase();
+            if (region.includes('west')) return true;
+            if (country === 'US' && allowedStates.has(state)) return true;
+            return false;
+          };
+
           const tokenize = (...values) => {
             const tokens = new Set();
             const push = (value) => {
@@ -893,7 +878,8 @@
             return Array.from(tokens).join(' ');
           };
 
-          this.zones = zones;
+          const filteredZones = zones.filter(isWestCoastZone);
+          this.zones = filteredZones;
           this.zoneLookup = {};
           this.portLookup = {};
           this.terminalLookup = {};
@@ -903,7 +889,7 @@
 
           const index = [];
 
-          for (const zone of zones) {
+          for (const zone of filteredZones) {
             const zoneCode = String(zone?.zone_code || '').trim().toUpperCase();
             const zoneName = zone?.zone_name || zoneCode || 'Unknown Zone';
             this.zoneLookup[zoneCode] = zone;
@@ -1172,27 +1158,39 @@
           } catch (e) { console.error('afterPortSelection failed:', e); }
         },
 
+        resetWeather() {
+          // Just clear weather/tide; keep liveData (alerts/docs) intact
+          this.weatherSnapshot = null;
+          this.weatherError = null;
+          this.weatherLoading = false;
+        },
+
         syncPortQueryWithSelection() {
           if (!this.selectedPort) {
             this.selectedPortContext = null;
             this.portQuery = '';
+            this.resetWeather();
             return;
           }
-          
+
           const code = this.selectedPort;
-          
-          if (!this.selectedPortContext || (this.selectedPortContext.portCode !== code && this.selectedPortContext.zoneCode !== code)) {
-            // Try to find a port match first, then zone match
-            const fallback = this.portSearchIndex.find((entry) => entry.portCode === code && entry.type === 'port') || 
-                             this.portSearchIndex.find((entry) => entry.zoneCode === code && entry.type === 'zone');
+
+          if (
+            !this.selectedPortContext ||
+            (this.selectedPortContext.portCode !== code && this.selectedPortContext.zoneCode !== code)
+          ) {
+            const fallback =
+              this.portSearchIndex.find(e => e.portCode === code && e.type === 'port') ||
+              this.portSearchIndex.find(e => e.zoneCode === code && e.type === 'zone');
             this.selectedPortContext = this.makeSelectionContext(fallback ?? null);
           }
-          
+
           if (this.selectedPortContext) {
             this.portQuery = this.selectedPortContext.label;
             this.afterPortSelection();
           } else {
             this.portQuery = this.zoneLabels[code] || code;
+            this.resetWeather();
           }
         },
 
@@ -1223,6 +1221,8 @@
 
           this.selectedPortDetails = null;
           this.selectedPortHolidays = [];
+          this.mpPorts = [];
+          this.mpResult = null;
           this.liveData = null;
         },
 
@@ -1745,18 +1745,8 @@
 
           const req = entry.request || {};
 
-          // Restore vessel search text if it's not a useless placeholder
-          if (entry.vesselName && entry.vesselName !== 'Unknown Vessel') {
-            this.vesselQuery = entry.vesselName;
-
-            // Give the UI something to show in the vessel card
-            if (!this.selectedVessel || !this.selectedVessel.VesselName) {
-              this.selectedVessel = {
-                ...(this.selectedVessel || {}),
-                VesselName: entry.vesselName,
-              };
-            }
-          }
+          // restore vessel info for UX clarity
+          this.vesselQuery = entry.vesselName || req.vessel_name || '';
 
           this.previousPortCode = req.previous_port_code || '';
           this.nextPortCode = req.next_port_code || '';
@@ -1773,7 +1763,6 @@
 
           if (this.selectedPort) {
             this.fetchPortInsights(this.selectedPort);
-            this.loadWeatherSnapshot();
           }
         },
 
@@ -1801,51 +1790,18 @@
         printEstimate() { window.print(); },
 
         // Multi-port methods
-        addCurrentPortToItinerary() {
-          if (!this.selectedPort && !this.selectedPortContext) {
-            alert('Select an arrival port before adding to the itinerary.');
-            return;
-          }
+        // addMpPortFromCurrent is now the single source of truth for adding to mpPorts
+        addMpPortFromCurrent() {
+          const ctx = this.selectedPortContext;
+          if (!ctx) return;
 
-          // Resolve to a context object similar to what searchPorts produces
-          let ctx = this.selectedPortContext;
-          if (!ctx && this.selectedPort) {
-            const code = this.selectedPort.toUpperCase();
-            const entry =
-              this.portSearchIndex.find(e => e.portCode === code) ||
-              this.portSearchIndex.find(e => e.zoneCode === code);
-            if (entry) {
-              ctx = this.makeSelectionContext(entry);
-            } else {
-              // Fallback to a minimal context so at least the code is captured
-              ctx = { zoneCode: code, portCode: code, label: code };
-            }
-          }
+          const code = ctx.zoneCode;
+          if (!code) return;
 
-          if (!ctx) {
-            alert('Could not resolve the selected arrival port.');
-            return;
-          }
+          // avoid duplicates by zone
+          if (this.mpPorts.some(p => p.zoneCode === code)) return;
 
-          // Avoid pushing duplicates back-to-back
-          if (this.mpPorts.length) {
-            const last = this.mpPorts[this.mpPorts.length - 1];
-            const lastCode = (last.portCode || last.zoneCode || '').toUpperCase();
-            const nextCode = (ctx.portCode || ctx.zoneCode || '').toUpperCase();
-            if (lastCode && nextCode && lastCode === nextCode) {
-              return;
-            }
-          }
-
-          this.mpPorts.push({
-            zoneCode: ctx.zoneCode,
-            zoneName: ctx.zoneName,
-            portCode: ctx.portCode,
-            portName: ctx.portName,
-            terminalCode: ctx.terminalCode,
-            terminalName: ctx.terminalName,
-            label: ctx.label,
-          });
+          this.mpPorts.push(ctx);
         },
 
         clearItinerary() {
