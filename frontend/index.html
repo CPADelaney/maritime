@@ -733,6 +733,23 @@
             </div>
         </div>
 
+        <!-- Port Documents -->
+        <div
+          x-show="portDocuments().length"
+          class="card p-4 no-print"
+        >
+          <h3 class="text-sm font-bold text-slate-800 mb-2">Required Documents</h3>
+          <ul class="text-xs text-slate-600 space-y-1">
+            <template x-for="doc in portDocuments()" :key="doc.document_code || doc.document_name || doc.name || doc.title || doc.code">
+              <li>
+                <span class="font-semibold" x-text="doc.document_name || doc.name || doc.title || doc.code || 'Document'"></span>
+                <span x-show="doc.authority || doc.note || doc.notes" class="ml-1 text-slate-400" x-text="'· ' + (doc.authority || doc.note || doc.notes)"></span>
+                <span x-show="doc.lead_time_hours || doc.lead_time || doc.leadTime" class="ml-1 text-slate-400" x-text="'· ' + (doc.lead_time_hours || doc.lead_time || doc.leadTime) + 'h prior'"></span>
+              </li>
+            </template>
+          </ul>
+        </div>
+
         <!-- Footer Actions -->
         <div class="flex justify-end gap-4 pt-4 border-t border-slate-200 no-print">
             <button @click="refreshAll" class="text-xs text-slate-500 hover:text-ocean-600">Refresh Data</button>
@@ -1154,6 +1171,20 @@
           const d = new Date(isoString);
           if (Number.isNaN(d.getTime())) return isoString;
           return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+        },
+
+        portDocuments() {
+          if (!this.selectedPortDetails) return [];
+          const candidates = [
+            this.selectedPortDetails.documents,
+            this.selectedPortDetails.document_requirements,
+            this.selectedPortDetails.documents_required,
+            this.selectedPortDetails.required_documents,
+          ];
+          for (const docs of candidates) {
+            if (Array.isArray(docs) && docs.length) return docs;
+          }
+          return [];
         },
 
         portResultTitle(entry) { return entry ? (entry.label || '') : ''; },
