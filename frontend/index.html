@@ -560,9 +560,39 @@
                             ></span>
                         </div>
                     </div>
-                    <div class="flex gap-2 no-print">
-                        <button @click="clientExport('csv')" class="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded hover:bg-slate-50">CSV</button>
-                        <button @click="printEstimate" class="px-3 py-1.5 text-xs font-medium text-white bg-slate-800 border border-slate-800 rounded hover:bg-slate-700">Print PDF</button>
+                    <div class="flex items-center gap-4 no-print">
+                        <div class="flex flex-col items-end gap-2">
+                            <div class="flex bg-white border border-slate-200 rounded-full text-xs overflow-hidden">
+                                <button
+                                  type="button"
+                                  @click="audienceProfile = 'agent'"
+                                  :class="audienceProfile === 'agent' ? 'bg-ocean-600 text-white' : 'text-slate-500 hover:bg-slate-50'"
+                                  class="px-3 py-1 font-medium">
+                                  Agent
+                                </button>
+                                <button
+                                  type="button"
+                                  @click="audienceProfile = 'owner'"
+                                  :class="audienceProfile === 'owner' ? 'bg-ocean-600 text-white' : 'text-slate-500 hover:bg-slate-50'"
+                                  class="px-3 py-1 font-medium">
+                                  Owner
+                                </button>
+                                <button
+                                  type="button"
+                                  @click="audienceProfile = 'full'"
+                                  :class="audienceProfile === 'full' ? 'bg-ocean-600 text-white' : 'text-slate-500 hover:bg-slate-50'"
+                                  class="px-3 py-1 font-medium">
+                                  Full
+                                </button>
+                            </div>
+                            <div class="text-[10px] text-slate-400 uppercase tracking-wide">
+                              View profile
+                            </div>
+                        </div>
+                        <div class="flex gap-2">
+                            <button @click="clientExport('csv')" class="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded hover:bg-slate-50">CSV</button>
+                            <button @click="printEstimate" class="px-3 py-1.5 text-xs font-medium text-white bg-slate-800 border border-slate-800 rounded hover:bg-slate-700">Print PDF</button>
+                        </div>
                     </div>
                 </div>
 
@@ -571,12 +601,12 @@
                     <div class="bg-slate-900 text-white rounded-xl p-5 shadow-lg relative overflow-hidden">
                         <div class="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-xl"></div>
                         <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Mandatory Fees</p>
-                        <p class="text-3xl font-bold tracking-tight" x-text="formatCurrency(estimateV2?.totals?.mandatory)"></p>
+                        <p class="text-3xl font-bold tracking-tight" x-text="formatCurrency(profileTotals().mandatory)"></p>
                         <p class="text-xs text-slate-400 mt-2">Baseline port costs</p>
                     </div>
                     <div class="bg-white border border-slate-200 rounded-xl p-5">
                         <p class="text-xs font-bold text-ocean-600 uppercase tracking-wider mb-1">Total (High Estimate)</p>
-                        <p class="text-3xl font-bold text-slate-900 tracking-tight" x-text="formatCurrency(estimateV2?.totals?.total_high)"></p>
+                        <p class="text-3xl font-bold text-slate-900 tracking-tight" x-text="formatCurrency(profileTotals().total_high)"></p>
                         <p class="text-xs text-slate-500 mt-2">Includes optional services & contingencies</p>
                     </div>
                 </div>
@@ -592,7 +622,7 @@
                                 </tr>
                             </thead>
                             <tbody class="bg-white divide-y divide-slate-200">
-                                <template x-for="c in (estimateV2?.calculations || [])" :key="c.code">
+                                <template x-for="c in filteredCalculations()" :key="c.code">
                                     <tr class="hover:bg-slate-50/50 transition-colors">
                                         <td class="px-6 py-3">
                                             <div class="flex items-center gap-2">
@@ -733,7 +763,8 @@
         activeTab: 'voyage',
         apiStatus: 'Checking…',
         cacheStats: '',
-  
+        audienceProfile: 'agent', // 'agent' | 'owner' | 'full'
+
         // search & paging
         vesselQuery: '',
         vesselSearched: false,
@@ -1025,6 +1056,83 @@
           const n = Number(value);
           if (!Number.isFinite(n)) return '$0.00';
           return n.toLocaleString(undefined, { style: 'currency', currency: 'USD', minimumFractionDigits: 2 });
+        },
+
+        isRegulatoryFee(c) {
+          const code = (c.code || '').toUpperCase();
+          return [
+            'CBP_USER_FEE',
+            'CBP_COMMERCIAL_VESSEL_ARRIVAL_FEE',
+            'APHIS_AQI',
+            'APHIS_COMMERCIAL_VESSEL',
+            'TONNAGE_TAX',
+            'TONNAGE_TAX_PER_TON',
+            'CA_MISP',
+            'CA_MISP_PER_VOYAGE',
+          ].includes(code);
+        },
+
+        isCorePortFee(c) {
+          const code = (c.code || '').toUpperCase();
+          return [
+            'PILOTAGE',
+            'MARINE_EXCHANGE',
+            'MX_VTS_PER_CALL',
+            'DOCKAGE',
+          ].includes(code);
+        },
+
+        isOperationalExtra(c) {
+          const code = (c.code || '').toUpperCase();
+          return [
+            'TOWAGE',
+            'TUGBOAT',
+            'LINE_HANDLING',
+            'LAUNCH_SERVICE',
+            'GARBAGE',
+            'FRESH_WATER',
+          ].includes(code);
+        },
+
+        filteredCalculations() {
+          const calcs = this.estimateV2?.calculations || [];
+          if (!calcs.length) return [];
+
+          if (this.audienceProfile === 'full') {
+            return calcs;
+          }
+
+          if (this.audienceProfile === 'agent') {
+            // Show regulatory + core port fees only
+            return calcs.filter((c) =>
+              this.isRegulatoryFee(c) || this.isCorePortFee(c)
+            );
+          }
+
+          if (this.audienceProfile === 'owner') {
+            // Show everything except the truly "grab bag" optional services
+            return calcs.filter((c) => !c.is_optional || !this.isOperationalExtra(c));
+          }
+
+          return calcs;
+        },
+
+        profileTotals() {
+          const calcs = this.filteredCalculations();
+          if (!calcs.length) return { mandatory: '0.00', total_high: '0.00' };
+
+          let sum = 0;
+          for (const c of calcs) {
+            const n = Number(c.final_amount);
+            if (Number.isFinite(n)) sum += n;
+          }
+          const base = sum;
+          // For now, profile total == sum of visible items.
+          // If you want low/high ranges later, you can get fancy.
+          return {
+            mandatory: base.toFixed(2),
+            total_high: base.toFixed(2),
+          };
         },
 
         potentialDemurrage() {
