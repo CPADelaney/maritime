@@ -12,6 +12,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from .dockage import DockageEngine
+from .tonnage_schedule import LOWER_RATE_PER_TON, LOWER_CAP_PER_TON_PER_YEAR
 from ..models import Fee, Port
 from .rates_loader import (
     MISSING_RATE_FIELD,
@@ -748,19 +749,32 @@ class FeeEngine:
                 calculation_details=details,
             )
 
-        # Fallback: vessel-type rate and federal cap $19,100
-        rate = self.TONNAGE_RATES.get(vessel.vessel_type, self.TONNAGE_RATES[VesselType.GENERAL_CARGO])
-        base = _money(vessel.net_tonnage * rate)
-        cap = _money("19100.00")
-        remaining = max(Decimal("0"), cap - _money(self.tonnage_year_paid))
-        final_amt = _money(min(base, remaining))
+        # Fallback: apply the statutory lower regular tonnage tax schedule
+        # (2¢/NT per entry, 10¢/NT per year) to derive a per-vessel annual cap.
+        # See 46 U.S.C. 60301 and 19 CFR 4.20 for the underlying structure.
+        if vessel.net_tonnage <= 0:
+            base = Decimal("0")
+            cap = Decimal("0")
+            final_amt = Decimal("0")
+            details = "Net tonnage missing; unable to compute statutory tonnage tax, treating as zero."
+        else:
+            rate = LOWER_RATE_PER_TON
+            base = _money(vessel.net_tonnage * rate)
+            cap_total = _money(vessel.net_tonnage * LOWER_CAP_PER_TON_PER_YEAR)
+            remaining = max(Decimal("0"), cap_total - _money(self.tonnage_year_paid))
+            final_amt = _money(min(base, remaining))
+            details = (
+                f"Net {vessel.net_tonnage} × ${rate}/NT, annual cap ${cap_total} "
+                f"(2¢/NT per entry, 10¢/NT per year), TY paid ${_money(self.tonnage_year_paid)}"
+            )
+
         return FeeCalculation(
             code="TONNAGE_TAX",
             name="Tonnage Tax",
             base_amount=base,
             final_amount=final_amt,
             confidence=Decimal("0.98"),
-            calculation_details=f"Net {vessel.net_tonnage} × ${rate}/NT, cap ${cap}, TY paid ${_money(self.tonnage_year_paid)}",
+            calculation_details=details,
         )
 
     def _calc_ca_misp(self, voyage: VoyageContext, port: Port) -> FeeCalculation:
@@ -1338,13 +1352,36 @@ class FeeEngine:
             )
         base = self.MX_FALLBACK.get(port.code, Decimal("250"))
         base = _money(base)
+        details = "Fallback fixed port fee"
+        try:
+            # Enrich with live MX provider/URL so users can verify against the tariff.
+            from ..connectors.live_sources import choose_region, mx_snapshot_for_region
+
+            region = choose_region(
+                getattr(port, "code", None),
+                getattr(port, "name", None),
+                getattr(port, "state", None),
+                getattr(port, "is_cascadia", None),
+            )
+            mx = mx_snapshot_for_region(region) or {}
+            primary = mx.get("primary") or {}
+            provider = primary.get("provider") or ""
+            url = primary.get("url") or ""
+            details = (
+                f"Approximate MX/VTS fee (no DB override). "
+                f"Region={region}, provider={provider or 'unknown'}, "
+                f"tariff_url={url or 'n/a'}"
+            )
+        except Exception:
+            logger.debug("MX live snapshot lookup failed; using static fallback", exc_info=True)
+
         return FeeCalculation(
             code="MARINE_EXCHANGE",
             name="Marine Exchange/VTS Services",
             base_amount=base,
             final_amount=base,
             confidence=Decimal("0.95"),
-            calculation_details="Fallback fixed port fee",
+            calculation_details=details,
         )
 
     def _optional_services(
