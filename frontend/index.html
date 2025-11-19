@@ -1050,14 +1050,24 @@
 
         isOperationalExtra(c) {
           const code = (c.code || '').toUpperCase();
-          return [
+          const operationalCodes = [
             'TOWAGE',
             'TUGBOAT',
             'LINE_HANDLING',
             'LAUNCH_SERVICE',
             'GARBAGE',
             'FRESH_WATER',
-          ].includes(code);
+          ];
+
+          if (operationalCodes.includes(code)) return true;
+
+          // Catch common variants so towage/line-handling style extras are consistently identified
+          return [
+            'TUG',
+            'TOW',
+            'LINEHANDLING',
+            'LAUNCH',
+          ].some((keyword) => code.includes(keyword));
         },
 
         filteredCalculations() {
@@ -1076,8 +1086,8 @@
           }
 
           if (this.audienceProfile === 'owner') {
-            // Show everything except the truly "grab bag" optional services
-            return calcs.filter((c) => !c.is_optional || !this.isOperationalExtra(c));
+            // Hide towage/line-handling style operational extras
+            return calcs.filter((c) => !this.isOperationalExtra(c));
           }
 
           return calcs;
