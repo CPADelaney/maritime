@@ -101,3 +101,47 @@ class PortDocument(Base):
     description: Mapped[Optional[str]] = mapped_column(Text)
     applies_to_vessel_types: Mapped[Optional[list[str]]] = mapped_column(ARRAY(String))
     applies_if_foreign: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class VesselTypeConfig(Base):
+    """
+    DB-backed configuration for vessel-type specific tuning:
+      - tonnage_rate: optional per-net-ton heuristic (used in legacy/simple paths)
+      - pilotage_multiplier: factor to adjust pilotage cost for this type
+      - typical_tug_count: typical tugs per move for this type
+    """
+
+    __tablename__ = "vessel_types"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    type_code: Mapped[str] = mapped_column(String, unique=True)
+    type_name: Mapped[str] = mapped_column(String)
+    tonnage_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
+    pilotage_multiplier: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), default=Decimal("1.0"))
+    typical_tug_count: Mapped[Optional[int]] = mapped_column(Integer, default=2)
+
+
+class PilotageRate(Base):
+    """
+    DB pilotage configuration per port and effective date.
+    Used as a structured fallback when the JSON registry is unavailable.
+    """
+
+    __tablename__ = "pilotage_rates"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    port_code: Mapped[str] = mapped_column(String(12))
+    effective_date: Mapped[datetime.date] = mapped_column(Date)
+
+    base_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
+    per_foot_rate: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
+    draft_multiplier: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4))
+
+    overtime_multiplier: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), default=Decimal("1.5"))
+    holiday_multiplier: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 4), default=Decimal("2.0"))
+
+    minimum_charge: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
+    maximum_charge: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
+
+    formula: Mapped[Optional[str]] = mapped_column(Text)
+    notes: Mapped[Optional[str]] = mapped_column(Text)
