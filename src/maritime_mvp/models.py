@@ -103,6 +103,26 @@ class PortDocument(Base):
     applies_if_foreign: Mapped[bool] = mapped_column(Boolean, default=False)
 
 
+class ContractAdjustment(Base):
+    """Per-profile fee adjustment layer."""
+
+    __tablename__ = "contract_adjustments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+
+    profile: Mapped[str] = mapped_column(String(64))
+    fee_code: Mapped[str] = mapped_column(String(64))
+    port_code: Mapped[Optional[str]] = mapped_column(String(12))
+
+    multiplier: Mapped[Decimal] = mapped_column(Numeric(8, 4), default=Decimal("1.0"))
+    offset: Mapped[Optional[Decimal]] = mapped_column(Numeric(12, 2))
+
+    effective_start: Mapped[datetime.date] = mapped_column(Date)
+    effective_end: Mapped[Optional[datetime.date]] = mapped_column(Date)
+
+    notes: Mapped[Optional[str]] = mapped_column(Text)
+
+
 class VesselTypeConfig(Base):
     """
     DB-backed configuration for vessel-type specific tuning:

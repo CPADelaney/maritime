@@ -1216,6 +1216,7 @@ def estimate_v2(
     days_alongside: int = Body(2, ge=1, embed=True),
     ytd_cbp_paid: Decimal = Body(Decimal("0"), ge=0, embed=True),
     tonnage_year_paid: Decimal = Body(Decimal("0"), ge=0, embed=True),
+    contract_profile: Optional[str] = Body(None, embed=True),
 ) -> Dict[str, Any]:
     """
     Comprehensive estimator using vessel specs + voyage context.
@@ -1243,6 +1244,7 @@ def estimate_v2(
         engine = FeeEngine(db)
         engine.ytd_cbp_paid = ytd_cbp_paid
         engine.tonnage_year_paid = tonnage_year_paid
+        engine.contract_profile = contract_profile or None
 
         vtype = VesselType(vessel_type)
         vessel = VesselSpecs(
