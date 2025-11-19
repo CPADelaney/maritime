@@ -4,6 +4,7 @@ import re
 import time
 import logging
 from dataclasses import dataclass, asdict
+from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple, List
 import httpx
 from lxml import html
@@ -410,6 +411,80 @@ def fetch_misp_snapshot() -> Dict[str, Any]:
         "possible_amounts_seen": list(dict.fromkeys(dollars))[:6],  # de-dupe & cap
         "effective_date": "2020-01-01"
     }
+
+# ---- APHIS AQI Commercial Vessel Fees --------------------------------------
+
+APHIS_FEES_URL = "https://www.aphis.usda.gov/aqi/fees"
+APHIS_COMM_VESSEL_URL = "https://www.aphis.usda.gov/aqi/commercial-vessel-fee"
+
+
+def _parse_money_first(text: str, pattern: str) -> Optional[Decimal]:
+    m = re.search(pattern, text, re.IGNORECASE | re.DOTALL)
+    if not m:
+        return None
+    # choose the first captured dollar string
+    for group in m.groups():
+        if not group:
+            continue
+        cleaned = "".join(ch for ch in group if (ch.isdigit() or ch == "."))
+        if cleaned:
+            try:
+                return Decimal(cleaned)
+            except Exception:
+                continue
+    return None
+
+
+def fetch_aphis_vessel_fees() -> Dict[str, Any]:
+    """
+    Fetch current APHIS AQI commercial vessel user fees from USDA public pages.
+
+    Returns:
+      {
+        "standard_fee": Decimal or None,  # Commercial Vessel
+        "cascadia_fee": Decimal or None, # Commercial Vessel - Great Lakes/Cascadia
+        "sources": [...],                # basic page metadata
+      }
+    """
+
+    ck = "aphis::vessel_fees"
+    cached = _get_cached(ck)
+    if cached is not None:
+        return cached
+
+    sources: List[Dict[str, Any]] = []
+
+    # 1) Standard commercial vessel fee (dedicated page)
+    std_val: Optional[Decimal] = None
+    try:
+        std_snap = fetch_html(APHIS_COMM_VESSEL_URL)
+        sources.append(std_snap)
+        txt = std_snap.get("text_sample", "") or ""
+        std_val = _parse_money_first(txt, r"current commercial vessel fee is\s*\$([\d,]+\.\d+)")
+    except Exception as e:
+        logger.warning(f"Failed to fetch APHIS commercial vessel fee page: {e}")
+
+    # 2) Great Lakes / Cascadia reduced fee from AQI fees table
+    cas_val: Optional[Decimal] = None
+    try:
+        tbl_snap = fetch_html(APHIS_FEES_URL)
+        sources.append(tbl_snap)
+        txt = tbl_snap.get("text_sample", "") or ""
+        # Row: "Commercial Vessel- Great Lakes/Cascadia ... $prev $current ..."
+        cas_val = _parse_money_first(
+            txt,
+            r"Commercial Vessel-?\s*Great Lakes/Cascadia.*?\$([\d,]+\.\d+)\s*\$([\d,]+\.\d+)"
+        )
+    except Exception as e:
+        logger.warning(f"Failed to fetch APHIS AQI fees table: {e}")
+
+    result = {
+        "standard_fee": std_val,
+        "cascadia_fee": cas_val,
+        "sources": sources,
+    }
+    _set_cached(ck, result, ttl_s=3600)  # 1 hour cache
+    return result
 
 # ---- COFR (Certificate of Financial Responsibility) -------------------------
 
