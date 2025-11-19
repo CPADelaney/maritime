@@ -82,6 +82,37 @@
         "transportation": 410,
         "harbor_security": 225
       }
+    },
+    {
+      "effective": "2025-10-01",
+      "bar": {
+        "base_fee": 3000,
+        "per_foot_rate": 10.26,
+        "draft_multiplier": 1.0,
+        "min_total": 3000,
+        "max_total": 99999
+      },
+      "bay": {
+        "per_foot_rate": 0,
+        "minimum": 2500
+      },
+      "river": {
+        "per_foot_rate": 0,
+        "minimum": 5000
+      },
+      "surcharges": {
+        "weekend_multiplier": 1.0,
+        "holiday_multiplier": 1.0,
+        "night_flat": 0
+      },
+      "extras": {
+        "mill_rate_per_grt": 0.09243,
+        "pension_mill_rate": 0.04468,
+        "pilot_boat_surcharge": 0.002,
+        "board_ops_percent": 0.065,
+        "continuing_ed_flat": 45,
+        "trainee_flat": 20
+      }
     }
   ],
   "PUGET": [
