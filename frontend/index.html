@@ -650,8 +650,8 @@
                         <tr>
                             <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Leg</th>
                             <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Route</th>
-                            <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Date</th>
-                            <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase">Est. Cost</th>
+                            <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">ETA</th>
+                            <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase">Costs</th>
                         </tr>
                     </thead>
                 <tbody class="bg-white divide-y divide-slate-100">
@@ -664,11 +664,14 @@
                       >
                         <td class="px-6 py-3 text-sm text-slate-500" x-text="leg.leg"></td>
                         <td class="px-6 py-3 text-sm font-medium text-slate-800" x-text="`${leg.from_port} → ${leg.to_port}`"></td>
-                        <td class="px-6 py-3 text-sm text-slate-500" x-text="leg.eta.split('T')[0]"></td>
-                        <td class="px-6 py-3 text-right text-sm font-mono font-bold text-ocean-600">
-                          <span x-text="formatCurrency(
-                            (Number(leg.fees?.mandatory || 0) + Number(leg.fees?.optional_high || 0))
-                          )"></span>
+                        <td class="px-6 py-3 text-sm text-slate-500" x-text="formatIsoDate(leg.eta)"></td>
+                        <td class="px-6 py-3 text-right text-sm text-slate-700">
+                          <div class="flex flex-col items-end gap-1">
+                            <div class="text-[11px] uppercase font-semibold text-slate-400">Mandatory</div>
+                            <div class="font-mono font-semibold text-slate-800" x-text="formatCurrency(leg.fees?.mandatory || 0)"></div>
+                            <div class="text-[11px] uppercase font-semibold text-slate-400">With optional</div>
+                            <div class="font-mono font-bold text-ocean-700" x-text="formatCurrency(Number(leg.fees?.mandatory || 0) + Number(leg.fees?.optional_high || 0))"></div>
+                          </div>
                         </td>
                       </tr>
 
@@ -727,9 +730,21 @@
                 </tbody>
                 </table>
             </div>
-            <div class="bg-slate-900 text-white p-4 flex justify-between items-center">
+            <div class="bg-slate-900 text-white p-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div class="flex items-center gap-3">
                 <span class="text-sm font-medium opacity-80">Total Voyage Cost</span>
-                <span class="text-2xl font-bold" x-text="`$${Number(mpResult?.total_voyage_cost?.mandatory || 0).toLocaleString()}`"></span>
+              </div>
+              <div class="flex flex-wrap gap-4 items-center justify-end">
+                <div class="text-right">
+                  <div class="text-[11px] uppercase font-semibold text-ocean-200">Mandatory</div>
+                  <div class="text-2xl font-bold" x-text="formatCurrency(mpResult?.total_voyage_cost?.mandatory || 0)"></div>
+                </div>
+                <div class="w-px h-10 bg-white/20"></div>
+                <div class="text-right">
+                  <div class="text-[11px] uppercase font-semibold text-ocean-200">With optional</div>
+                  <div class="text-2xl font-bold" x-text="formatCurrency(Number(mpResult?.total_voyage_cost?.mandatory || 0) + Number(mpResult?.total_voyage_cost?.optional_high || 0))"></div>
+                </div>
+              </div>
             </div>
         </div>
 
@@ -1147,6 +1162,19 @@
           const d = new Date(dateString);
           if (Number.isNaN(d.getTime())) return dateString;
           return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+        },
+
+        formatIsoDate(dateString) {
+          if (!dateString) return '';
+          if (typeof dateString === 'string' && dateString.includes('T')) {
+            return dateString.split('T')[0];
+          }
+
+          const d = new Date(dateString);
+          if (!Number.isNaN(d.getTime())) {
+            try { return d.toISOString().split('T')[0]; } catch (e) { /* ignore */ }
+          }
+          return dateString;
         },
 
         formatLocalTime(isoString) {
@@ -1860,6 +1888,7 @@
             const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request, vessel }) });
             if (!r.ok) throw new Error(await r.text());
             this.mpResult = await r.json();
+            this.mpExpandedLeg = null;
             this.saveMpHistory(this.mpPorts);
           } catch (e) { console.error('Multi-port failed:', e); alert('Failed to calculate multi-port voyage.'); }
         },
