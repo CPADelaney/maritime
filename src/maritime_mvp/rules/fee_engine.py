@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP
 from enum import Enum
-from typing import Optional, List, Dict, Tuple, Any, Iterable
+from typing import Optional, List, Dict, Tuple, Any, Iterable, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -747,14 +747,45 @@ class FeeEngine:
                 confidence=Decimal("1"),
                 calculation_details="DB configured MISP per voyage",
             )
-        base = _money(1000)
+
+        # Fallback: try to infer current fee from CA public sources via live snapshot
+        amount = Decimal("1000")
+        details = "Fallback fixed per voyage"
+        try:
+            # Lazy import to avoid hard dependency at module import time
+            from ..connectors.live_sources import fetch_misp_snapshot
+
+            snap = fetch_misp_snapshot()
+            candidates = cast(List[str], snap.get("possible_amounts_seen") or [])
+            parsed: Optional[Decimal] = None
+
+            for s in candidates:
+                cleaned = "".join(ch for ch in str(s) if (ch.isdigit() or ch == "."))
+                if cleaned:
+                    parsed = Decimal(cleaned)
+                    break
+
+            if parsed is None:
+                cf = snap.get("current_fee")
+                if cf:
+                    cleaned = "".join(ch for ch in str(cf) if (ch.isdigit() or ch == "."))
+                    if cleaned:
+                        parsed = Decimal(cleaned)
+
+            if parsed is not None:
+                amount = parsed
+                details = "Derived from CA MISP public sources"
+        except Exception:
+            logger.debug("MISP live snapshot lookup failed; using static fallback", exc_info=True)
+
+        base = _money(amount)
         return FeeCalculation(
             code="CA_MISP",
             name="California Marine Invasive Species Program",
             base_amount=base,
             final_amount=base,
             confidence=Decimal("1"),
-            calculation_details="Fallback fixed per voyage",
+            calculation_details=details,
         )
 
     def _calc_dockage(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
