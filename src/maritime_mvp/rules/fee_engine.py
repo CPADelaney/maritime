@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from .dockage import DockageEngine
 from .tonnage_schedule import LOWER_RATE_PER_TON, LOWER_CAP_PER_TON_PER_YEAR
-from ..models import Fee, Port
+from ..models import Fee, Port, VesselTypeConfig, PilotageRate
 from .rates_loader import (
     MISSING_RATE_FIELD,
     load_pilotage_rates,
@@ -246,6 +246,10 @@ class FeeEngine:
         # Rolling caps for comprehensive API; the simple API takes caps from ctx
         self.ytd_cbp_paid = Decimal("0.00")
         self.tonnage_year_paid = Decimal("0.00")
+        # Small in-memory caches so we don't hit the DB repeatedly for static config
+        self._vessel_type_cache: Dict[str, Optional[VesselTypeConfig]] = {}
+        # key: (port_code, date)
+        self._pilotage_rate_cache: Dict[Tuple[str, date], Optional[PilotageRate]] = {}
         # Legacy optional services (launch, garbage, fresh water) are hidden by default.
         self.show_legacy_optional = show_legacy_optional
 
@@ -304,6 +308,55 @@ class FeeEngine:
                 continue
             return f
         return None
+
+    # ------------- DB-backed config helpers -------------
+
+    def _get_vessel_type_config(self, vessel: VesselSpecs) -> Optional[VesselTypeConfig]:
+        """
+        Look up vessel-type configuration (tonnage_rate, pilotage_multiplier,
+        typical_tug_count) from vessel_types table based on vessel.vessel_type.
+        """
+
+        code = vessel.vessel_type.value
+        if code in self._vessel_type_cache:
+            return self._vessel_type_cache[code]
+
+        cfg = (
+            self.db.execute(
+                select(VesselTypeConfig).where(VesselTypeConfig.type_code == code)
+            )
+            .scalars()
+            .first()
+        )
+
+        self._vessel_type_cache[code] = cfg
+        return cfg
+
+    def _get_pilotage_rate_for_port(self, port: Port, on: date) -> Optional[PilotageRate]:
+        """
+        Return the most recent PilotageRate row for a given port and date, or None.
+        Used by the pilotage fallback when JSON registry isn't available.
+        """
+
+        key = (port.code, on)
+        if key in self._pilotage_rate_cache:
+            return self._pilotage_rate_cache[key]
+
+        row = (
+            self.db.execute(
+                select(PilotageRate)
+                .where(
+                    PilotageRate.port_code == port.code,
+                    PilotageRate.effective_date <= on,
+                )
+                .order_by(PilotageRate.effective_date.desc())
+            )
+            .scalars()
+            .first()
+        )
+
+        self._pilotage_rate_cache[key] = row
+        return row
 
     # ------------- Back-compat: simple API -------------
 
@@ -1198,14 +1251,30 @@ class FeeEngine:
     def _calc_pilotage_fallback(
         self, vessel: VesselSpecs, voyage: VoyageContext, port: Port
     ) -> FeeCalculation:
-        rates = self._LEGACY_PILOTAGE_PORT_RATES.get(
-            voyage.arrival_port_code,
-            {"base": 3500, "per_foot": 8.00, "draft_mult": 1.15},
-        )
-        base = _money(rates["base"])
-        loa_charge = _money(vessel.loa_feet * Decimal(str(rates["per_foot"])))
-        draft_mult = Decimal(str(rates["draft_mult"]))
-        base_amt = _money(base + (loa_charge * draft_mult))
+        on = voyage.eta.date()
+
+        # Prefer DB-configured pilotage_rates row for this port, if available
+        pr = self._get_pilotage_rate_for_port(port, on)
+        if pr:
+            base = _money(pr.base_rate or 0)
+            per_foot = Decimal(str(pr.per_foot_rate or 0))
+            draft_mult = Decimal(str(pr.draft_multiplier or 1))
+            loa_charge = _money(vessel.loa_feet * per_foot)
+            base_amt = _money(base + (loa_charge * draft_mult))
+            min_charge = _money(pr.minimum_charge) if pr.minimum_charge is not None else None
+            max_charge = _money(pr.maximum_charge) if pr.maximum_charge is not None else None
+        else:
+            # Fall back to legacy in-code approximations
+            rates = self._LEGACY_PILOTAGE_PORT_RATES.get(
+                voyage.arrival_port_code,
+                {"base": 3500, "per_foot": 8.00, "draft_mult": 1.15},
+            )
+            base = _money(rates["base"])
+            loa_charge = _money(vessel.loa_feet * Decimal(str(rates["per_foot"])))
+            draft_mult = Decimal(str(rates["draft_mult"]))
+            base_amt = _money(base + (loa_charge * draft_mult))
+            min_charge = _money(5000)
+            max_charge = _money(30000)
 
         is_holiday = self._is_us_holiday(voyage.eta.date(), getattr(port, "state", None))
 
@@ -1217,8 +1286,12 @@ class FeeEngine:
 
         final_mult = max(multipliers.values()) if multipliers else Decimal("1.0")
         final_amt = _money(base_amt * final_mult)
-        final_amt = max(final_amt, _money(5000))
-        final_amt = min(final_amt, _money(30000))
+
+        # Apply min/max from DB where available (or legacy defaults if not)
+        if min_charge is not None:
+            final_amt = max(final_amt, min_charge)
+        if max_charge is not None:
+            final_amt = min(final_amt, max_charge)
 
         return FeeCalculation(
             code="PILOTAGE",
@@ -1228,7 +1301,8 @@ class FeeEngine:
             final_amount=final_amt,
             confidence=Decimal("0.75"),
             calculation_details=(
-                f"Registry fallback – LOA {vessel.loa_feet:.0f}ft × ${rates['per_foot']}/ft"
+                "Registry fallback – using DB / legacy pilotage rates "
+                f"for {port.code} at LOA {vessel.loa_feet:.0f}ft"
             ),
             is_optional=False,
         )
@@ -1304,15 +1378,33 @@ class FeeEngine:
                 manual_entry=True,
             )
 
+        # Try to use vessel_types config for tug count if available
+        vt_cfg = self._get_vessel_type_config(vessel)
+        base_tugs: Optional[float] = None
+        if vt_cfg and vt_cfg.typical_tug_count is not None:
+            try:
+                base_tugs = float(vt_cfg.typical_tug_count)
+            except Exception:
+                base_tugs = None
+
+        if base_tugs is not None and base_tugs > 0:
+            tugs_per_move = base_tugs
+        else:
+            # Fallback to GT-based heuristic
+            if gt < 20000:
+                tugs_per_move = 1.5
+            elif gt < 60000:
+                tugs_per_move = 2.0
+            else:
+                tugs_per_move = 2.5
+
+        # Hourly rate remains GT-based; we can refine by type later if desired.
         if gt < 20000:
             hourly_rate = 1800.0
-            tugs_per_move = 1.5
         elif gt < 60000:
             hourly_rate = 2400.0
-            tugs_per_move = 2.0
         else:
             hourly_rate = 3200.0
-            tugs_per_move = 2.5
 
         moves = 2
         hours_per_tug_job = 2.5
@@ -1330,7 +1422,8 @@ class FeeEngine:
             final_amount=_money(total_cost),
             confidence=Decimal("0.75"),
             calculation_details=(
-                f"Est. {int(tugs_per_move)} tugs in/out @ ${int(hourly_rate)}/hr/tug "
+                f"Est. {int(tugs_per_move)} tugs in/out for {vessel.vessel_type.value} "
+                f"@ ${int(hourly_rate)}/hr/tug "
                 f"for {total_tug_hours:.1f} tug-hours + {int(fuel_surcharge_pct*100)}% FSC."
             ),
             is_optional=False,
