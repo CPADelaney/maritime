@@ -172,13 +172,13 @@
       </div>
     </header>
 
-    <div class="grid lg:grid-cols-3 gap-6">
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
       
       <!-- LEFT COLUMN: Controls -->
       <div class="space-y-6 sidebar print-hidden">
 
         <!-- 1. Vessel Search -->
-        <div class="glass card p-5 animate-slide-up inputs">
+        <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up inputs">
           <div class="flex items-center justify-between mb-4">
             <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
               <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
@@ -241,7 +241,7 @@
         </div>
 
         <!-- 2. Selected Vessel Card -->
-        <div x-show="selectedVessel" class="glass card p-5 animate-slide-up border-l-4 border-l-indigo-500 inputs">
+        <div x-show="selectedVessel" class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up border-l-4 border-l-indigo-500 inputs">
           <div class="flex justify-between items-start mb-3">
             <h3 class="font-bold text-slate-800 text-lg" x-text="selectedVessel ? (selectedVessel.VesselName || 'Unknown') : ''"></h3>
             <div class="text-xs font-mono bg-slate-100 px-2 py-1 rounded text-slate-500" x-text="selectedVessel ? (selectedVessel.CallSign || '---') : ''"></div>
@@ -277,7 +277,7 @@
         </div>
 
         <!-- 3. Voyage Calculator (Tabbed) -->
-        <div class="glass card p-5 animate-slide-up inputs" style="animation-delay: 0.1s;">
+        <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up inputs" style="animation-delay: 0.1s;">
             
             <!-- Header & Toggle -->
             <div class="flex items-center justify-between mb-4">
@@ -525,7 +525,7 @@
         </div>
 
         <!-- 4. Multi-Port Planner (Controls) -->
-        <div class="glass card p-6 animate-slide-up multi-port-card print-hidden">
+        <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up multi-port-card print-hidden">
           <div class="flex items-center justify-between mb-4">
             <h3 class="text-lg font-bold text-slate-800">Multi-Port Planner Tool</h3>
             <span class="badge bg-indigo-50 text-indigo-600">Beta</span>
@@ -614,7 +614,7 @@
         </div>
 
         <!-- Weather & Tide Snapshot -->
-        <div x-show="weatherSnapshot || selectedPortHolidays.length" class="glass card p-5 animate-slide-up print-hidden" style="animation-delay:0.05s;">
+        <div x-show="weatherSnapshot || selectedPortHolidays.length" class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up print-hidden" style="animation-delay:0.05s;">
           <div class="flex flex-col gap-4">
             <div x-show="weatherSnapshot" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
               <div>
@@ -659,7 +659,7 @@
 
         <!-- 3. Estimate Results V2 (Modern) -->
         <template x-if="!!estimateV2">
-          <div class="glass card p-6 animate-slide-up results-card">
+          <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up results-card">
             <div class="print-header">
                 <div>
                     <div class="text-lg font-bold text-slate-900">Maritime MVP</div>
@@ -770,7 +770,7 @@
 
         <!-- 4. Estimate Results V1 (Legacy) -->
         <template x-if="estimate && !estimateV2">
-          <div class="glass card p-6 animate-slide-up results-card">
+          <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up results-card">
              <div class="print-header">
                 <div>
                     <div class="text-lg font-bold text-slate-900">Maritime MVP</div>
@@ -860,7 +860,7 @@
         </template>
 
         <!-- 5. Multi-Port Results -->
-        <div x-show="mpResult" class="glass card p-6 animate-slide-up results-card">
+        <div x-show="mpResult" class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up results-card">
             <div class="flex items-center justify-between mb-4 print-hidden">
                 <h3 class="text-xl font-bold text-slate-800">Multi-Port Voyage Plan</h3>
                 <div class="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg font-bold">
