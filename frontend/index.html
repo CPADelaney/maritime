@@ -1,1000 +1,697 @@
-<!-- frontend/index.html -->
+html
 <!doctype html>
-<html lang="en">
+<html lang="en" class="antialiased">
 <head>
   <meta charset="utf-8" />
-  <title>Maritime MVP — Port Call Intelligence Platform</title>
+  <title>Maritime MVP — Port Call Intelligence</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
 
-  <!-- Fonts & Libraries -->
+  <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   
+  <!-- Libraries -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
-  <style>
-    /* Modern Reset & Texture */
-    body {
-      font-family: 'Inter', system-ui, -apple-system, sans-serif;
-      background-color: #f8fafc;
-      background-image: radial-gradient(#6366f1 0.5px, transparent 0.5px);
-      background-size: 24px 24px;
-      color: #1e293b;
+  <!-- Tailwind Config for Maritime Theme -->
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          fontFamily: {
+            sans: ['Inter', 'sans-serif'],
+            mono: ['JetBrains Mono', 'monospace'],
+          },
+          colors: {
+            ocean: {
+              50: '#f0f9ff',
+              100: '#e0f2fe',
+              500: '#0ea5e9',
+              600: '#0284c7',
+              800: '#075985',
+              900: '#0c4a6e',
+              950: '#082f49',
+            }
+          },
+          zIndex: {
+            '60': '60',
+            '70': '70',
+          }
+        }
+      }
     }
+  </script>
 
+  <style>
+    /* Custom Styles */
+    body { background-color: #f1f5f9; color: #0f172a; }
     [x-cloak] { display: none !important; }
 
-    /* Animations */
-    @keyframes slideUp { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-    .animate-slide-up { animation: slideUp 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards; }
+    /* Smooth Fade In */
+    .animate-enter { animation: enter 0.4s ease-out forwards; opacity: 0; transform: translateY(10px); }
+    @keyframes enter { to { opacity: 1; transform: translateY(0); } }
 
-    /* Glass Card */
-    .glass { background: rgba(255, 255, 255, 0.95); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); }
-    .card { 
-      border-radius: 16px; 
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
-      border: 1px solid rgba(255, 255, 255, 0.6);
+    /* Card Styling */
+    .card {
+      background: white;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.05);
+      transition: box-shadow 0.2s;
+      position: relative;
     }
+    .card:hover { box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05); }
 
     /* Inputs */
+    .label-text { font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.025em; color: #64748b; margin-bottom: 0.35rem; display: block; }
     .field {
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 0.6rem 0.85rem;
-      transition: all 0.2s ease;
-      font-size: 0.9rem;
       width: 100%;
+      background-color: #fff;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.875rem;
+      color: #1e293b;
+      transition: all 0.15s ease-in-out;
     }
     .field:focus {
       outline: none;
-      border-color: #6366f1;
-      box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.1);
-      background-color: #fff;
+      border-color: #0ea5e9;
+      box-shadow: 0 0 0 3px rgba(14, 165, 233, 0.15);
+      z-index: 10;
     }
-    .field:disabled { background-color: #f1f5f9; color: #94a3b8; }
+    .field:disabled { background-color: #f8fafc; color: #94a3b8; cursor: not-allowed; }
 
-    /* Buttons */
-    .btn { 
-      border-radius: 10px; 
-      font-weight: 600; 
-      transition: all 0.2s;
-      cursor: pointer;
-    }
-    .btn-primary {
-      background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
-      color: #fff;
-      box-shadow: 0 4px 12px rgba(79, 70, 229, 0.2);
-    }
-    .btn-primary:hover:not(:disabled) { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(79, 70, 229, 0.3); }
-    .btn-primary:active:not(:disabled) { transform: translateY(0); }
-    
-    .btn-soft { background: #eef2ff; color: #4338ca; }
-    .btn-soft:hover { background: #e0e7ff; }
-    
-    .btn-outline { border: 1px solid #e2e8f0; background: #fff; color: #475569; }
-    .btn-outline:hover { background: #f8fafc; border-color: #cbd5e1; }
-
-    /* Utilities */
-    .chip { border-radius: 6px; padding: 2px 6px; font-size: 11px; font-weight: 600; white-space: nowrap; }
-    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 8px; border-radius: 99px; font-size: 11px; font-weight: 600; background: #f1f5f9; color: #475569; }
-    .list-scroll { max-height: 240px; overflow-y: auto; }
-    
     /* Custom Scrollbar */
-    .list-scroll::-webkit-scrollbar { width: 6px; }
-    .list-scroll::-webkit-scrollbar-track { background: transparent; }
-    .list-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
-    .list-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+    .custom-scroll::-webkit-scrollbar { width: 5px; height: 5px; }
+    .custom-scroll::-webkit-scrollbar-track { background: transparent; }
+    .custom-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 10px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
 
-    /* Toggle Switch */
-    .dot { transition: all 0.3s cubic-bezier(0.4, 0.0, 0.2, 1); }
-
-    .results-card {
-      position: relative;
-    }
-
-    .results-card .print-header,
-    .results-card .print-footer {
-      display: none;
-    }
-
-    .eca-alert {
-      background: #fef3c7;
-      color: #92400e;
-      border: 1px solid #fcd34d;
-    }
-
+    /* Print Styles */
     @media print {
-      body { background: #fff !important; }
-      .print-hidden, .sidebar, .inputs, .buttons, header, footer { display: none !important; }
-      .results-card {
-        box-shadow: none !important;
-        border: 1px solid #0f172a;
-        background: #fff;
-        page-break-inside: avoid;
-        padding: 0 !important;
-        border: none !important;
-      }
-      .results-card .print-header,
-      .results-card .print-footer {
-        display: flex;
-      }
-      .results-card .print-header {
-        justify-content: space-between;
-        align-items: center;
-        margin-bottom: 1rem;
-        padding-bottom: 0.75rem;
-        border-bottom: 1px solid #e2e8f0;
-      }
-      .results-card .print-footer {
-        justify-content: space-between;
-        font-size: 0.75rem;
-        color: #475569;
-        border-top: 1px solid #e2e8f0;
-        margin-top: 1rem;
-        padding-top: 0.75rem;
-      }
-      .bg-slate-800 { background: #f8fafc !important; color: #0f172a !important; border: 1px solid #e2e8f0; }
-      .text-white { color: #0f172a !important; }
+      body { background: white; }
+      .no-print { display: none !important; }
+      .card { border: none; box-shadow: none; }
+      .print-only { display: block !important; }
     }
+    .print-only { display: none; }
   </style>
 </head>
-<body class="min-h-screen p-4 sm:p-6">
+<body class="min-h-screen pb-12" x-data="portCallApp()" x-init="init()">
 
   <script>
-    // 1) Default to same-origin API; 2) set OVERRIDE_API_BASE to hard-code a remote API if needed.
     const OVERRIDE_API_BASE = ""; 
     const API_BASE = OVERRIDE_API_BASE || window.location.origin;
   </script>
 
-  <div class="max-w-7xl mx-auto" x-data="portCallApp()" x-init="init()">
-
-    <!-- Header -->
-    <header class="flex items-center justify-between mb-8 animate-slide-up print-hidden">
-      <div class="flex items-center gap-4">
-        <div class="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-600 to-blue-700 flex items-center justify-center text-white text-2xl shadow-lg shadow-indigo-200">
-          ⛴
-        </div>
-        <div>
-          <h1 class="text-2xl font-bold text-slate-900 tracking-tight">Maritime MVP</h1>
-          <p class="text-slate-500 text-sm">Port Call Intelligence & Fee Estimation</p>
-        </div>
-      </div>
-      <div class="flex items-center gap-4 text-sm">
-        <div class="hidden sm:block text-right">
-          <div class="flex items-center gap-2 justify-end">
-            <span class="w-2 h-2 rounded-full" :class="apiStatus === 'Online' ? 'bg-emerald-500' : 'bg-red-500'"></span>
-            <span class="font-medium text-slate-700" x-text="apiStatus"></span>
+  <!-- Top Navigation Bar -->
+  <nav class="bg-ocean-950 text-white border-b border-ocean-800 sticky top-0 z-50 no-print">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+      <div class="flex items-center justify-between h-16">
+        <div class="flex items-center gap-3">
+          <div class="w-8 h-8 bg-ocean-500 rounded-lg flex items-center justify-center text-white font-bold shadow-lg shadow-ocean-900/50">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
           </div>
-          <div class="text-slate-400 text-xs mt-0.5" x-text="cacheStats"></div>
+          <div>
+            <h1 class="font-bold text-lg tracking-tight">Maritime MVP</h1>
+            <div class="text-[10px] text-ocean-200 uppercase tracking-wider font-medium">Port Call Intelligence</div>
+          </div>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2 px-3 py-1 rounded-full bg-ocean-900/50 border border-ocean-800 text-xs">
+            <span class="w-2 h-2 rounded-full animate-pulse" :class="apiStatus === 'Online' ? 'bg-emerald-400' : 'bg-red-400'"></span>
+            <span class="font-medium text-ocean-100" x-text="apiStatus"></span>
+          </div>
         </div>
       </div>
-    </header>
+    </div>
+  </nav>
 
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 relative">
+  <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+    <div class="grid grid-cols-1 lg:grid-cols-12 gap-8">
       
-      <!-- LEFT COLUMN: Controls -->
-      <div class="space-y-6 sidebar print-hidden relative z-30">
+      <!-- LEFT COLUMN: Inputs (Span 4) -->
+      <div class="lg:col-span-4 space-y-6 no-print">
 
-        <!-- 1. Vessel Search -->
-        <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up inputs">
+        <!-- 1. Vessel Selector -->
+        <div class="card p-5 animate-enter z-30">
           <div class="flex items-center justify-between mb-4">
-            <h2 class="text-lg font-bold text-slate-800 flex items-center gap-2">
-              <svg class="w-5 h-5 text-indigo-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-              Vessel Search
+            <h2 class="font-bold text-slate-800 flex items-center gap-2">
+              <svg class="w-5 h-5 text-ocean-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              Vessel Selection
             </h2>
+            <button x-show="selectedVessel" @click="selectedVessel = null; vesselQuery = ''" class="text-xs text-slate-400 hover:text-red-500">Clear</button>
           </div>
 
-          <div class="space-y-3">
-            <div class="flex gap-2">
-              <input
-                x-model="vesselQuery"
-                @keyup.enter="searchVessel(1)"
-                class="field"
-                placeholder="IMO, Callsign, or Name..."
-                :disabled="searchLoading"
-              />
+          <!-- Search Input -->
+          <div class="relative">
+            <input
+              x-model="vesselQuery"
+              @keyup.enter="searchVessel(1)"
+              class="field pl-10"
+              placeholder="Search by Name, IMO, or Callsign..."
+              :disabled="searchLoading"
+            />
+            <div class="absolute left-3 top-2.5 text-slate-400">
+              <svg x-show="!searchLoading" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
+              <svg x-show="searchLoading" class="w-5 h-5 animate-spin text-ocean-600" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+            </div>
+          </div>
+
+          <!-- Dropdown Results -->
+          <div x-show="vesselResults.length > 0" class="absolute left-0 right-0 mt-1 mx-5 border border-slate-200 rounded-lg overflow-hidden max-h-60 custom-scroll overflow-y-auto shadow-xl z-50 bg-white">
+            <template x-for="(v, idx) in vesselResults" :key="v.VesselID ?? idx">
               <button
-                @click="searchVessel(1)"
-                :disabled="searchLoading || !vesselQuery.trim()"
-                class="btn btn-primary px-4 py-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                <span x-show="!searchLoading">Find</span>
-                <svg x-show="searchLoading" class="w-5 h-5 animate-spin" viewBox="0 0 24 24" fill="none"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z"/></svg>
+                @click="selectVessel(v); vesselResults = []"
+                class="w-full text-left px-4 py-3 hover:bg-ocean-50 border-b border-slate-100 last:border-0 transition-colors flex items-center justify-between group">
+                <div>
+                  <div class="font-semibold text-slate-800 group-hover:text-ocean-700" x-text="v.VesselName || '(unnamed)'"></div>
+                  <div class="text-xs text-slate-500 font-mono mt-0.5">IMO: <span x-text="v.IMO || v.IMONumber || 'N/A'"></span></div>
+                </div>
+                <span class="text-[10px] font-bold bg-slate-100 text-slate-600 px-2 py-1 rounded" x-text="v.VesselType || 'Unknown'"></span>
               </button>
-            </div>
+            </template>
+          </div>
 
-            <!-- Results List -->
-            <div x-show="vesselResults.length > 0" class="list-scroll space-y-2 pr-1">
-              <template x-for="(v, idx) in vesselResults" :key="v.VesselID ?? v.vesselid ?? idx">
-                <button
-                  @click="selectVessel(v)"
-                  class="w-full text-left border border-slate-100 rounded-xl p-3 hover:bg-indigo-50 hover:border-indigo-200 transition-all group relative">
-                  <div class="font-semibold text-slate-800 group-hover:text-indigo-700 transition-colors" x-text="v.VesselName || v.vesselname || '(unnamed)'"></div>
-                  <div class="text-xs text-slate-500 mt-1 flex flex-wrap gap-2">
-                    <span class="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600" x-show="v.CallSign" x-text="v.CallSign"></span>
-                    <span class="bg-slate-100 px-1.5 py-0.5 rounded text-slate-600" x-show="v.Flag" x-text="v.Flag"></span>
-                    <span x-text="v.VesselType"></span>
-                  </div>
-                  <div x-show="selectedVessel && (selectedVessel.VesselID === v.VesselID || selectedVessel.VesselName === v.VesselName)" 
-                       class="absolute top-3 right-3 w-2 h-2 bg-indigo-500 rounded-full"></div>
-                </button>
-              </template>
-            </div>
-
-            <div x-show="!searchLoading && vesselResults.length === 0 && vesselSearched" class="text-sm text-center text-slate-500 py-4">
-              No vessels found. Try a different name.
-            </div>
-            <div x-show="searchError" class="text-sm text-red-500 text-center" x-text="searchError"></div>
-
-            <!-- Pagination -->
-            <div x-show="vesselTotal > 0" class="flex items-center justify-between pt-2 border-t border-slate-100">
-              <span class="text-[10px] font-medium text-slate-400 uppercase tracking-wide">
-                <span x-text="vesselStart"></span>-<span x-text="vesselEnd"></span> of <span x-text="vesselTotal"></span>
-              </span>
-              <div x-show="vesselPages > 1" class="flex gap-1">
-                <button @click="prevVesselPage" :disabled="vesselPage <= 1" class="btn btn-outline px-2 py-1 text-xs disabled:opacity-50">←</button>
-                <button @click="nextVesselPage" :disabled="vesselPage >= vesselPages" class="btn btn-outline px-2 py-1 text-xs disabled:opacity-50">→</button>
+          <!-- Selected Vessel "Ticket" -->
+          <div x-show="selectedVessel" class="mt-4 bg-ocean-50 border border-ocean-100 rounded-xl p-4 relative overflow-hidden group">
+            <div class="absolute top-0 right-0 w-16 h-16 bg-ocean-500/10 rounded-bl-full -mr-4 -mt-4 transition-transform group-hover:scale-110"></div>
+            <div class="relative z-10">
+              <div class="flex justify-between items-start">
+                <div>
+                  <div class="text-[10px] uppercase tracking-wider text-ocean-600 font-bold mb-1">Selected Vessel</div>
+                  <h3 class="font-bold text-ocean-900 text-lg leading-tight" x-text="selectedVessel?.VesselName"></h3>
+                  <div class="text-xs font-mono text-ocean-700 mt-1" x-text="selectedVessel?.CallSign || 'No Callsign'"></div>
+                </div>
+                <div class="text-right">
+                  <div class="text-2xl">🚢</div>
+                </div>
+              </div>
+              <div class="grid grid-cols-3 gap-2 mt-3 pt-3 border-t border-ocean-200/60">
+                <div>
+                  <div class="text-[9px] text-ocean-500 uppercase font-bold">Flag</div>
+                  <div class="text-xs font-semibold text-ocean-900 truncate" x-text="selectedVessel?.Flag || '-'"></div>
+                </div>
+                <div>
+                  <div class="text-[9px] text-ocean-500 uppercase font-bold">IMO</div>
+                  <div class="text-xs font-semibold text-ocean-900" x-text="selectedVessel?.IMO || selectedVessel?.IMONumber || '-'"></div>
+                </div>
+                <div>
+                  <div class="text-[9px] text-ocean-500 uppercase font-bold">Built</div>
+                  <div class="text-xs font-semibold text-ocean-900" x-text="selectedVessel?.YearBuilt || '-'"></div>
+                </div>
               </div>
             </div>
           </div>
         </div>
 
-        <!-- 2. Selected Vessel Card -->
-        <div x-show="selectedVessel" class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up border-l-4 border-l-indigo-500 inputs">
-          <div class="flex justify-between items-start mb-3">
-            <h3 class="font-bold text-slate-800 text-lg" x-text="selectedVessel ? (selectedVessel.VesselName || 'Unknown') : ''"></h3>
-            <div class="text-xs font-mono bg-slate-100 px-2 py-1 rounded text-slate-500" x-text="selectedVessel ? (selectedVessel.CallSign || '---') : ''"></div>
+        <!-- 2. Voyage Configuration -->
+        <div class="card p-5 animate-enter z-20" style="animation-delay: 0.1s;">
+          <div class="flex items-center justify-between mb-5">
+            <h3 class="font-bold text-slate-800">Voyage Details</h3>
+            <!-- Mode Toggle -->
+            <div class="flex bg-slate-100 p-1 rounded-lg">
+                <button @click="useV2 = false" :class="!useV2 ? 'bg-white text-ocean-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-3 py-1 text-xs font-semibold rounded-md transition-all">Basic</button>
+                <button @click="useV2 = true" :class="useV2 ? 'bg-white text-ocean-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'" class="px-3 py-1 text-xs font-semibold rounded-md transition-all">Advanced</button>
+            </div>
+          </div>
+
+          <!-- Tabs -->
+          <div class="flex border-b border-slate-200 mb-5">
+            <button @click="activeTab = 'voyage'" :class="activeTab === 'voyage' ? 'border-ocean-500 text-ocean-600' : 'border-transparent text-slate-400 hover:text-slate-600'" class="flex-1 pb-2 text-sm font-medium border-b-2 transition-colors">Route & Dates</button>
+            <button @click="activeTab = 'specs'" :class="activeTab === 'specs' ? 'border-ocean-500 text-ocean-600' : 'border-transparent text-slate-400 hover:text-slate-600'" class="flex-1 pb-2 text-sm font-medium border-b-2 transition-colors relative">
+              Vessel Specs
+              <span x-show="autoGT || autoNT" class="absolute top-0 right-4 w-1.5 h-1.5 bg-emerald-500 rounded-full"></span>
+            </button>
+          </div>
+
+          <!-- Tab: Voyage -->
+          <div x-show="activeTab === 'voyage'" class="space-y-5">
+            
+            <!-- Port Search -->
+            <div class="relative" @click.away="showPortDropdown = false">
+              <label class="label-text">Arrival Port / Terminal</label>
+              <div class="relative">
+                <input 
+                  x-model="portQuery" 
+                  @input="searchPorts(false, 'single')" 
+                  @focus="searchPorts(true, 'single')" 
+                  @keydown.enter.prevent="selectFirstPortResult()"
+                  class="field pl-9" 
+                  placeholder="Search port name or code..." 
+                />
+                <svg class="w-4 h-4 absolute left-3 top-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 11a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+                <button x-show="portQuery" @click="clearPortQuery" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">✕</button>
+              </div>
+              
+              <!-- Port Dropdown -->
+              <div x-show="showPortDropdown" class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-60 custom-scroll overflow-y-auto">
+                <template x-for="p in filteredPorts" :key="`single-${p.zoneCode}-${p.portCode}-${p.terminalCode}`">
+                  <button type="button" class="w-full text-left px-4 py-2.5 hover:bg-ocean-50 border-b border-slate-50 last:border-0 group" @click="selectPort(p)">
+                    <div class="font-medium text-slate-800 text-sm group-hover:text-ocean-700" x-text="portResultTitle(p)"></div>
+                    <div class="text-xs text-slate-500" x-text="portResultDescription(p)"></div>
+                  </button>
+                </template>
+              </div>
+
+              <!-- ECA Warning -->
+              <div x-show="selectedPortIsEca()" class="mt-2 flex items-center gap-2 text-xs text-amber-700 bg-amber-50 border border-amber-100 px-3 py-2 rounded-md">
+                <svg class="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                <span><strong>ECA Zone:</strong> Low Sulfur Fuel Required</span>
+              </div>
+            </div>
+
+            <!-- Route (V2 Only) -->
+            <div x-show="useV2" class="bg-slate-50 p-4 rounded-lg border border-slate-200">
+              <label class="label-text mb-2">Voyage Route (UN/LOCODE)</label>
+              <div class="flex items-center gap-2">
+                <div class="flex-1 relative">
+                  <input x-model="previousPortCode" 
+                         @input.debounce.300ms="searchUnloc('prev')" 
+                         @focus="searchUnloc('prev')"
+                         placeholder="PREV" 
+                         class="field text-center font-mono uppercase text-sm" />
+                  <!-- Unloc Dropdown Prev -->
+                  <div x-show="unlocPrev.length" class="absolute bottom-full mb-1 left-0 w-48 bg-white shadow-xl rounded-lg border border-slate-200 text-xs z-50 max-h-40 overflow-y-auto custom-scroll">
+                      <div class="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase bg-slate-50">Suggestions</div>
+                      <template x-for="p in unlocPrev">
+                          <div @click="previousPortCode=p.locode; unlocPrev=[]" class="px-3 py-2 hover:bg-ocean-50 cursor-pointer border-b border-slate-50 last:border-0">
+                              <span class="font-bold text-ocean-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
+                          </div>
+                      </template>
+                  </div>
+                </div>
+                
+                <div class="text-slate-300">→</div>
+                
+                <div class="w-16 h-9 flex items-center justify-center bg-white border border-slate-300 rounded-md text-xs font-bold text-ocean-600 shadow-sm">
+                  <span x-text="selectedPortContext?.portCode || 'ARR'"></span>
+                </div>
+                
+                <div class="text-slate-300">→</div>
+                
+                <div class="flex-1 relative">
+                  <input x-model="nextPortCode" 
+                         @input.debounce.300ms="searchUnloc('next')" 
+                         @focus="searchUnloc('next')"
+                         placeholder="NEXT" 
+                         class="field text-center font-mono uppercase text-sm" />
+                   <!-- Unloc Dropdown Next -->
+                   <div x-show="unlocNext.length" class="absolute bottom-full mb-1 right-0 w-48 bg-white shadow-xl rounded-lg border border-slate-200 text-xs z-50 max-h-40 overflow-y-auto custom-scroll">
+                    <div class="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase bg-slate-50">Suggestions</div>
+                    <template x-for="p in unlocNext">
+                        <div @click="nextPortCode=p.locode; unlocNext=[]" class="px-3 py-2 hover:bg-ocean-50 cursor-pointer border-b border-slate-50 last:border-0">
+                            <span class="font-bold text-ocean-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
+                        </div>
+                    </template>
+                </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div>
+                <label class="label-text">ETA</label>
+                <input x-model="eta" type="date" class="field" />
+              </div>
+              <div x-show="useV2">
+                <label class="label-text">Days Alongside</label>
+                <input x-model.number="daysAlongside" type="number" min="1" class="field" />
+              </div>
+              <div x-show="!useV2">
+                <label class="label-text">Arrival Type</label>
+                <select x-model="arrivalType" class="field">
+                  <option value="FOREIGN">Foreign</option>
+                  <option value="COASTWISE">Coastwise</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Demurrage Calculator -->
+            <div x-show="useV2" class="border-t border-slate-100 pt-4">
+              <button @click="$el.nextElementSibling.classList.toggle('hidden')" class="flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-ocean-600 mb-2">
+                <span>Laytime & Demurrage Settings</span>
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+              </button>
+              <div class="hidden bg-slate-50 p-3 rounded-lg border border-slate-200 grid grid-cols-2 gap-3">
+                <div>
+                  <label class="label-text">Allowed Days</label>
+                  <input x-model.number="laytimeAllowedDays" type="number" step="0.5" class="field text-xs" />
+                </div>
+                <div>
+                  <label class="label-text">Rate ($/Day)</label>
+                  <input x-model.number="demurrageRate" type="number" step="100" class="field text-xs" />
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Tab: Specs -->
+          <div x-show="activeTab === 'specs'" class="space-y-4">
+            <div class="bg-blue-50 text-blue-800 text-xs p-3 rounded-md border border-blue-100 flex items-start gap-2">
+              <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+              <p>Data sourced from USCG PSIX. Please verify current drafts before calculation.</p>
+            </div>
+
+            <div class="grid grid-cols-2 gap-4">
+              <div class="relative">
+                <label class="label-text">Gross Tonnage</label>
+                <input x-model.number="grossTonnage" type="number" class="field" @input="autoGT=false" />
+                <div x-show="autoGT" class="absolute right-2 top-8 w-2 h-2 bg-emerald-500 rounded-full" title="Autofilled"></div>
+              </div>
+              <div class="relative">
+                <label class="label-text">Net Tonnage</label>
+                <input x-model.number="netTonnage" type="number" class="field" @input="autoNT=false" />
+                <div x-show="autoNT" class="absolute right-2 top-8 w-2 h-2 bg-emerald-500 rounded-full" title="Autofilled"></div>
+              </div>
+              <div class="relative">
+                <label class="label-text">LOA (m)</label>
+                <input x-model.number="loaMeters" type="number" step="0.1" class="field" @input="autoLOA=false" />
+                <div x-show="autoLOA" class="absolute right-2 top-8 w-2 h-2 bg-emerald-500 rounded-full" title="Autofilled"></div>
+              </div>
+              <div class="relative">
+                <label class="label-text">Beam (m)</label>
+                <input x-model.number="beamMeters" type="number" step="0.1" class="field" @input="autoBeam=false" />
+                <div x-show="autoBeam" class="absolute right-2 top-8 w-2 h-2 bg-emerald-500 rounded-full" title="Autofilled"></div>
+              </div>
+            </div>
+
+            <div class="pt-2">
+              <label class="label-text mb-2">Draft Configuration (Meters)</label>
+              <div class="flex rounded-md shadow-sm">
+                <input x-model.number="draftForwardMeters" type="number" step="0.1" placeholder="Fwd" class="field rounded-r-none border-r-0 text-center" />
+                <input x-model.number="draftAftMeters" type="number" step="0.1" placeholder="Aft" class="field rounded-none text-center" />
+                <input x-model.number="airDraftMeters" type="number" step="0.1" placeholder="Air" class="field rounded-l-none border-l-0 text-center" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Action Button -->
+          <div class="mt-6 pt-4 border-t border-slate-100">
+            <button
+              @click="useV2 ? getEstimateV2() : getEstimate()"
+              :disabled="!selectedPort || estimateLoading || (useV2 && !previousPortCode.trim())"
+              class="w-full bg-ocean-600 hover:bg-ocean-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3.5 px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2">
+              <span x-show="!estimateLoading">Calculate Port Fees</span>
+              <svg x-show="estimateLoading" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+            </button>
+            
+            <!-- History Dropdown -->
+            <div class="relative mt-3 text-center" @click.away="historyDropdownOpen = false">
+                <button @click="historyDropdownOpen = !historyDropdownOpen" class="text-xs text-slate-500 hover:text-ocean-600 underline">Load Previous Estimate</button>
+                <div x-show="historyDropdownOpen" class="absolute bottom-full left-0 w-full bg-white border border-slate-200 rounded-lg shadow-xl z-50 mb-1 text-left max-h-56 overflow-y-auto custom-scroll">
+                    <template x-for="item in estimateHistory" :key="item.id">
+                        <button @click="applyEstimateHistory(item)" class="w-full px-4 py-2 hover:bg-slate-50 border-b border-slate-50 text-xs group">
+                            <div class="flex justify-between items-center mb-0.5">
+                                <span class="font-bold text-slate-700" x-text="item.portLabel"></span>
+                                <span class="text-[10px] bg-slate-100 text-slate-500 px-1.5 rounded" x-text="formatDate(item.timestamp)"></span>
+                            </div>
+                            <div class="text-slate-500 truncate" x-text="item.vesselName"></div>
+                            <div class="mt-1 font-mono text-ocean-600 font-semibold" x-text="formatCurrency(item.totals?.total_high || item.totals?.mandatory || 0)"></div>
+                        </button>
+                    </template>
+                    <div x-show="!estimateHistory.length" class="p-3 text-xs text-slate-400 text-center">No history found</div>
+                </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 3. Multi-Port Planner -->
+        <div class="card p-5 animate-enter z-10" style="animation-delay: 0.2s;">
+          <div class="flex items-center justify-between mb-4">
+            <h3 class="font-bold text-slate-800">Multi-Port Planner</h3>
+            <span class="bg-ocean-100 text-ocean-700 text-[10px] font-bold px-2 py-0.5 rounded-full uppercase">Beta</span>
           </div>
           
-          <div class="grid grid-cols-2 gap-y-2 gap-x-4 text-sm">
-            <div><span class="text-slate-400 text-xs uppercase block">Flag</span> <span x-text="selectedVessel?.Flag || '—'"></span></div>
-            <div><span class="text-slate-400 text-xs uppercase block">Type</span> <span x-text="selectedVessel?.VesselType || '—'"></span></div>
-            <div x-show="selectedVessel?.YearBuilt">
-              <span class="text-slate-400 text-xs uppercase block">Built</span>
-              <span x-text="selectedVessel?.YearBuilt ?? ''"></span>
-            </div>
-            <div x-show="selectedVessel?.IMO">
-              <span class="text-slate-400 text-xs uppercase block">IMO</span>
-              <span x-text="selectedVessel?.IMO ?? ''"></span>
-            </div>
-            
-            <div class="col-span-2 mt-2 pt-2 border-t border-slate-100 grid grid-cols-3 gap-2">
-                <div class="text-center bg-indigo-50/50 rounded p-1">
-                    <div class="text-[10px] text-indigo-400 uppercase font-bold">LOA</div>
-                    <div class="font-semibold text-indigo-900" x-text="selectedVessel?.LOA_m ? Number(selectedVessel.LOA_m).toFixed(1) + 'm' : '-'"></div>
-                </div>
-                <div class="text-center bg-indigo-50/50 rounded p-1">
-                    <div class="text-[10px] text-indigo-400 uppercase font-bold">Beam</div>
-                    <div class="font-semibold text-indigo-900" x-text="selectedVessel?.Beam_m ? Number(selectedVessel.Beam_m).toFixed(1) + 'm' : '-'"></div>
-                </div>
-                <div class="text-center bg-indigo-50/50 rounded p-1">
-                    <div class="text-[10px] text-indigo-400 uppercase font-bold">Draft</div>
-                    <div class="font-semibold text-indigo-900" x-text="selectedVessel?.Draft_m ? Number(selectedVessel.Draft_m).toFixed(1) + 'm' : '-'"></div>
-                </div>
-            </div>
-          </div>
-        </div>
-
-        <!-- 3. Voyage Calculator (Tabbed) -->
-        <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up inputs" style="animation-delay: 0.1s;">
-            
-            <!-- Header & Toggle -->
-            <div class="flex items-center justify-between mb-4">
-                <h3 class="text-lg font-bold text-slate-800">Voyage Calculator</h3>
-                <label class="flex items-center cursor-pointer select-none">
-                    <div class="mr-2 text-xs font-medium text-slate-500" :class="!useV2 ? 'text-indigo-600 font-bold' : ''">Basic</div>
-                    <div class="relative">
-                        <input type="checkbox" x-model="useV2" class="sr-only">
-                        <div class="block bg-slate-200 w-10 h-6 rounded-full transition" :class="useV2 ? 'bg-indigo-600' : ''"></div>
-                        <div class="dot absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition transform shadow-sm" :class="useV2 ? 'translate-x-4' : ''"></div>
-                    </div>
-                    <div class="ml-2 text-xs font-medium text-slate-500" :class="useV2 ? 'text-indigo-600 font-bold' : ''">Advanced</div>
-                </label>
-            </div>
-        
-            <!-- Tabs -->
-            <div class="flex border-b border-slate-100 mb-5">
-                <button @click="activeTab = 'voyage'" 
-                    :class="activeTab === 'voyage' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'" 
-                    class="flex-1 py-2 text-center border-b-2 font-medium text-sm transition-colors">
-                    Voyage
-                </button>
-                <button @click="activeTab = 'specs'" 
-                    :class="activeTab === 'specs' ? 'border-indigo-500 text-indigo-600' : 'border-transparent text-slate-400 hover:text-slate-600'" 
-                    class="flex-1 py-2 text-center border-b-2 font-medium text-sm transition-colors relative">
-                    Vessel Specs
-                    <span x-show="autoGT || autoNT" class="absolute top-2 right-4 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-pulse"></span>
-                </button>
-            </div>
-        
-            <!-- Tab 1: Voyage Inputs -->
-            <div x-show="activeTab === 'voyage'" class="space-y-4">
-                
-                <!-- Port Selector -->
-                <div class="relative" @click.away="showPortDropdown = false">
-                    <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Arrival Port</label>
-                    <div class="relative">
-                        <input x-model="portQuery" 
-                               @input="searchPorts(false, 'single')" 
-                               @focus="searchPorts(true, 'single')" 
-                               @keydown.enter.prevent="selectFirstPortResult()"
-                               class="field pl-9" 
-                               placeholder="Select port..." />
-                        <svg class="w-4 h-4 absolute left-3 top-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/></svg>
-                        <button x-show="portQuery" @click="clearPortQuery" class="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">✕</button>
-                    </div>
-
-                    <!-- Dropdown -->
-                    <div x-show="showPortDropdown" class="absolute z-50 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll">
-                        <template x-for="p in filteredPorts" :key="`single-${p.zoneCode}-${p.portCode}-${p.terminalCode}`">
-                            <button type="button" class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-50 last:border-0 group" @click="selectPort(p)">
-                                <div class="font-medium text-slate-800 group-hover:text-indigo-700" x-text="portResultTitle(p)"></div>
-                                <div class="text-xs text-slate-500 mt-0.5" x-text="portResultDescription(p)"></div>
-                                <div class="mt-1.5 flex flex-wrap gap-1">
-                                    <span class="chip bg-indigo-100 text-indigo-700" x-show="p.zoneCode" x-text="p.zoneCode"></span>
-                                    <span class="chip bg-slate-100 text-slate-600" x-show="p.portCode && p.type !== 'zone'" x-text="p.portCode"></span>
-                                </div>
-                            </button>
-                        </template>
-                    </div>
-
-                    <!-- Selected Context Chip -->
-                    <div x-show="selectedPortContext" class="mt-2 p-2.5 bg-indigo-50 border border-indigo-100 rounded-lg flex items-center justify-between group">
-                        <div>
-                            <div class="text-xs font-bold text-indigo-700" x-text="selectedPortContext?.zoneCode"></div>
-                            <div class="text-xs text-indigo-600/80 truncate max-w-[180px]" x-text="selectedPortContext?.label"></div>
-                        </div>
-                        <button @click="clearPortQuery" class="text-indigo-400 hover:text-indigo-600 p-1 rounded hover:bg-indigo-100">
-                            <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-                        </button>
-                    </div>
-                    <div x-show="selectedPortIsEca()" class="mt-2 inline-flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-semibold eca-alert">
-                        <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M12 2a10 10 0 00-7.07 17.07A10 10 0 1012 2z"/></svg>
-                        <span>Low Sulfur Fuel Required (ECA)</span>
-                    </div>
-                </div>
-            
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">ETA</label>
-                        <input x-model="eta" type="date" class="field" />
-                    </div>
-                    <div x-show="useV2">
-                        <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Days Alongside</label>
-                        <input x-model.number="daysAlongside" type="number" min="1" class="field" />
-                    </div>
-                </div>
-
-                <!-- V2 Route Inputs -->
-                <div x-show="useV2" class="bg-slate-50 p-3 rounded-xl border border-slate-200/60">
-                    <label class="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Voyage Route (UN/LOCODE)</label>
-                    <div class="flex items-center gap-2">
-                        <div class="flex-1 relative">
-                            <input x-model="previousPortCode"
-                                   @focus="searchUnloc('prev')"
-                                   @input.debounce.300ms="searchUnloc('prev')" placeholder="PREV (e.g. CNSHA)" class="field text-xs uppercase font-mono text-center" />
-                            <!-- Unloc Dropdown Prev -->
-                             <div x-show="unlocPrev.length"
-                                  @focusin.stop
-                                 class="absolute bottom-full mb-1 left-0 w-48 bg-white shadow-lg rounded-lg border border-slate-100 text-xs z-40 max-h-32 overflow-y-auto">
-                                <template x-for="p in unlocPrev">
-                                    <div @click="previousPortCode=p.locode; unlocPrev=[]" class="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-slate-50 last:border-0">
-                                        <span class="font-bold text-indigo-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
-                                    </div>
-                                </template>
-                            </div>
-                        </div>
-                        
-                        <div class="text-slate-300">→</div>
-                        
-                        <div class="w-16 h-9 flex items-center justify-center bg-white border border-slate-200 rounded-lg text-xs font-bold text-indigo-600 shadow-sm">
-                            <span x-text="selectedPortContext?.portCode || 'ARR'"></span>
-                        </div>
-                        
-                        <div class="text-slate-300">→</div>
-
-                        <div class="flex-1 relative">
-                            <input x-model="nextPortCode"
-                                   @focus="searchUnloc('next')"
-                                   @input.debounce.300ms="searchUnloc('next')" placeholder="NEXT (Opt)" class="field text-xs uppercase font-mono text-center" />
-                            <!-- Unloc Dropdown Next -->
-                             <div x-show="unlocNext.length"
-                                  @focusin.stop
-                                  class="absolute bottom-full mb-1 right-0 w-48 bg-white shadow-lg rounded-lg border border-slate-100 text-xs z-40 max-h-32 overflow-y-auto">
-                                <template x-for="p in unlocNext">
-                                    <div @click="nextPortCode=p.locode; unlocNext=[]" class="px-3 py-2 hover:bg-indigo-50 cursor-pointer border-b border-slate-50 last:border-0">
-                                        <span class="font-bold text-indigo-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
-                                    </div>
-                                </template>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                <div x-show="useV2" class="bg-white border border-amber-100 rounded-xl p-3 text-xs text-slate-600">
-                    <div class="font-semibold text-slate-700 mb-2">Laytime / Demurrage Calculator</div>
-                    <div class="grid grid-cols-2 gap-3">
-                        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Allowed Days
-                            <input x-model.number="laytimeAllowedDays" type="number" min="0" step="0.5" class="field mt-1" />
-                        </label>
-                        <label class="text-[11px] font-semibold text-slate-500 uppercase tracking-wide">Demurrage Rate ($/day)
-                            <input x-model.number="demurrageRate" type="number" min="0" step="100" class="field mt-1" />
-                        </label>
-                    </div>
-                    <div class="mt-2 text-slate-500">Potential Extra Cost: <span class="font-semibold text-rose-600" x-text="formatCurrency(potentialDemurrage())"></span></div>
-                </div>
-                
-                <!-- Legacy Inputs -->
-                <div x-show="!useV2">
-                    <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">Arrival Type</label>
-                    <select x-model="arrivalType" class="field bg-white">
-                        <option value="FOREIGN">Foreign</option>
-                        <option value="COASTWISE">Coastwise</option>
-                    </select>
-                </div>
-
-                <div x-show="!useV2">
-                    <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1.5">YTD CBP Paid</label>
-                    <input x-model="ytdCbpPaid" type="number" step="0.01" class="field" placeholder="0.00" />
-                </div>
-            </div>
-        
-            <!-- Tab 2: Vessel Specs -->
-            <div x-show="activeTab === 'specs'" class="space-y-4">
-                <div class="flex items-center p-3 bg-blue-50 text-blue-700 rounded-lg text-xs border border-blue-100" x-show="selectedVessel">
-                    <svg class="w-4 h-4 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    Data sourced from USCG PSIX. Verify current drafts.
-                </div>
-            
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-xs font-medium text-slate-500 mb-1">Gross Tonnage</label>
-                        <div class="relative">
-                            <input x-model.number="grossTonnage" type="number" class="field" @input="autoGT=false" />
-                            <span x-show="autoGT" class="absolute right-2 top-3 w-2 h-2 bg-emerald-500 rounded-full ring-2 ring-white" title="Autofilled"></span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-500 mb-1">Net Tonnage</label>
-                        <div class="relative">
-                            <input x-model.number="netTonnage" type="number" class="field" @input="autoNT=false" />
-                            <span x-show="autoNT" class="absolute right-2 top-3 w-2 h-2 bg-emerald-500 rounded-full ring-2 ring-white" title="Autofilled"></span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-500 mb-1">LOA (m)</label>
-                        <div class="relative">
-                            <input x-model.number="loaMeters" type="number" step="0.1" class="field" @input="autoLOA=false" />
-                            <span x-show="autoLOA" class="absolute right-2 top-3 w-2 h-2 bg-emerald-500 rounded-full ring-2 ring-white" title="Autofilled"></span>
-                        </div>
-                    </div>
-                    <div>
-                        <label class="block text-xs font-medium text-slate-500 mb-1">Beam (m)</label>
-                        <div class="relative">
-                            <input x-model.number="beamMeters" type="number" step="0.1" class="field" @input="autoBeam=false" />
-                            <span x-show="autoBeam" class="absolute right-2 top-3 w-2 h-2 bg-emerald-500 rounded-full ring-2 ring-white" title="Autofilled"></span>
-                        </div>
-                    </div>
-                </div>
-                
-                <div class="pt-4 border-t border-slate-100">
-                    <label class="block text-xs font-bold text-slate-700 mb-2 uppercase tracking-wider">Draft Configuration (m)</label>
-                    <div class="grid grid-cols-3 gap-3">
-                        <div>
-                            <span class="text-[10px] text-slate-400 font-semibold uppercase block mb-1">Forward</span>
-                            <input x-model.number="draftForwardMeters" type="number" step="0.1" class="field text-sm" placeholder="0.0" />
-                        </div>
-                        <div>
-                            <span class="text-[10px] text-slate-400 font-semibold uppercase block mb-1">Aft</span>
-                            <input x-model.number="draftAftMeters" type="number" step="0.1" class="field text-sm" placeholder="0.0" />
-                        </div>
-                        <div>
-                            <span class="text-[10px] text-slate-400 font-semibold uppercase block mb-1">Air</span>
-                            <input x-model.number="airDraftMeters" type="number" step="0.1" class="field text-sm" placeholder="0.0" />
-                        </div>
-                    </div>
-                </div>
-            </div>
-        
-            <!-- Action Footer -->
-            <div class="mt-6 pt-5 border-t border-slate-100 buttons">
-                <div class="flex gap-2 items-stretch">
-                    <button
-                        @click="useV2 ? getEstimateV2() : getEstimate()"
-                        :disabled="!selectedPort || estimateLoading || (useV2 && !previousPortCode.trim())"
-                        class="flex-1 btn btn-primary py-3.5 text-lg shadow-lg shadow-indigo-200 flex items-center justify-center gap-2 disabled:opacity-60 disabled:cursor-not-allowed disabled:shadow-none">
-                        <span x-show="!estimateLoading">Calculate Fees</span>
-                        <svg x-show="estimateLoading" class="animate-spin h-5 w-5 text-white/80" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                        </svg>
-                    </button>
-                    <div class="relative" @click.away="historyDropdownOpen = false">
-                        <button type="button"
-                                class="btn btn-outline px-4 py-2 text-sm h-full print-hidden"
-                                @click.stop="historyDropdownOpen = !historyDropdownOpen">
-                          History ▾
-                        </button>
-                        <div x-show="historyDropdownOpen"
-                             x-transition
-                             class="absolute right-0 top-full mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50">
-                            <template x-if="!estimateHistory.length">
-                                <div class="p-4 text-xs text-slate-400">No saved estimates yet.</div>
-                            </template>
-                            <template x-for="item in estimateHistory" :key="item.id">
-                                <button type="button" @click="applyEstimateHistory(item); historyDropdownOpen = false" class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-100 last:border-0">
-                                    <div class="flex items-start justify-between gap-2">
-                                      <div class="flex-1">
-                                        <div class="text-sm font-semibold text-slate-800"
-                                             x-text="item.portLabel || item.portCode"></div>
-                                        <div class="text-xs text-slate-500 mt-0.5">
-                                          <span x-text="item.vesselName || 'Unknown Vessel'"></span>
-                                          · <span x-text="formatDate(item.timestamp)"></span>
-                                        </div>
-                                        <div class="text-xs text-slate-500 mt-0.5">
-                                          <span class="font-mono text-indigo-600 font-semibold"
-                                                x-text="formatCurrency(item.totals?.total_high || item.totals?.mandatory || 0)"></span>
-                                        </div>
-                                      </div>
-                                      <button type="button"
-                                              @click.stop="toggleEstimateFavorite(item.id)"
-                                              class="text-xs px-1 py-0.5 rounded"
-                                              :class="item.favorite ? 'text-amber-500' : 'text-slate-400 hover:text-slate-600'">
-                                        <span x-text="item.favorite ? '★' : '☆'"></span>
-                                      </button>
-                                    </div>
-                                </button>
-                            </template>
-                        </div>
-                    </div>
-                </div>
-                <div x-show="!selectedPort" class="text-center text-xs text-slate-400 mt-2">Please select a port to proceed</div>
-            </div>
-        </div>
-
-        <!-- 4. Multi-Port Planner (Controls) -->
-        <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up multi-port-card print-hidden relative">
-          <div class="flex items-center justify-between mb-4">
-            <h3 class="text-lg font-bold text-slate-800">Multi-Port Planner Tool</h3>
-            <div class="flex items-center gap-2">
-              <button type="button"
-                      class="btn btn-outline px-2 py-1 text-xs print-hidden"
-                      @click.stop="mpHistoryDropdownOpen = !mpHistoryDropdownOpen">
-                History ▾
-              </button>
-              <span class="badge bg-indigo-50 text-indigo-600">Beta</span>
-            </div>
-          </div>
-
-          <div class="grid sm:grid-cols-2 gap-4 mb-4">
-            <div class="sm:col-span-2">
-               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Vessel Name Override</label>
-               <input x-model="mpVesselName" class="field" :placeholder="selectedVessel?.VesselName || 'Optional'" />
-            </div>
-            <div>
-               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Start Date</label>
-               <input x-model="mpStartDate" type="date" class="field" />
-            </div>
-            <div>
-               <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-1">Port Stay (Days)</label>
-               <input x-model.number="mpDaysInPort" type="number" min="1" class="field" />
-            </div>
-          </div>
-
-          <div class="mb-4">
-             <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Itinerary Sequence</label>
-             <!-- Port Adder -->
-             <div class="flex gap-2 mb-3 relative" @click.away="showMpDropdown = false">
+          <div class="space-y-3">
+            <div class="flex gap-2">
                 <div class="relative flex-1">
-                    <input x-model="mpPortInput" 
-                           @input="searchPorts(false, 'multi')" 
-                           @focus="searchPorts(true, 'multi')" 
-                           @keydown.enter.prevent="addMpPort()"
-                           class="field" placeholder="Add port..." />
-                    <!-- MP Dropdown -->
-                    <div x-show="showMpDropdown" class="absolute z-20 mt-1 w-full bg-white border border-slate-100 rounded-xl shadow-xl list-scroll">
-                        <template x-for="p in mpFilteredPorts" :key="`multi-${p.zoneCode}-${p.portCode}`">
-                            <button type="button" class="w-full text-left px-4 py-2 hover:bg-indigo-50 border-b border-slate-50 last:border-0" @click="addMpPort(p)">
-                                <div class="font-medium text-slate-800" x-text="portResultTitle(p)"></div>
-                            </button>
+                    <input x-model="mpPortInput" @input="searchPorts(false, 'multi')" @keydown.enter.prevent="addMpPort()" class="field text-sm" placeholder="Add port to itinerary..." />
+                    <div x-show="showMpDropdown" class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto custom-scroll">
+                        <template x-for="p in mpFilteredPorts">
+                            <button class="w-full text-left px-3 py-2 hover:bg-slate-50 text-sm" @click="addMpPort(p)" x-text="portResultTitle(p)"></button>
                         </template>
                     </div>
                 </div>
-                <button @click="addMpPort()" class="btn btn-soft px-4">Add</button>
-             </div>
+                <button @click="addMpPort()" class="bg-slate-100 hover:bg-slate-200 text-slate-600 font-semibold px-3 rounded-lg text-sm">Add</button>
+            </div>
 
-             <!-- List -->
-             <div class="space-y-2 bg-slate-50 rounded-xl p-3 min-h-[60px]">
-                <template x-for="(item, i) in mpPorts" :key="`${item.zoneCode}-${i}`">
-                    <div class="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-sm">
-                        <div class="flex items-center gap-3">
-                            <div class="w-6 h-6 rounded-full bg-slate-100 flex items-center justify-center text-xs font-bold text-slate-500" x-text="i+1"></div>
-                            <div>
-                                <div class="text-sm font-medium text-slate-800" x-text="item.zoneCode"></div>
-                                <div class="text-[10px] text-slate-400" x-text="item.label"></div>
-                            </div>
+            <div class="bg-slate-50 rounded-lg p-2 min-h-[80px] space-y-2">
+                <template x-for="(item, i) in mpPorts" :key="i">
+                    <div class="flex items-center justify-between bg-white p-2 rounded border border-slate-200 shadow-sm text-sm">
+                        <div class="flex items-center gap-2">
+                            <span class="w-5 h-5 rounded-full bg-ocean-100 text-ocean-700 flex items-center justify-center text-xs font-bold" x-text="i+1"></span>
+                            <span class="font-medium text-slate-700" x-text="item.zoneCode"></span>
                         </div>
-                        <button @click="removeMpPort(i)" class="text-slate-400 hover:text-red-500">✕</button>
+                        <button @click="removeMpPort(i)" class="text-slate-400 hover:text-red-500">×</button>
                     </div>
                 </template>
-                <div x-show="mpPorts.length === 0" class="text-center text-xs text-slate-400 py-2">Add at least 2 ports to calculate voyage</div>
-             </div>
-          </div>
+                <div x-show="mpPorts.length === 0" class="text-center text-xs text-slate-400 py-4">Add at least 2 ports</div>
+            </div>
 
-          <button @click="submitMultiPort" :disabled="mpPorts.length < 2" class="w-full btn btn-primary py-2 disabled:opacity-50">Calculate Voyage Fees</button>
-
-          <!-- Multi-port history dropdown -->
-          <div class="relative mt-2" @click.away="mpHistoryDropdownOpen = false">
-            <div x-show="mpHistoryDropdownOpen"
-                 x-transition
-                 class="absolute right-0 top-0 mt-2 w-72 bg-white border border-slate-200 rounded-xl shadow-xl z-50">
-              <template x-if="!mpHistory.length">
-                <div class="p-4 text-xs text-slate-400">No multi-port voyages saved yet.</div>
-              </template>
-              <template x-for="item in mpHistory" :key="item.id">
-                <button type="button"
-                        @click="applyMultiPortHistory(item); mpHistoryDropdownOpen = false"
-                        class="w-full text-left px-4 py-3 hover:bg-indigo-50 border-b border-slate-100 last:border-0">
-                  <div class="flex justify-between items-start">
-                    <div>
-                      <div class="text-sm font-semibold text-slate-800" x-text="(item.ports || []).join(' → ')"></div>
-                      <div class="text-xs text-slate-500 mt-0.5">
-                        <span x-text="item.vesselName || 'Unknown Vessel'"></span>
-                        · <span x-text="formatDate(item.timestamp)"></span>
-                      </div>
-                    </div>
-                    <div class="text-xs font-mono text-indigo-600" x-text="formatCurrency(item.totalMandatory || 0)"></div>
-                  </div>
-                </button>
-              </template>
+            <button @click="submitMultiPort" :disabled="mpPorts.length < 2" class="w-full btn bg-white border border-ocean-200 text-ocean-700 hover:bg-ocean-50 font-semibold py-2 rounded-lg text-sm disabled:opacity-50">Calculate Itinerary</button>
+            
+            <!-- Multi-Port History -->
+            <div x-show="mpHistory.length > 0" class="pt-2 border-t border-slate-100">
+                <div class="text-xs text-slate-400 mb-1">Recent Itineraries</div>
+                <div class="flex flex-wrap gap-2">
+                    <template x-for="(h, idx) in mpHistory" :key="idx">
+                        <button @click="applyMpHistory(h)" class="text-[10px] bg-slate-100 hover:bg-slate-200 text-slate-600 px-2 py-1 rounded border border-slate-200 truncate max-w-[100px]" x-text="h.label"></button>
+                    </template>
+                </div>
             </div>
           </div>
         </div>
 
       </div> <!-- End Left Column -->
 
-      <!-- RIGHT COLUMN: Results -->
-      <div class="lg:col-span-2 space-y-6">
+      <!-- RIGHT COLUMN: Results (Span 8) -->
+      <div class="lg:col-span-8 space-y-6">
 
-        <!-- 1. Compliance Alerts -->
-        <div x-show="liveData && liveData.alerts && liveData.alerts.length" class="bg-amber-50 border-l-4 border-amber-400 rounded-xl p-4 shadow-sm animate-slide-up print-hidden">
-          <div class="flex items-center justify-between mb-2">
-            <h4 class="font-bold text-amber-900 flex items-center gap-2">
-                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
-                Compliance Alerts
-            </h4>
-            <span class="badge bg-amber-100 text-amber-800">Live</span>
-          </div>
-          <ul class="text-sm text-amber-800/90 space-y-1 pl-1">
-            <template x-for="a in (liveData && liveData.alerts ? liveData.alerts : [])" :key="a">
-                <li class="flex items-start gap-2">
-                    <span class="mt-1.5 w-1.5 h-1.5 bg-amber-500 rounded-full flex-shrink-0"></span>
-                    <span x-text="a"></span>
-                </li>
-            </template>
-          </ul>
-        </div>
-
-        <!-- Weather & Tide Snapshot -->
-        <div x-show="weatherSnapshot || selectedPortHolidays.length" class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up print-hidden" style="animation-delay:0.05s;">
-          <div class="flex flex-col gap-4">
-            <div x-show="weatherSnapshot" class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div>
-                <div class="text-xs uppercase tracking-wide text-slate-400 font-semibold">Weather</div>
-                <div class="text-3xl font-bold text-slate-800" x-text="weatherSnapshot?.temperature != null ? `${Number(weatherSnapshot.temperature).toFixed(0)}°F` : '--'"></div>
-                <div class="text-sm text-slate-500" x-text="weatherSnapshot?.description"></div>
-              </div>
-              <div class="text-right text-sm text-slate-600">
-                <div class="font-semibold" x-text="weatherSnapshot?.wind_speed != null ? `${Number(weatherSnapshot.wind_speed).toFixed(0)} kt` : ''"></div>
-                <div class="text-xs text-slate-400">Wind Dir: <span x-text="weatherSnapshot?.wind_direction != null ? `${weatherSnapshot.wind_direction}°` : '—'"></span></div>
-              </div>
-            </div>
-            <div x-show="weatherSnapshot?.tide" class="bg-indigo-50 border border-indigo-100 rounded-xl p-3 text-sm text-indigo-900">
-              Next high tide <strong x-text="formatLocalTime(weatherSnapshot?.tide?.time)"></strong>
-              · <span class="font-semibold" x-text="weatherSnapshot?.tide?.height != null ? `${Number(weatherSnapshot.tide.height).toFixed(2)} m` : ''"></span>
-            </div>
-            <div x-show="selectedPortHolidays.length" class="text-sm text-slate-600">
-              <div class="text-xs uppercase font-semibold text-amber-600 mb-2">Upcoming Holidays</div>
-              <ul class="space-y-2">
-                <template x-for="holiday in selectedPortHolidays" :key="holiday.date + holiday.name">
-                  <li class="flex items-start gap-2">
-                    <span class="text-lg">⚠️</span>
-                    <div>
-                      <div class="font-semibold text-slate-800" x-text="`${holiday.name} · ${formatDate(holiday.date)}`"></div>
-                      <div class="text-xs text-slate-500" x-text="holiday.notes || holiday.note"></div>
+        <!-- Alerts -->
+        <div x-show="liveData && liveData.alerts && liveData.alerts.length" class="bg-amber-50 border-l-4 border-amber-400 p-4 rounded-r-lg shadow-sm animate-enter no-print">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-amber-400" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clip-rule="evenodd" /></svg>
+                </div>
+                <div class="ml-3">
+                    <h3 class="text-sm font-medium text-amber-800">Compliance Alerts</h3>
+                    <div class="mt-2 text-sm text-amber-700">
+                        <ul class="list-disc pl-5 space-y-1">
+                            <template x-for="a in liveData.alerts" :key="a"><li x-text="a"></li></template>
+                        </ul>
                     </div>
-                  </li>
-                </template>
-              </ul>
+                </div>
             </div>
-          </div>
         </div>
 
-        <!-- 2. Empty State -->
-        <div x-show="!estimate && !estimateV2 && !mpResult && !selectedPort" class="border-2 border-dashed border-slate-200 rounded-2xl p-12 text-center h-full min-h-[280px] sm:min-h-[400px] flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 animate-slide-up">
-            <div class="w-20 h-20 bg-white rounded-full shadow-sm flex items-center justify-center mb-6">
-                <svg class="w-10 h-10 text-indigo-200" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
-            </div>
-            <h4 class="font-bold text-xl text-slate-600 mb-2">Ready to Calculate</h4>
-            <p class="text-sm max-w-xs mx-auto text-slate-500">Select a vessel and configure your voyage details on the left to generate a comprehensive fee estimate.</p>
-        </div>
-
-        <!-- 3. Estimate Results V2 (Modern) -->
-        <template x-if="!!estimateV2">
-          <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up results-card">
-            <div class="print-header">
+        <!-- Weather Widget -->
+        <div x-show="weatherSnapshot" class="card p-4 flex flex-wrap items-center justify-between gap-4 bg-gradient-to-r from-slate-800 to-slate-900 text-white border-none no-print animate-enter">
+            <div class="flex items-center gap-4">
+                <div class="text-4xl">🌤</div>
                 <div>
-                    <div class="text-lg font-bold text-slate-900">Maritime MVP</div>
-                    <div class="text-xs text-slate-500">Proforma Estimate</div>
-                </div>
-                <div class="text-right text-xs text-slate-500">
-                    <div x-text="selectedPortContext?.label || selectedPort || '—'"></div>
-                    <div x-text="formatDate(estimateV2?.voyage?.eta)"></div>
+                    <div class="text-2xl font-bold" x-text="weatherSnapshot?.temperature != null ? `${Number(weatherSnapshot.temperature).toFixed(0)}°F` : '--'"></div>
+                    <div class="text-sm text-slate-300" x-text="weatherSnapshot?.description"></div>
                 </div>
             </div>
-            <div class="flex items-center justify-between mb-6 print-hidden">
-              <h3 class="text-xl font-bold text-slate-800">Fee Estimate</h3>
-              <div class="flex gap-3 items-center">
-                 <div class="text-xs text-slate-500 flex items-center gap-1 bg-slate-100 px-2 py-1 rounded-lg">
-                    <span>Confidence</span>
-                    <span class="font-bold" :class="Number(estimateV2?.confidence) > 0.8 ? 'text-emerald-600' : 'text-amber-600'" x-text="Math.round(Number(estimateV2?.confidence)*100) + '%'"></span>
-                 </div>
-                 <div class="flex gap-1">
-                    <button @click="clientExport('csv')" class="btn btn-outline px-3 py-1 text-xs h-8">CSV</button>
-                    <button @click="clientExport('json')" class="btn btn-outline px-3 py-1 text-xs h-8">JSON</button>
-                 </div>
-                 <button @click="printEstimate" class="btn btn-outline px-3 py-1 text-xs h-8">Print PDF</button>
-              </div>
+            <div class="flex gap-6 text-sm text-slate-300">
+                <div class="text-right">
+                    <div class="text-xs uppercase tracking-wider text-slate-500">Wind</div>
+                    <div class="font-mono text-white" x-text="weatherSnapshot?.wind_speed != null ? `${Number(weatherSnapshot.wind_speed).toFixed(0)} kt` : '--'"></div>
+                </div>
+                <div class="text-right" x-show="weatherSnapshot?.tide">
+                    <div class="text-xs uppercase tracking-wider text-slate-500">Next High Tide</div>
+                    <div class="font-mono text-white" x-text="formatLocalTime(weatherSnapshot?.tide?.time)"></div>
+                </div>
             </div>
+        </div>
 
-            <!-- Summary Cards -->
-            <div class="flex flex-col sm:flex-row gap-4 mb-8">
-                <div class="flex-1 bg-slate-800 text-white rounded-2xl p-5 shadow-xl shadow-slate-200 relative overflow-hidden">
-                    <div class="absolute top-0 right-0 -mt-4 -mr-4 w-24 h-24 bg-white/10 rounded-full blur-2xl pointer-events-none"></div>
-                    <div class="text-xs text-slate-400 uppercase font-bold tracking-wider mb-1">Mandatory Fees</div>
-                    <div class="text-3xl font-bold tracking-tight" x-text="'$' + Number(estimateV2?.totals?.mandatory || 0).toLocaleString(undefined, {minimumFractionDigits: 2})"></div>
-                    <div class="text-xs text-slate-400 mt-2 opacity-80">Baseline port costs</div>
-                </div>
-                <div class="flex-1 bg-white border border-slate-200 rounded-2xl p-5 shadow-sm relative">
-                    <div class="text-xs text-indigo-500 uppercase font-bold tracking-wider mb-1">Total (High Estimate)</div>
-                    <div class="text-3xl font-bold text-indigo-600 tracking-tight" x-text="'$' + Number(estimateV2?.totals?.total_high || 0).toLocaleString(undefined, {minimumFractionDigits: 2})"></div>
-                    <div class="text-xs text-slate-400 mt-2 flex items-center gap-1">
-                        Range: <span class="font-mono text-slate-600" x-text="'$' + Number(estimateV2?.totals?.total_low).toLocaleString()"></span> - High
+        <!-- Empty State -->
+        <div x-show="!estimate && !estimateV2 && !mpResult" class="h-96 border-2 border-dashed border-slate-300 rounded-xl flex flex-col items-center justify-center text-slate-400 bg-slate-50/50 no-print">
+            <svg class="w-16 h-16 mb-4 text-slate-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            <h3 class="text-lg font-semibold text-slate-600">Ready to Calculate</h3>
+            <p class="text-sm max-w-xs text-center mt-2">Select a vessel and configure the voyage details on the left to generate a fee estimate.</p>
+        </div>
+
+        <!-- RESULT: V2 Estimate -->
+        <template x-if="!!estimateV2">
+            <div class="card overflow-hidden animate-enter">
+                <!-- Header -->
+                <div class="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                    <div>
+                        <h2 class="text-xl font-bold text-slate-800">Proforma Estimate</h2>
+                        <div class="text-sm text-slate-500 mt-1 flex items-center gap-2">
+                            <span x-text="selectedPortContext?.label || selectedPort"></span>
+                            <span>•</span>
+                            <span x-text="formatDate(estimateV2?.voyage?.eta)"></span>
+                        </div>
+                    </div>
+                    <div class="flex gap-2 no-print">
+                        <button @click="clientExport('csv')" class="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded hover:bg-slate-50">CSV</button>
+                        <button @click="printEstimate" class="px-3 py-1.5 text-xs font-medium text-white bg-slate-800 border border-slate-800 rounded hover:bg-slate-700">Print PDF</button>
                     </div>
                 </div>
-            </div>
 
-            <!-- Context Bar -->
-            <div class="bg-slate-50 rounded-xl p-4 mb-6 text-sm text-slate-600 border border-slate-100 grid sm:grid-cols-2 gap-4">
-               <div class="flex flex-col gap-1">
-                   <div class="text-xs font-bold text-slate-400 uppercase">Voyage</div>
-                   <div><span x-text="estimateV2?.voyage?.previous_port"></span> <span class="text-slate-300">→</span> <strong class="text-slate-800" x-text="estimateV2?.port?.arrival_unlocode || estimateV2?.port?.resolved_internal_code"></strong> <span class="text-slate-300">→</span> <span x-text="estimateV2?.voyage?.next_port || '-'"></span></div>
-               </div>
-               <div class="flex flex-col gap-1">
-                   <div class="text-xs font-bold text-slate-400 uppercase">Timeline</div>
-                   <div>ETA: <span x-text="estimateV2?.voyage?.eta?.split('T')[0]"></span> <span class="text-slate-400 mx-1">|</span> <span x-text="estimateV2?.voyage?.is_weekend ? 'Weekend Rate' : 'Weekday'"></span></div>
-               </div>
-            </div>
+                <!-- Summary Cards -->
+                <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="bg-slate-900 text-white rounded-xl p-5 shadow-lg relative overflow-hidden">
+                        <div class="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-xl"></div>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Mandatory Fees</p>
+                        <p class="text-3xl font-bold tracking-tight" x-text="formatCurrency(estimateV2?.totals?.mandatory)"></p>
+                        <p class="text-xs text-slate-400 mt-2">Baseline port costs</p>
+                    </div>
+                    <div class="bg-white border border-slate-200 rounded-xl p-5">
+                        <p class="text-xs font-bold text-ocean-600 uppercase tracking-wider mb-1">Total (High Estimate)</p>
+                        <p class="text-3xl font-bold text-slate-900 tracking-tight" x-text="formatCurrency(estimateV2?.totals?.total_high)"></p>
+                        <p class="text-xs text-slate-500 mt-2">Includes optional services & contingencies</p>
+                    </div>
+                </div>
 
-            <!-- Line Items -->
-            <div class="border rounded-xl border-slate-200 overflow-hidden">
-                <table class="w-full text-sm text-left">
-                    <thead class="bg-slate-50 text-xs uppercase text-slate-500 font-semibold">
+                <!-- Details Table -->
+                <div class="px-6 pb-6">
+                    <div class="border border-slate-200 rounded-lg overflow-hidden">
+                        <table class="min-w-full divide-y divide-slate-200">
+                            <thead class="bg-slate-50">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase tracking-wider">Item</th>
+                                    <th scope="col" class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase tracking-wider">Amount</th>
+                                </tr>
+                            </thead>
+                            <tbody class="bg-white divide-y divide-slate-200">
+                                <template x-for="c in (estimateV2?.calculations || [])" :key="c.code">
+                                    <tr class="hover:bg-slate-50/50 transition-colors">
+                                        <td class="px-6 py-3">
+                                            <div class="flex items-center gap-2">
+                                                <span class="text-sm font-medium text-slate-900" x-text="c.name"></span>
+                                                <span x-show="c.is_optional" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-slate-100 text-slate-800">Optional</span>
+                                            </div>
+                                            <div class="text-xs text-slate-500 mt-0.5 font-mono" x-text="c.details"></div>
+                                        </td>
+                                        <td class="px-6 py-3 text-right whitespace-nowrap text-sm text-slate-600 font-mono" x-text="formatCurrency(c.final_amount)"></td>
+                                    </tr>
+                                </template>
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <!-- Demurrage Alert -->
+                    <div class="mt-6 bg-rose-50 border border-rose-100 rounded-lg p-4 flex justify-between items-center no-print">
+                        <div>
+                            <h4 class="text-sm font-bold text-rose-800">Potential Demurrage Risk</h4>
+                            <p class="text-xs text-rose-600 mt-1">
+                                Based on <span class="font-semibold" x-text="daysAlongside"></span> days alongside vs <span class="font-semibold" x-text="laytimeAllowedDays"></span> allowed.
+                            </p>
+                        </div>
+                        <div class="text-right">
+                            <div class="text-lg font-bold text-rose-700" x-text="formatCurrency(potentialDemurrage())"></div>
+                            <div class="text-[10px] text-rose-500 uppercase">Est. Extra Cost</div>
+                        </div>
+                    </div>
+
+                    <div class="mt-6 text-center">
+                        <p class="text-xs text-slate-400" x-text="estimateV2?.disclaimer"></p>
+                    </div>
+                </div>
+                
+                <!-- Print Footer -->
+                <div class="print-only border-t border-slate-200 p-4 text-center text-xs text-slate-400">
+                    Generated by Maritime MVP on <span x-text="new Date().toLocaleDateString()"></span>
+                </div>
+            </div>
+        </template>
+
+        <!-- RESULT: V1 Estimate (Legacy) -->
+        <template x-if="estimate && !estimateV2">
+            <div class="card overflow-hidden animate-enter">
+                <div class="bg-slate-50 px-6 py-4 border-b border-slate-200 flex justify-between items-center">
+                    <h2 class="text-lg font-bold text-slate-800">Fee Estimate (Basic)</h2>
+                    <div class="flex gap-2 no-print">
+                        <button @click="clientExport('csv')" class="px-3 py-1.5 text-xs font-medium text-slate-600 bg-white border border-slate-300 rounded hover:bg-slate-50">CSV</button>
+                        <button @click="printEstimate" class="px-3 py-1 text-xs font-medium bg-white border border-slate-300 rounded hover:bg-slate-50">Print</button>
+                    </div>
+                </div>
+                <div class="p-0">
+                    <table class="min-w-full divide-y divide-slate-200">
+                        <thead class="bg-slate-50">
+                            <tr>
+                                <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Fee</th>
+                                <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase">Amount</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-100 bg-white">
+                            <template x-for="item in (estimate?.line_items || [])" :key="item.code">
+                                <tr>
+                                    <td class="px-6 py-3 text-sm text-slate-700" x-text="item.name"></td>
+                                    <td class="px-6 py-3 text-right text-sm font-mono text-slate-600" x-text="`$${item.amount}`"></td>
+                                </tr>
+                            </template>
+                        </tbody>
+                        <tfoot class="bg-slate-50 font-bold text-slate-800">
+                            <tr>
+                                <td class="px-6 py-4">Total Mandatory</td>
+                                <td class="px-6 py-4 text-right text-ocean-600" x-text="`$${estimate.total}`"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </div>
+        </template>
+
+        <!-- RESULT: Multi-Port -->
+        <div x-show="mpResult" class="card overflow-hidden animate-enter">
+            <div class="bg-slate-50 px-6 py-4 border-b border-slate-200">
+                <h2 class="text-lg font-bold text-slate-800">Voyage Itinerary Plan</h2>
+            </div>
+            <div class="p-0 overflow-x-auto">
+                <table class="min-w-full divide-y divide-slate-200">
+                    <thead class="bg-slate-50">
                         <tr>
-                            <th class="px-4 py-3">Item</th>
-                            <th class="px-4 py-3 text-right">Amount</th>
+                            <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Leg</th>
+                            <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Route</th>
+                            <th class="px-6 py-3 text-left text-xs font-bold text-slate-500 uppercase">Date</th>
+                            <th class="px-6 py-3 text-right text-xs font-bold text-slate-500 uppercase">Est. Cost</th>
                         </tr>
                     </thead>
-                    <tbody class="divide-y divide-slate-100">
-                        <template x-for="c in (estimateV2?.calculations || [])" :key="c.code">
-                            <tr class="hover:bg-slate-50/50 transition-colors">
-                                <td class="px-4 py-3">
-                                    <div class="flex items-baseline gap-2">
-                                        <span class="font-medium text-slate-700" x-text="c.name"></span>
-                                        <span x-show="c.is_optional" class="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 uppercase tracking-wide">Optional</span>
-                                    </div>
-                                    <div class="text-xs text-slate-400 mt-0.5 font-mono" x-text="c.details"></div>
-                                </td>
-                                <td class="px-4 py-3 text-right align-top">
-                                    <div class="font-mono font-medium text-slate-700" x-text="'$' + Number(c.final_amount).toLocaleString(undefined, {minimumFractionDigits: 2})"></div>
-                                </td>
+                    <tbody class="bg-white divide-y divide-slate-100">
+                        <template x-for="leg in (mpResult?.legs || [])" :key="leg.leg">
+                            <tr>
+                                <td class="px-6 py-3 text-sm text-slate-500" x-text="leg.leg"></td>
+                                <td class="px-6 py-3 text-sm font-medium text-slate-800" x-text="`${leg.from_port} → ${leg.to_port}`"></td>
+                                <td class="px-6 py-3 text-sm text-slate-500" x-text="leg.eta.split('T')[0]"></td>
+                                <td class="px-6 py-3 text-right text-sm font-mono font-bold text-ocean-600" x-text="`$${(Number(leg.fees?.mandatory||0)+Number(leg.fees?.optional_high||0)).toLocaleString()}`"></td>
                             </tr>
                         </template>
                     </tbody>
                 </table>
             </div>
-
-            <p class="text-[11px] text-slate-400 mt-6 text-center leading-relaxed max-w-lg mx-auto">
-                <span x-text="estimateV2?.disclaimer"></span><br>
-                <span x-text="estimateV2?.accuracy_statement"></span>
-            </p>
-
-            <div class="mt-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 text-sm text-rose-900 print-hidden">
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="text-xs uppercase tracking-wide font-semibold">Potential Extra Cost</div>
-                  <div class="text-2xl font-bold mt-1" x-text="formatCurrency(potentialDemurrage())"></div>
-                </div>
-                <div class="text-xs text-rose-600">
-                  Based on <span class="font-semibold" x-text="daysAlongside"></span> days vs
-                  <span class="font-semibold" x-text="laytimeAllowedDays"></span> allowed @
-                  <span class="font-semibold" x-text="formatCurrency(demurrageRate)"></span>/day
-                </div>
-              </div>
-            </div>
-            
-            <div class="print-footer">
-                <span>Generated <span x-text="formatDate(new Date().toISOString())"></span></span>
-                <span>Maritime MVP • Planning use only</span>
-            </div>
-          </div>
-        </template>
-
-        <!-- 4. Estimate Results V1 (Legacy) -->
-        <template x-if="estimate && !estimateV2">
-          <div class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up results-card">
-             <div class="print-header">
-                <div>
-                    <div class="text-lg font-bold text-slate-900">Maritime MVP</div>
-                    <div class="text-xs text-slate-500">Proforma Estimate</div>
-                </div>
-                <div class="text-right text-xs text-slate-500">
-                    <div x-text="selectedPortContext?.label || selectedPort || '—'"></div>
-                    <div x-text="formatDate(estimate?.eta)"></div>
-                </div>
-            </div>
-            <div class="flex items-center justify-between mb-4 print-hidden">
-              <h3 class="text-xl font-bold text-slate-800">Fee Estimate (Simple)</h3>
-              <div class="flex gap-2">
-                <button @click="clientExport('csv')" class="btn btn-outline px-3 py-1 text-xs">CSV</button>
-                <button @click="printEstimate" class="btn btn-outline px-3 py-1 text-xs">Print PDF</button>
-              </div>
-            </div>
-
-            <div class="overflow-hidden border rounded-xl border-slate-200">
-              <table class="min-w-full text-sm">
-                <thead class="bg-slate-50 text-xs uppercase text-slate-500 font-semibold">
-                  <tr>
-                    <th class="px-4 py-3 text-left">Fee</th>
-                    <th class="px-4 py-3 text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody class="divide-y divide-slate-100">
-                  <template x-for="item in (estimate && estimate.line_items ? estimate.line_items : [])" :key="item.code">
-                    <tr>
-                      <td class="px-4 py-3">
-                        <div class="font-medium text-slate-700" x-text="item.name"></div>
-                        <div class="text-xs text-slate-400 font-mono" x-text="item.code"></div>
-                      </td>
-                      <td class="px-4 py-3 text-right font-mono text-slate-700" x-text="`$${item.amount}`"></td>
-                    </tr>
-                  </template>
-                </tbody>
-                <tfoot class="bg-slate-50 border-t border-slate-200">
-                  <tr>
-                    <td class="px-4 py-3 font-bold text-slate-700">Total Mandatory</td>
-                    <td class="px-4 py-3 text-right font-bold text-lg text-indigo-600" x-text="estimate ? (`$${estimate.total}`) : ''"></td>
-                  </tr>
-                </tfoot>
-              </table>
-            </div>
-
-            <div x-show="estimate && estimate.optional_services" class="mt-6">
-               <h4 class="font-bold text-slate-700 text-sm mb-3">Optional Services</h4>
-               <div class="space-y-2">
-                 <template x-for="s in (estimate?.optional_services || [])" :key="s.service">
-                   <div class="flex justify-between text-sm p-3 bg-white border border-slate-100 rounded-lg">
-                     <div>
-                       <div class="font-medium text-slate-700" x-text="s.service"></div>
-                       <div class="text-xs text-slate-400" x-text="s.note"></div>
-                     </div>
-                     <div class="text-right font-mono text-slate-600">
-                        <template x-if="s.estimated_low">
-                             <span x-text="`$${Number(s.estimated_low).toLocaleString()} - $${Number(s.estimated_high).toLocaleString()}`"></span>
-                        </template>
-                        <template x-if="s.manual_entry">
-                             <span class="text-xs font-sans text-amber-600 font-bold">Quote Req.</span>
-                        </template>
-                     </div>
-                   </div>
-                 </template>
-               </div>
-            </div>
-            
-            <div class="mt-6 bg-rose-50 border border-rose-100 rounded-2xl p-4 text-sm text-rose-900 print-hidden">
-              <div class="flex items-center justify-between">
-                <div>
-                  <div class="text-xs uppercase tracking-wide font-semibold">Potential Extra Cost</div>
-                  <div class="text-2xl font-bold mt-1" x-text="formatCurrency(potentialDemurrage())"></div>
-                </div>
-                <div class="text-xs text-rose-600">
-                  Using laytime cap of <span class="font-semibold" x-text="laytimeAllowedDays"></span> days @
-                  <span class="font-semibold" x-text="formatCurrency(demurrageRate)"></span>/day
-                </div>
-              </div>
-            </div>
-
-            <div class="print-footer">
-                <span>Generated <span x-text="formatDate(new Date().toISOString())"></span></span>
-                <span>Maritime MVP • Planning use only</span>
-            </div>
-          </div>
-        </template>
-
-        <!-- 5. Multi-Port Results -->
-        <div x-show="mpResult" class="glass card p-4 sm:p-5 lg:p-6 animate-slide-up results-card">
-            <div class="flex items-center justify-between mb-4 print-hidden">
-                <h3 class="text-xl font-bold text-slate-800">Multi-Port Voyage Plan</h3>
-                <div class="text-xs bg-indigo-50 text-indigo-700 px-2 py-1 rounded-lg font-bold">
-                    <span x-text="mpResult?.voyage_summary?.total_legs"></span> Legs
-                </div>
-            </div>
-
-            <div class="overflow-x-auto rounded-xl border border-slate-200 mb-4">
-              <table class="min-w-full text-sm">
-                <thead class="bg-slate-50 text-xs uppercase text-slate-500 font-semibold"><tr>
-                  <th class="px-4 py-3 text-left">#</th>
-                  <th class="px-4 py-3 text-left">Route</th>
-                  <th class="px-4 py-3 text-left">Timing</th>
-                  <th class="px-4 py-3 text-right">Mandatory</th>
-                  <th class="px-4 py-3 text-right">Total Est.</th>
-                </tr></thead>
-                <tbody class="divide-y divide-slate-100">
-                  <template x-for="leg in (mpResult?.legs || [])" :key="leg.leg">
-                    <tr class="hover:bg-slate-50">
-                      <td class="px-4 py-3 font-medium text-slate-400" x-text="leg.leg"></td>
-                      <td class="px-4 py-3 font-medium text-slate-700" x-text="`${leg.from_port} → ${leg.to_port}`"></td>
-                      <td class="px-4 py-3 text-slate-500"><div x-text="leg.eta.split('T')[0]"></div></td>
-                      <td class="px-4 py-3 text-right font-mono text-slate-600" x-text="`$${Number(leg.fees?.mandatory || 0).toLocaleString()}`"></td>
-                      <td class="px-4 py-3 text-right font-mono font-bold text-indigo-600" x-text="`$${(Number(leg.fees?.mandatory||0)+Number(leg.fees?.optional_high||0)).toLocaleString()}`"></td>
-                    </tr>
-                  </template>
-                </tbody>
-              </table>
-            </div>
-
-            <div class="flex justify-between items-end p-4 bg-slate-800 text-white rounded-xl">
-                <div>
-                    <div class="text-xs text-slate-400 uppercase font-bold">Total Voyage Cost</div>
-                    <div class="text-sm opacity-80">Mandatory Fees</div>
-                </div>
-                <div class="text-right">
-                    <div class="text-3xl font-bold" x-text="`$${Number(mpResult?.total_voyage_cost?.mandatory || 0).toLocaleString()}`"></div>
-                </div>
-            </div>
-
-            <div class="mt-4 bg-blue-50 p-4 rounded-xl print-hidden" x-show="mpResult?.optimization_suggestions?.length">
-                <h5 class="font-bold text-blue-800 text-sm mb-2">Optimization Suggestions</h5>
-                <ul class="list-disc list-inside text-sm text-blue-700 space-y-1">
-                    <template x-for="s in (mpResult?.optimization_suggestions || [])" :key="s">
-                        <li x-text="s"></li>
-                    </template>
-                </ul>
+            <div class="bg-slate-900 text-white p-4 flex justify-between items-center">
+                <span class="text-sm font-medium opacity-80">Total Voyage Cost</span>
+                <span class="text-2xl font-bold" x-text="`$${Number(mpResult?.total_voyage_cost?.mandatory || 0).toLocaleString()}`"></span>
             </div>
         </div>
 
-        <!-- Quick Actions -->
-        <div class="flex gap-3 justify-end pt-4 border-t border-slate-200/50 print-hidden">
-          <button @click="refreshAll" class="text-xs btn btn-outline px-4 py-2">Refresh Data</button>
-          <button @click="clearCache" class="text-xs btn btn-outline px-4 py-2 hover:text-red-600 hover:border-red-200">Clear Cache</button>
+        <!-- Footer Actions -->
+        <div class="flex justify-end gap-4 pt-4 border-t border-slate-200 no-print">
+            <button @click="refreshAll" class="text-xs text-slate-500 hover:text-ocean-600">Refresh Data</button>
+            <button @click="clearCache" class="text-xs text-slate-500 hover:text-red-600">Clear Cache</button>
         </div>
 
       </div> <!-- End Right Column -->
     </div>
+  </main>
 
-    <footer class="mt-12 py-8 border-t border-slate-200 text-center print-hidden">
-      <p class="text-sm text-slate-500">Maritime MVP &copy; 2025</p>
-      <p class="text-xs text-slate-400 mt-1">Data sources: USCG PSIX, CBP, APHIS. Estimates for planning purposes only.</p>
-    </footer>
-  </div>
-
-  <!-- SCRIPT (Logic) -->
+  <!-- Logic Script -->
   <script>
     function portCallApp() {
       return {
         // --- State ---
-        activeTab: 'voyage', // Tabs state
+        activeTab: 'voyage',
         apiStatus: 'Checking…',
         cacheStats: '',
   
@@ -1054,7 +751,7 @@
         draftAftMeters: 0,
         airDraftMeters: 0,
 
-        // autofill flags (for badges)
+        // autofill flags
         autoGT: false,
         autoNT: false,
         autoLOA: false,
@@ -1063,14 +760,6 @@
         // UN/LOCODE suggestions
         unlocPrev: [],
         unlocNext: [],
-        // Common UN/LOCODEs for quick selection in advanced mode
-        unlocDefaults: [
-          { locode: "USLAX", port_name: "Los Angeles, CA" },
-          { locode: "USLGB", port_name: "Long Beach, CA" },
-          { locode: "USOAK", port_name: "Oakland, CA" },
-          { locode: "USSEA", port_name: "Seattle, WA" },
-          { locode: "USPDX", port_name: "Portland, OR" },
-        ],
   
         // multi-port
         mpVesselName: '',
@@ -1080,7 +769,6 @@
         mpPorts: [],
         mpResult: null,
         mpHistory: [],
-        mpHistoryDropdownOpen: false,
   
         // results
         estimate: null,
@@ -1098,7 +786,7 @@
           await this.checkHealth();
           await this.loadPorts();
           this.loadEstimateHistory();
-          this.loadMultiPortHistory();
+          this.initMpHistory();
         },
   
         async checkHealth() {
@@ -1117,17 +805,7 @@
           try {
             const r = await fetch(`${API_BASE}/ports`);
             const payload = await r.json();
-
-            // Accept several backend response shapes:
-            //   [ ...zones ]
-            //   { zones: [ ... ] }
-            //   { data: [ ... ] }
-            const zones = Array.isArray(payload)
-              ? payload
-              : Array.isArray(payload.zones)
-                ? payload.zones
-                : Array.isArray(payload.data) ? payload.data : [];
-
+            const zones = Array.isArray(payload) ? payload : Array.isArray(payload.zones) ? payload.zones : Array.isArray(payload.data) ? payload.data : [];
             this.buildPortCaches(zones);
             this.filteredPorts = [];
             this.mpFilteredPorts = [];
@@ -1143,16 +821,9 @@
           const tokenize = (...values) => {
             const tokens = new Set();
             const push = (value) => {
-              if (Array.isArray(value)) {
-                value.forEach(push);
-                return;
-              }
+              if (Array.isArray(value)) { value.forEach(push); return; }
               if (value == null) return;
-              String(value)
-                .toLowerCase()
-                .split(/[^a-z0-9]+/i)
-                .filter(Boolean)
-                .forEach((token) => tokens.add(token));
+              String(value).toLowerCase().split(/[^a-z0-9]+/i).filter(Boolean).forEach((token) => tokens.add(token));
             };
             values.forEach(push);
             return Array.from(tokens).join(' ');
@@ -1174,16 +845,10 @@
             this.zoneLookup[zoneCode] = zone;
             this.zoneLabels[zoneCode] = zoneCode ? `${zoneName} (${zoneCode})` : zoneName;
 
-            const zoneTokenCollector = [
-              zoneCode,
-              zoneName,
-              zone?.region,
-              zone?.primary_state,
-              zone?.country,
-            ];
-
+            const zoneTokenCollector = [zoneCode, zoneName, zone?.region, zone?.primary_state, zone?.country];
             const zoneEntries = [];
             const ports = Array.isArray(zone?.ports) ? zone.ports : [];
+            
             for (const port of ports) {
               const portCode = String(port?.code || '').trim().toUpperCase();
               const portName = port?.name || portCode || 'Unnamed Port';
@@ -1191,44 +856,22 @@
               if (portCode) this.portLabels[`${zoneCode}::${portCode}`] = `${zoneName} • ${portName}`;
 
               zoneTokenCollector.push(portCode, portName, port?.state, port?.country, port?.region);
+              const location = [port?.state || zone?.primary_state, port?.country || zone?.country].filter(Boolean).join(', ');
 
-              const location = [
-                port?.state || zone?.primary_state,
-                port?.country || zone?.country,
-              ].filter(Boolean).join(', ');
+              // Deduplication: If ZoneCode == PortCode and it's the only port, skip the port entry
+              const isSelfZone = ports.length === 1 && zoneCode && portCode && zoneCode === portCode;
 
               const portEntry = {
-                type: 'port',
-                zoneCode,
-                zoneName,
-                portCode,
-                portName,
-                terminalCode: null,
-                terminalName: null,
-                zone,
-                port,
-                terminal: null,
+                type: 'port', zoneCode, zoneName, portCode, portName, terminalCode: null, terminalName: null, zone, port, terminal: null,
                 label: `${zoneName} • ${portName}`,
-                description: [
-                  zoneCode ? `Zone ${zoneCode}` : null,
-                  portCode ? `Port ${portCode}` : null,
-                  location || null,
-                ].filter(Boolean).join(' · '),
+                description: [zoneCode ? `Zone ${zoneCode}` : null, portCode ? `Port ${portCode}` : null, location || null].filter(Boolean).join(' · '),
                 operator: '',
-                haystack: tokenize(
-                  zoneCode,
-                  zoneName,
-                  zone?.region,
-                  zone?.primary_state,
-                  zone?.country,
-                  portCode,
-                  portName,
-                  port?.state,
-                  port?.country,
-                  port?.region,
-                ),
+                haystack: tokenize(zoneCode, zoneName, zone?.region, zone?.primary_state, zone?.country, portCode, portName, port?.state, port?.country, port?.region),
               };
-              zoneEntries.push(portEntry);
+              
+              if (!isSelfZone) {
+                  zoneEntries.push(portEntry);
+              }
 
               const terminals = Array.isArray(port?.public_terminals) ? port.public_terminals : [];
               for (const term of terminals) {
@@ -1237,48 +880,15 @@
                 const termName = term?.name || termCode || 'Terminal';
                 const operator = term?.operator_name || '';
                 const notes = term?.notes || '';
-
                 zoneTokenCollector.push(termCode, termName, operator);
-
                 const terminalEntry = {
-                  type: 'terminal',
-                  zoneCode,
-                  zoneName,
-                  portCode,
-                  portName,
-                  terminalCode: termCode || null,
-                  terminalName: termName,
-                  zone,
-                  port,
-                  terminal: term,
+                  type: 'terminal', zoneCode, zoneName, portCode, portName, terminalCode: termCode || null, terminalName: termName, zone, port, terminal: term,
                   label: `${zoneName} • ${portName} • ${termName}`,
-                  description: [
-                    zoneCode ? `Zone ${zoneCode}` : null,
-                    portCode ? `Port ${portCode}` : null,
-                    termCode ? `Terminal ${termCode}` : null,
-                    operator || null,
-                    location || null,
-                  ].filter(Boolean).join(' · '),
+                  description: [zoneCode ? `Zone ${zoneCode}` : null, portCode ? `Port ${portCode}` : null, termCode ? `Terminal ${termCode}` : null, operator || null, location || null].filter(Boolean).join(' · '),
                   operator,
-                  haystack: tokenize(
-                    zoneCode,
-                    zoneName,
-                    zone?.region,
-                    zone?.primary_state,
-                    zone?.country,
-                    portCode,
-                    portName,
-                    port?.state,
-                    port?.country,
-                    port?.region,
-                    termCode,
-                    termName,
-                    operator,
-                    notes,
-                  ),
+                  haystack: tokenize(zoneCode, zoneName, zone?.region, zone?.primary_state, zone?.country, portCode, portName, port?.state, port?.country, port?.region, termCode, termName, operator, notes),
                 };
                 zoneEntries.push(terminalEntry);
-
                 if (termCode) {
                   this.terminalLookup[`${zoneCode}::${termCode}`] = { zoneCode, portCode, terminal: term, port, zone };
                   this.terminalLabels[`${zoneCode}::${termCode}`] = terminalEntry.label;
@@ -1288,46 +898,23 @@
                 }
               }
             }
-
             const portCount = ports.length;
             const zoneEntry = {
-              type: 'zone',
-              zoneCode,
-              zoneName,
-              portCode: null,
-              portName: null,
-              terminalCode: null,
-              terminalName: null,
-              zone,
-              port: null,
-              terminal: null,
+              type: 'zone', zoneCode, zoneName, portCode: null, portName: null, terminalCode: null, terminalName: null, zone, port: null, terminal: null,
               label: zoneName,
-              description: [
-                zoneCode ? `Zone ${zoneCode}` : null,
-                [zone?.primary_state, zone?.country].filter(Boolean).join(', ') || null,
-                portCount ? `${portCount} port${portCount === 1 ? '' : 's'}` : null,
-              ].filter(Boolean).join(' · '),
+              description: [zoneCode ? `Zone ${zoneCode}` : null, [zone?.primary_state, zone?.country].filter(Boolean).join(', ') || null, portCount ? `${portCount} port${portCount === 1 ? '' : 's'}` : null].filter(Boolean).join(' · '),
               operator: '',
               haystack: tokenize(zoneTokenCollector),
             };
-
-            // Avoid duplicate-looking entries where the zone and its only port
-            // share the exact same display name (e.g., "Los Angeles/Long Beach").
-            let redundantZone = false;
-            if (portCount === 1) {
-              const onlyPort = ports[0] || {};
-              const zName = (zoneName || '').trim().toLowerCase();
-              const pName = (onlyPort.name || '').trim().toLowerCase();
-              if (zName && pName && zName === pName) {
-                redundantZone = true;
-              }
-            }
-
-            if (!redundantZone) {
-              index.push(zoneEntry);
-            }
-            index.push(...zoneEntries);
+            index.push(zoneEntry, ...zoneEntries);
           }
+          
+          // Sort index: Zones first, then Ports, then Terminals, then Alphabetical
+          index.sort((a, b) => {
+              const typeScore = { zone: 1, port: 2, terminal: 3 };
+              if (typeScore[a.type] !== typeScore[b.type]) return typeScore[a.type] - typeScore[b.type];
+              return (a.label || '').localeCompare(b.label || '');
+          });
 
           this.portSearchIndex = index;
         },
@@ -1354,10 +941,7 @@
           if (terminal?.operator_name) descriptionParts.push(terminal.operator_name);
 
           return {
-            ...entry,
-            zone,
-            port,
-            terminal,
+            ...entry, zone, port, terminal,
             label: labelParts.join(' • '),
             description: descriptionParts.join(' · '),
             operator: terminal?.operator_name || entry.operator || '',
@@ -1371,9 +955,7 @@
           const zonePorts = Array.isArray(ctx.zone?.ports) ? ctx.zone.ports : [];
           if (!zonePorts.length) return false;
           const zoneCode = String(ctx.zoneCode || '').toUpperCase();
-          const match = zoneCode
-            ? zonePorts.find((p) => String(p.code || '').toUpperCase() === zoneCode)
-            : null;
+          const match = zoneCode ? zonePorts.find((p) => String(p.code || '').toUpperCase() === zoneCode) : null;
           if (match && typeof match.is_eca === 'boolean') return match.is_eca;
           return zonePorts.some((p) => p.is_eca !== false);
         },
@@ -1392,8 +974,7 @@
         },
 
         getSelectedCoordinates() {
-          const port = this.getRepresentativePort()
-            || (Array.isArray(this.selectedPortDetails?.ports) ? this.selectedPortDetails.ports[0] : null);
+          const port = this.getRepresentativePort() || (Array.isArray(this.selectedPortDetails?.ports) ? this.selectedPortDetails.ports[0] : null);
           if (!port) return null;
           const lat = Number(port.latitude);
           const lon = Number(port.longitude);
@@ -1430,31 +1011,12 @@
         },
 
         describeWeather(code) {
-          const mapping = {
-            0: 'Clear',
-            1: 'Mainly clear',
-            2: 'Partly cloudy',
-            3: 'Overcast',
-            45: 'Fog',
-            48: 'Depositing rime fog',
-            51: 'Light drizzle',
-            61: 'Light rain',
-            63: 'Rain',
-            65: 'Heavy rain',
-            71: 'Snow',
-            80: 'Rain showers',
-            95: 'Thunderstorms'
-          };
+          const mapping = { 0: 'Clear', 1: 'Mainly clear', 2: 'Partly cloudy', 3: 'Overcast', 45: 'Fog', 48: 'Depositing rime fog', 51: 'Light drizzle', 61: 'Light rain', 63: 'Rain', 65: 'Heavy rain', 71: 'Snow', 80: 'Rain showers', 95: 'Thunderstorms' };
           return mapping[code] || 'Conditions unavailable';
         },
 
-        portResultTitle(entry) {
-          return entry ? (entry.label || '') : '';
-        },
-
-        portResultDescription(entry) {
-          return entry ? (entry.description || '') : '';
-        },
+        portResultTitle(entry) { return entry ? (entry.label || '') : ''; },
+        portResultDescription(entry) { return entry ? (entry.description || '') : ''; },
 
         async afterPortSelection() {
           if (!this.selectedPort) {
@@ -1463,14 +1025,11 @@
             this.selectedPortHolidays = [];
             return;
           }
-
           try {
             this.loadLiveData();
             await this.fetchPortInsights(this.selectedPort);
             await this.loadWeatherSnapshot();
-          } catch (e) {
-            console.error('afterPortSelection failed:', e);
-          }
+          } catch (e) { console.error('afterPortSelection failed:', e); }
         },
 
         syncPortQueryWithSelection() {
@@ -1480,33 +1039,31 @@
             this.resetWeather();
             return;
           }
-          if (!this.selectedPortContext || this.selectedPortContext.zoneCode !== this.selectedPort) {
-            const fallback = this.portSearchIndex.find(
-              (entry) => entry.zoneCode === this.selectedPort && entry.type === 'zone'
-            );
+          
+          const code = this.selectedPort;
+          
+          if (!this.selectedPortContext || (this.selectedPortContext.portCode !== code && this.selectedPortContext.zoneCode !== code)) {
+            // Try to find a port match first, then zone match
+            const fallback = this.portSearchIndex.find((entry) => entry.portCode === code && entry.type === 'port') || 
+                             this.portSearchIndex.find((entry) => entry.zoneCode === code && entry.type === 'zone');
             this.selectedPortContext = this.makeSelectionContext(fallback ?? null);
           }
+          
           if (this.selectedPortContext) {
             this.portQuery = this.selectedPortContext.label;
             this.afterPortSelection();
           } else {
-            this.portQuery = this.zoneLabels[this.selectedPort] || this.selectedPort;
+            this.portQuery = this.zoneLabels[code] || code;
             this.resetWeather();
           }
         },
 
         clearPortQuery() {
-          if (this.portSearchTimeout) {
-            clearTimeout(this.portSearchTimeout);
-            this.portSearchTimeout = null;
-          }
+          if (this.portSearchTimeout) { clearTimeout(this.portSearchTimeout); this.portSearchTimeout = null; }
           this.portQuery = '';
           this.filteredPorts = [];
           this.showPortDropdown = false;
-          if (this.selectedPort) {
-            this.selectedPort = '';
-            this.selectedPortContext = null;
-          }
+          if (this.selectedPort) { this.selectedPort = ''; this.selectedPortContext = null; }
           this.selectedPortDetails = null;
           this.selectedPortHolidays = [];
           this.weatherSnapshot = null;
@@ -1524,8 +1081,7 @@
             if (qExact(entry.zoneCode?.toLowerCase())) score += 6;
             if (qExact(entry.portCode?.toLowerCase())) score += 5;
             if (qExact(entry.terminalCode?.toLowerCase())) score += 5;
-            const primaryMatches = [entry.zoneName, entry.portName, entry.terminalName]
-              .map((value) => (value || '').toLowerCase());
+            const primaryMatches = [entry.zoneName, entry.portName, entry.terminalName].map((value) => (value || '').toLowerCase());
             for (const token of tokens) {
               if (entry.zoneCode?.toLowerCase().includes(token)) score += 2;
               if (entry.portCode?.toLowerCase().includes(token)) score += 2;
@@ -1548,60 +1104,31 @@
           const configs = {
             single: {
               getQuery: () => this.portQuery,
-              clear: () => {
-                this.filteredPorts = [];
-                this.showPortDropdown = false;
-              },
-              apply: (matches) => {
-                this.filteredPorts = matches;
-                this.showPortDropdown = matches.length > 0;
-              },
+              clear: () => { this.filteredPorts = []; this.showPortDropdown = false; },
+              apply: (matches) => { this.filteredPorts = matches; this.showPortDropdown = matches.length > 0; },
               timeoutProp: 'portSearchTimeout',
             },
             multi: {
               getQuery: () => this.mpPortInput,
-              clear: () => {
-                this.mpFilteredPorts = [];
-                this.showMpDropdown = false;
-              },
-              apply: (matches) => {
-                this.mpFilteredPorts = matches;
-                this.showMpDropdown = matches.length > 0;
-              },
+              clear: () => { this.mpFilteredPorts = []; this.showMpDropdown = false; },
+              apply: (matches) => { this.mpFilteredPorts = matches; this.showMpDropdown = matches.length > 0; },
               timeoutProp: 'mpPortSearchTimeout',
             },
           };
-
           const cfg = configs[target] || configs.single;
-          if (!Array.isArray(this.portSearchIndex) || this.portSearchIndex.length === 0) {
-            cfg.clear();
-            return;
-          }
-
-          if (this[cfg.timeoutProp]) {
-            clearTimeout(this[cfg.timeoutProp]);
-            this[cfg.timeoutProp] = null;
-          }
+          if (!Array.isArray(this.portSearchIndex) || this.portSearchIndex.length === 0) { cfg.clear(); return; }
+          if (this[cfg.timeoutProp]) { clearTimeout(this[cfg.timeoutProp]); this[cfg.timeoutProp] = null; }
 
           const run = () => {
             this[cfg.timeoutProp] = null;
             const query = (cfg.getQuery() || '').trim().toLowerCase();
-            if (!query) {
-              // SHOW ALL (top 12) if empty
-              cfg.apply(this.portSearchIndex.slice(0, 12));
-              return;
-            }
+            if (!query) { cfg.apply(this.portSearchIndex.slice(0, 12)); return; }
             const tokens = query.split(/[^a-z0-9]+/g).filter(Boolean);
-            if (!tokens.length) {
-              cfg.apply(this.portSearchIndex.slice(0, 12));
-              return;
-            }
+            if (!tokens.length) { cfg.apply(this.portSearchIndex.slice(0, 12)); return; }
             const matches = this.rankPortMatches(tokens);
             cfg.apply(matches);
           };
-
-          if (immediate) run();
-          else this[cfg.timeoutProp] = setTimeout(run, 180);
+          if (immediate) run(); else this[cfg.timeoutProp] = setTimeout(run, 180);
         },
 
         selectFirstPortResult(target = 'single') {
@@ -1616,319 +1143,141 @@
           if (!entry) return;
           const context = this.makeSelectionContext(entry);
           this.selectedPortContext = context;
-          this.selectedPort = context?.zoneCode || '';
+          // Prefer portCode if we have a concrete port; fall back to zoneCode
+          this.selectedPort = context?.portCode || context?.zoneCode || '';
           this.portQuery = context?.label || '';
           this.filteredPorts = [];
           this.showPortDropdown = false;
           await this.afterPortSelection();
         },
 
-        resetWeather() {
-          this.weatherSnapshot = null;
-          this.weatherError = null;
-          this.weatherLoading = false;
-        },
+        resetWeather() { this.weatherSnapshot = null; this.weatherError = null; this.weatherLoading = false; },
 
-        // ---------- Normalizer (no out-before-init) ----------
+        // ---------- Normalizer ----------
         augment(v) {
           const src = (v && typeof v === 'object') ? { ...v } : {};
-        
-          const scanDeep = (obj, keyRegex, accept = (val) => (
-            (typeof val === 'string' && val.trim() !== '') || typeof val === 'number'
-          ), depth = 0) => {
+          const scanDeep = (obj, keyRegex, accept = (val) => ((typeof val === 'string' && val.trim() !== '') || typeof val === 'number'), depth = 0) => {
             if (!obj || depth > 4) return null;
             for (const [k, val] of Object.entries(obj)) {
               if (val == null) continue;
-              if (keyRegex.test(k)) {
-                const s = String(val).trim();
-                if (accept(s)) return s;
-              }
-              if (val && typeof val === 'object' && !Array.isArray(val)) {
-                const found = scanDeep(val, keyRegex, accept, depth + 1);
-                if (found != null) return found;
-              }
+              if (keyRegex.test(k)) { const s = String(val).trim(); if (accept(s)) return s; }
+              if (val && typeof val === 'object' && !Array.isArray(val)) { const found = scanDeep(val, keyRegex, accept, depth + 1); if (found != null) return found; }
             }
             return null;
           };
           const scan = (re, accept) => scanDeep(src, re, accept);
-        
           const pick = (...cands) => {
-            for (const c of cands) {
-              if (c in src && src[c] != null) {
-                const s = String(src[c]).trim();
-                if (s && s.toLowerCase() !== 'none') return s;
-              }
-            }
+            for (const c of cands) { if (c in src && src[c] != null) { const s = String(src[c]).trim(); if (s && s.toLowerCase() !== 'none') return s; } }
             return null;
           };
-        
-          const toNumber = (val) => {
-            if (val == null) return null;
-            const n = Number(String(val).replace(/[^0-9.+-]/g, ''));
-            return Number.isFinite(n) ? n : null;
-          };
-        
+          const toNumber = (val) => { if (val == null) return null; const n = Number(String(val).replace(/[^0-9.+-]/g, '')); return Number.isFinite(n) ? n : null; };
           const toMetersGeneric = (val) => {
-            if (val == null) return null;
-            const s = String(val).toLowerCase();
-            const n = toNumber(s);
-            if (n == null) return null;
-            if (s.includes('ft') || s.includes('feet') || s.includes("'")) return n * 0.3048;
-            return n; // assume meters if unitless
+            if (val == null) return null; const s = String(val).toLowerCase(); const n = toNumber(s); if (n == null) return null;
+            if (s.includes('ft') || s.includes('feet') || s.includes("'")) return n * 0.3048; return n;
           };
-        
-          // Feet→meters helper when we *know* the source is feet (e.g., LengthInFeet)
-          const feetToMeters = (val) => {
-            const n = toNumber(val);
-            return n == null ? null : n * 0.3048;
-          };
-        
+          const feetToMeters = (val) => { const n = toNumber(val); return n == null ? null : n * 0.3048; };
           const num7 = (x) => (x ? String(x).match(/\b\d{6,7}\b/)?.[0] : null);
-        
-          // Identity / descriptors
-          const VesselID   = pick('VesselID','vesselid','VesselId','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
+
+          const VesselID = pick('VesselID','vesselid','VesselId','ID','id') ?? scan(/(^|[\W_])vessel\s*id$/i);
           const VesselName = pick('VesselName','vesselname','Name','name') ?? scan(/vessel.*name|^name$/i);
-          const CallSign   = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign')
-                          ?? scan(/call.?sign|radio.?call/i);
-          const Flag       = pick('CountryLookupName','Flag','FlagName','FlagOfRegistry','FlagState','FlagCountry','FlagCode','flag')
-                          ?? scan(/(flag|country)(.*(name|lookup|state|country))?/i, v => isNaN(v));
-          const VesselType = pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype')
-                          ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
-        
-          // IDs
-          const imoRaw = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMONo','IMOShipNo','imo')
-                      || pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No')
-                      || scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
+          const CallSign = pick('VesselCallSign','CallSign','Call_Sign','RadioCallSign','radio_callsign','callSign') ?? scan(/call.?sign|radio.?call/i);
+          const Flag = pick('CountryLookupName','Flag','FlagName','FlagOfRegistry','FlagState','FlagCountry','FlagCode','flag') ?? scan(/(flag|country)(.*(name|lookup|state|country))?/i, v => isNaN(v));
+          const VesselType = pick('ServiceType','VesselType','VesselTypeDescription','VesselService','Service','ShipType','vesseltype') ?? scan(/(service|type)/i, v => isNaN(v) && String(v).length < 80);
+          const imoRaw = pick('IMONumber','IMO','ImoNumber','IMO_Number','IMONo','IMOShipNo','imo') || pick('PrimaryVesselNumber','Primary_Vessel_Number','Primary_Vessel_No') || scanDeep(src, /(^|[\W_])imo([\W_]|$)/i, v => /\d{6,7}/.test(String(v)));
           const IMONumber = num7(imoRaw);
-        
-          const OfficialNumber = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number')
-                              ?? scan(/official.?number/i);
-        
-          const YearBuilt = (() => {
-            const y = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year')
-                   ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i);
-            const n = Number(String(y ?? '').replace(/\D/g,''));
-            return Number.isFinite(n) ? n : null;
-          })();
-        
-          // Tonnage (broaden common aliases)
-          const gtRaw = pick(
-            'GrossTonnage','GrossRegisteredTonnage','GrossTons','GT','Gross_Tonnage','grosstonnage'
-          ) ?? scan(/gross.*ton|(^|\b)gt\b/i);
-          const ntRaw = pick(
-            'NetTonnage','NetRegisteredTonnage','NetTons','NT','Net_Tonnage','nettonnage'
-          ) ?? scan(/net.*ton|(^|\b)nt\b/i);
+          const OfficialNumber = pick('OfficialNumber','OfficialNumberText','Official_No','USOfficialNumber','US_Official_Number') ?? scan(/official.?number/i);
+          const YearBuilt = (() => { const y = pick('ConstructionCompletedYear','YearBuilt','BuildYear','build_year') ?? scan(/(year.*built|build.*year|construction.*(year|completed))/i); const n = Number(String(y ?? '').replace(/\D/g,'')); return Number.isFinite(n) ? n : null; })();
+          const gtRaw = pick('GrossTonnage','GrossRegisteredTonnage','GrossTons','GT','Gross_Tonnage','grosstonnage') ?? scan(/gross.*ton|(^|\b)gt\b/i);
+          const ntRaw = pick('NetTonnage','NetRegisteredTonnage','NetTons','NT','Net_Tonnage','nettonnage') ?? scan(/net.*ton|(^|\b)nt\b/i);
           const GrossTonnage = (toNumber(gtRaw) ?? gtRaw) ?? null;
-          const NetTonnage   = (toNumber(ntRaw) ?? ntRaw) ?? null;
-        
-          // ---------- Dimensions ----------
-          // Prefer explicit meters, else explicit feet, else generic text (unit-detected)
-          // Length/LOA
+          const NetTonnage = (toNumber(ntRaw) ?? ntRaw) ?? null;
           const lenMetersRaw = pick('LOA_m','LengthInMeters','LOAInMeters','OverallLengthInMeters','loa_m','length_m');
-          const lenFeetRaw   = pick('LengthInFeet','LOAInFeet','OverallLengthInFeet','Length (ft)');
-          const lenGeneric   = pick('LOA','Length','LengthOverall','OverallLength','loa','length_overall') ?? scan(/(length|loa)/i);
-          const LOA_m = toNumber(lenMetersRaw)
-            ?? (feetToMeters(lenFeetRaw))
-            ?? toMetersGeneric(lenGeneric);
-        
-          // Beam/Breadth
+          const lenFeetRaw = pick('LengthInFeet','LOAInFeet','OverallLengthInFeet','Length (ft)');
+          const lenGeneric = pick('LOA','Length','LengthOverall','OverallLength','loa','length_overall') ?? scan(/(length|loa)/i);
+          const LOA_m = toNumber(lenMetersRaw) ?? (feetToMeters(lenFeetRaw)) ?? toMetersGeneric(lenGeneric);
           const beamMetersRaw = pick('Beam_m','BreadthInMeters','BeamInMeters','OverallBreadthInMeters','MouldedBreadthInMeters','beam_m','breadth_m');
-          const beamFeetRaw   = pick('BreadthInFeet','BeamInFeet','OverallBreadthInFeet','MouldedBreadthInFeet','Breadth (ft)');
-          const beamGeneric   = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','beam','breadth') ?? scan(/(beam|breadth|width)/i);
-          const Beam_m = toNumber(beamMetersRaw)
-            ?? (feetToMeters(beamFeetRaw))
-            ?? toMetersGeneric(beamGeneric);
-        
-          // Depth (NOT Draft)
+          const beamFeetRaw = pick('BreadthInFeet','BeamInFeet','OverallBreadthInFeet','MouldedBreadthInFeet','Breadth (ft)');
+          const beamGeneric = pick('Beam','Breadth','MouldedBreadth','MoldedBreadth','Width','beam','breadth') ?? scan(/(beam|breadth|width)/i);
+          const Beam_m = toNumber(beamMetersRaw) ?? (feetToMeters(beamFeetRaw)) ?? toMetersGeneric(beamGeneric);
           const depthMetersRaw = pick('Depth_m','DepthInMeters','MouldedDepthInMeters','depth_m');
-          const depthFeetRaw   = pick('DepthInFeet','MouldedDepthInFeet','Depth (ft)');
-          const depthGeneric   = pick('Depth','depth') ?? scan(/(^|\b)depth\b/i);
-          const Depth_m = toNumber(depthMetersRaw)
-            ?? (feetToMeters(depthFeetRaw))
-            ?? toMetersGeneric(depthGeneric);
-        
-          // Draft (optional, distinct from Depth)
+          const depthFeetRaw = pick('DepthInFeet','MouldedDepthInFeet','Depth (ft)');
+          const depthGeneric = pick('Depth','depth') ?? scan(/(^|\b)depth\b/i);
+          const Depth_m = toNumber(depthMetersRaw) ?? (feetToMeters(depthFeetRaw)) ?? toMetersGeneric(depthGeneric);
           const draftFwdMetersRaw = pick('DraftForward_m','ForwardDraft_m','ForwardDraftInMeters','ForwardDraftMeters','forward_draft_m','draft_forward_meters');
-          const draftFwdFeetRaw   = pick('ForwardDraftInFeet','ForwardDraftFeet','forward_draft_ft');
-          const draftFwdGeneric   = scan(/forward.*draft/i);
-          const DraftForward_m = toNumber(draftFwdMetersRaw)
-            ?? (feetToMeters(draftFwdFeetRaw))
-            ?? toMetersGeneric(draftFwdGeneric);
-
+          const draftFwdFeetRaw = pick('ForwardDraftInFeet','ForwardDraftFeet','forward_draft_ft');
+          const draftFwdGeneric = scan(/forward.*draft/i);
+          const DraftForward_m = toNumber(draftFwdMetersRaw) ?? (feetToMeters(draftFwdFeetRaw)) ?? toMetersGeneric(draftFwdGeneric);
           const draftAftMetersRaw = pick('DraftAft_m','AftDraft_m','AftDraftInMeters','AftDraftMeters','aft_draft_m','draft_aft_meters');
-          const draftAftFeetRaw   = pick('AftDraftInFeet','AftDraftFeet','aft_draft_ft');
-          const draftAftGeneric   = scan(/aft.*draft|draft.*aft/i);
-          const DraftAft_m = toNumber(draftAftMetersRaw)
-            ?? (feetToMeters(draftAftFeetRaw))
-            ?? toMetersGeneric(draftAftGeneric);
-
+          const draftAftFeetRaw = pick('AftDraftInFeet','AftDraftFeet','aft_draft_ft');
+          const draftAftGeneric = scan(/aft.*draft|draft.*aft/i);
+          const DraftAft_m = toNumber(draftAftMetersRaw) ?? (feetToMeters(draftAftFeetRaw)) ?? toMetersGeneric(draftAftGeneric);
           const airDraftMetersRaw = pick('AirDraft_m','AirDraftInMeters','AirDraftMeters','air_draft_m');
-          const airDraftFeetRaw   = pick('AirDraftInFeet','AirDraftFeet','air_draft_ft');
-          const airDraftGeneric   = scan(/air.*draft/i);
-          const AirDraft_m = toNumber(airDraftMetersRaw)
-            ?? (feetToMeters(airDraftFeetRaw))
-            ?? toMetersGeneric(airDraftGeneric);
-
+          const airDraftFeetRaw = pick('AirDraftInFeet','AirDraftFeet','air_draft_ft');
+          const airDraftGeneric = scan(/air.*draft/i);
+          const AirDraft_m = toNumber(airDraftMetersRaw) ?? (feetToMeters(airDraftFeetRaw)) ?? toMetersGeneric(airDraftGeneric);
           const draftMetersRaw = pick('Draft_m','DraftInMeters','MaxDraftInMeters','draft_m');
-          const draftFeetRaw   = pick('DraftInFeet','MaxDraftInFeet','Draft (ft)');
-          const draftGeneric   = pick('Draft','SummerDraft','draft') ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b/i);
-          const Draft_m = toNumber(draftMetersRaw)
-            ?? (feetToMeters(draftFeetRaw))
-            ?? toMetersGeneric(draftGeneric);
+          const draftFeetRaw = pick('DraftInFeet','MaxDraftInFeet','Draft (ft)');
+          const draftGeneric = pick('Draft','SummerDraft','draft') ?? scan(/(^|\b)draft\b|(^|\b)summer.*draft\b/i);
+          const Draft_m = toNumber(draftMetersRaw) ?? (feetToMeters(draftFeetRaw)) ?? toMetersGeneric(draftGeneric);
 
-          return {
-            ...src,
-            VesselID, VesselName, CallSign, Flag, VesselType,
-            IMONumber, OfficialNumber, YearBuilt,
-            GrossTonnage, NetTonnage,
-            LOA_m, Beam_m, Draft_m, Depth_m,
-            DraftForward_m, DraftAft_m, AirDraft_m
-          };
+          return { ...src, VesselID, VesselName, CallSign, Flag, VesselType, IMONumber, OfficialNumber, YearBuilt, GrossTonnage, NetTonnage, LOA_m, Beam_m, Draft_m, Depth_m, DraftForward_m, DraftAft_m, AirDraft_m };
         }, 
 
-  
-        // --- Vessel search with server pagination + augmentation ---
+        // --- Vessel search ---
         async searchVessel(page = 1) {
           if (!this.vesselQuery.trim()) return;
-  
-          this.vesselSearched = true;
-          this.searchLoading = true;
-          this.searchError = null;
-          this.vesselPage = page;
-  
+          this.vesselSearched = true; this.searchLoading = true; this.searchError = null; this.vesselPage = page;
           try {
-            const params = new URLSearchParams({
-              name: this.vesselQuery,
-              page: String(this.vesselPage),
-              limit: String(this.vesselLimit),
-            });
-  
+            const params = new URLSearchParams({ name: this.vesselQuery, page: String(this.vesselPage), limit: String(this.vesselLimit) });
             const r = await fetch(`${API_BASE}/vessels/search?${params}`);
             if (!r.ok) throw new Error('Search failed');
             const data = await r.json();
-  
-            this._lastSearchPayload = data;
-  
-            const raw = Array.isArray(data?.Table) ? data.Table
-                      : Array.isArray(data?.rows)  ? data.rows
-                      : Array.isArray(data)        ? data
-                      : [];
-  
+            const raw = Array.isArray(data?.Table) ? data.Table : Array.isArray(data?.rows) ? data.rows : Array.isArray(data) ? data : [];
             const augmented = raw.map(this.augment.bind(this));
-  
-            console.log('[search] first row keys:', raw[0] ? Object.keys(raw[0]) : '(no rows)');
-  
             this.vesselTotal = (typeof data.total === 'number') ? data.total : augmented.length;
-            this.vesselPages = (typeof data.pages === 'number')
-              ? data.pages
-              : Math.max(Math.ceil(this.vesselTotal / this.vesselLimit), 1);
-  
+            this.vesselPages = (typeof data.pages === 'number') ? data.pages : Math.max(Math.ceil(this.vesselTotal / this.vesselLimit), 1);
             this.vesselResults = augmented;
-  
-            const startIdx = (this.vesselPage - 1) * this.vesselLimit;
-            this.vesselStart = this.vesselTotal ? (data.start ?? startIdx + 1) : 0;
-            this.vesselEnd = data.end ?? Math.min(startIdx + this.vesselResults.length, this.vesselTotal);
-  
             if (this.vesselResults.length === 0) this.searchError = 'No vessels found';
-          } catch (e) {
-            this.searchError = e.message || 'Search failed';
-            console.error('Vessel search failed:', e);
-          } finally {
-            this.searchLoading = false;
-          }
-        },
-  
-        prevVesselPage() { if (this.vesselPage > 1) this.searchVessel(this.vesselPage - 1); },
-        nextVesselPage() { if (this.vesselPage < this.vesselPages) this.searchVessel(this.vesselPage + 1); },
-        goToVesselPage(p) { if (p >= 1 && p <= this.vesselPages) this.searchVessel(p); },
-        pageWindow() {
-          const win = 2;
-          const start = Math.max(1, this.vesselPage - win);
-          const end = Math.min(this.vesselPages, this.vesselPage + win);
-          const arr = [];
-          for (let i = start; i <= end; i++) arr.push(i);
-          return arr;
+          } catch (e) { this.searchError = e.message || 'Search failed'; console.error('Vessel search failed:', e); } finally { this.searchLoading = false; }
         },
   
         async selectVessel(v) {
           const prevSelected = this.selectedVessel || null;
           const makeToken = (obj) => {
             if (!obj) return '';
-            const parts = [
-              obj.VesselID ?? obj.vessel_id ?? obj.id ?? '',
-              obj.CallSign ?? obj.VesselCallSign ?? '',
-              obj.VesselName ?? obj.Name ?? ''
-            ].map(val => String(val || '').trim().toUpperCase()).filter(Boolean);
+            const parts = [obj.VesselID ?? obj.vessel_id ?? obj.id ?? '', obj.CallSign ?? obj.VesselCallSign ?? '', obj.VesselName ?? obj.Name ?? ''].map(val => String(val || '').trim().toUpperCase()).filter(Boolean);
             return parts.join('|');
           };
           const prevToken = makeToken(prevSelected);
-
           const normalized = this.augment(v) || {};
           const nextToken = makeToken(normalized) || makeToken(v);
           const vesselChanged = !prevSelected || prevToken !== nextToken;
-
-          this._rawSelected = v;
           this.selectedVessel = normalized;
-          this._selectedVesselToken = nextToken;
 
-          console.log('[select] raw row:', v);
-          console.log('[select] normalized:', normalized);
-
-          // reset badges for locked particulars when vessel changes
           if (vesselChanged) {
-            this.autoGT = false;
-            this.autoNT = false;
-            this.autoLOA = false;
-            this.autoBeam = false;
-            this.grossTonnage = null;
-            this.netTonnage = null;
-            this.loaMeters = null;
-            this.beamMeters = null;
-            this.draftForwardMeters = null;
-            this.draftAftMeters = null;
-            this.airDraftMeters = null;
+            this.autoGT = false; this.autoNT = false; this.autoLOA = false; this.autoBeam = false;
+            this.grossTonnage = null; this.netTonnage = null; this.loaMeters = null; this.beamMeters = null;
+            this.draftForwardMeters = null; this.draftAftMeters = null; this.airDraftMeters = null;
           }
 
-          // quick type guess
           const s = (normalized.VesselType || '').toLowerCase();
-          const guess =
-            s.includes('container') ? 'container' :
-            s.includes('tanker')    ? 'tanker' :
-            s.includes('bulk')      ? 'bulk_carrier' :
-            (s.includes('cruise') || s.includes('passenger')) ? 'cruise' :
-            (s.includes('roro') || s.includes('ro-ro')) ? 'roro' :
-            s.includes('lng')       ? 'lng' :
-            (s.includes('vehicle') || s.includes('car carrier')) ? 'vehicle_carrier' :
-            'general_cargo';
+          const guess = s.includes('container') ? 'container' : s.includes('tanker') ? 'tanker' : s.includes('bulk') ? 'bulk_carrier' : (s.includes('cruise') || s.includes('passenger')) ? 'cruise' : (s.includes('roro') || s.includes('ro-ro')) ? 'roro' : s.includes('lng') ? 'lng' : (s.includes('vehicle') || s.includes('car carrier')) ? 'vehicle_carrier' : 'general_cargo';
           if (this.vesselType === 'general_cargo' && guess !== 'general_cargo') this.vesselType = guess;
 
-          // prefill from search row
           const prefer = (field, next, flag, dp = 2) => {
-            const curr = this[field];
-            const n = Number(next);
-            const currNum = Number(curr);
-            const currValid = Number.isFinite(currNum) && currNum > 0;
-            const nextValid = Number.isFinite(n) && n > 0;
-
+            const curr = this[field]; const n = Number(next); const currNum = Number(curr);
+            const currValid = Number.isFinite(currNum) && currNum > 0; const nextValid = Number.isFinite(n) && n > 0;
             if (!nextValid) return curr;
-            if (vesselChanged) {
-              this[flag] = true;
-              return dp ? Number(n.toFixed(dp)) : n;
-            }
-            if (!currValid || this[flag]) {
-              this[flag] = true;
-              return dp ? Number(n.toFixed(dp)) : n;
-            }
+            if (vesselChanged || !currValid || this[flag]) { this[flag] = true; return dp ? Number(n.toFixed(dp)) : n; }
             return curr;
           };
           if (normalized.GrossTonnage != null) this.grossTonnage = prefer('grossTonnage', normalized.GrossTonnage, 'autoGT', 0);
-          if (normalized.NetTonnage   != null) this.netTonnage   = prefer('netTonnage',   normalized.NetTonnage,   'autoNT', 0);
-          if (normalized.LOA_m        != null) this.loaMeters    = prefer('loaMeters',    normalized.LOA_m,        'autoLOA', 2);
-          if (normalized.Beam_m       != null) this.beamMeters   = prefer('beamMeters',   normalized.Beam_m,       'autoBeam', 2);
+          if (normalized.NetTonnage != null) this.netTonnage = prefer('netTonnage', normalized.NetTonnage, 'autoNT', 0);
+          if (normalized.LOA_m != null) this.loaMeters = prefer('loaMeters', normalized.LOA_m, 'autoLOA', 2);
+          if (normalized.Beam_m != null) this.beamMeters = prefer('beamMeters', normalized.Beam_m, 'autoBeam', 2);
 
           const setDraftField = (field, value, dp = 2) => {
-            const n = Number(value);
-            if (!Number.isFinite(n) || n <= 0) return;
+            const n = Number(value); if (!Number.isFinite(n) || n <= 0) return;
             if (!vesselChanged && Number(this[field]) > 0) return;
             this[field] = dp ? Number(n.toFixed(dp)) : n;
           };
@@ -1940,24 +1289,13 @@
           if (this.selectedPort) this.loadLiveData();
         },
   
-        // ----- v1 estimator (GET /estimate) -----
+        // ----- v1 estimator -----
         async getEstimate() {
           if (!this.selectedPort || !this.eta) return;
-          this.estimateLoading = true;
-          this.estimate = null;
-          this.estimateV2 = null;
-
-          const params = new URLSearchParams({
-            port_code: this.selectedPort,
-            eta: this.eta,
-            arrival_type: this.arrivalType,
-            include_optional: 'true'
-          });
-          // In basic mode, previous port is optional; when provided, it refines
-          // arrival_type inference on the backend.
-          if (this.previousPortCode && this.previousPortCode.trim()) {
-            params.set('previous_port_code', this.previousPortCode.trim().toUpperCase());
-          }
+          // FIX: Basic mode does not require previous port
+          this.estimateLoading = true; this.estimate = null; this.estimateV2 = null;
+          const params = new URLSearchParams({ port_code: this.selectedPort, eta: this.eta, arrival_type: this.arrivalType, include_optional: 'true' });
+          if (this.previousPortCode.trim()) params.set('previous_port_code', this.previousPortCode.trim().toUpperCase());
           if (this.netTonnage) params.set('net_tonnage', this.netTonnage);
           if (this.ytdCbpPaid) params.set('ytd_cbp_paid', this.ytdCbpPaid);
    
@@ -1967,90 +1305,50 @@
             this.estimate = await r.json();
             this.saveEstimateToHistory(this.estimate, { days_alongside: this.daysAlongside });
             if (this.selectedVessel) await this.loadLiveData();
-          } catch (e) {
-            console.error('Estimate failed:', e);
-            alert('Failed to calculate estimate: ' + (e.message || 'request error'));
-          } finally {
-            this.estimateLoading = false;
-          }
+          } catch (e) { console.error('Estimate failed:', e); alert('Failed to calculate estimate: ' + (e.message || 'request error')); } finally { this.estimateLoading = false; }
         },
   
-        // ----- v2 estimator (POST /v2/estimate) -----
+        // ----- v2 estimator -----
         async getEstimateV2() {
-          if (!this.selectedPort || !this.eta || !this.previousPortCode.trim()) {
-            alert('Previous port (UN/LOCODE), arrival port, and ETA are required for v2.');
-            return;
-          }
-          this.estimateLoading = true;
-          this.estimate = null;
-          this.estimateV2 = null;
-  
-          const fwdDraft = Number(this.draftForwardMeters) || 0;
-          const aftDraft = Number(this.draftAftMeters) || 0;
-          const airDraft = Number(this.airDraftMeters) || 0;
+          if (!this.selectedPort || !this.eta || !this.previousPortCode.trim()) { alert('Previous port (UN/LOCODE), arrival port, and ETA are required for v2.'); return; }
+          this.estimateLoading = true; this.estimate = null; this.estimateV2 = null;
+          const fwdDraft = Number(this.draftForwardMeters) || 0; const aftDraft = Number(this.draftAftMeters) || 0; const airDraft = Number(this.airDraftMeters) || 0;
           const draftSamples = [fwdDraft, aftDraft].filter(v => v > 0);
-          const representativeDraft = draftSamples.length
-            ? Number((draftSamples.reduce((sum, v) => sum + v, 0) / draftSamples.length).toFixed(2))
-            : (fwdDraft || aftDraft || 0);
+          const representativeDraft = draftSamples.length ? Number((draftSamples.reduce((sum, v) => sum + v, 0) / draftSamples.length).toFixed(2)) : (fwdDraft || aftDraft || 0);
           const draftString = (val) => (val > 0 ? String(val) : null);
 
           const body = {
             vessel_name: this.selectedVessel?.VesselName || this.vesselQuery || 'Unknown Vessel',
             vessel_type: this.vesselType,
-            gross_tonnage: String(this.grossTonnage || 0),
-            net_tonnage: String(this.netTonnage || 0),
-            loa_meters: String(this.loaMeters || 0),
-            draft_meters: String(representativeDraft || 0),
-            beam_meters: String(this.beamMeters || 0),
-            forward_draft_meters: draftString(fwdDraft),
-            aft_draft_meters: draftString(aftDraft),
-            air_draft_meters: draftString(airDraft),
-            previous_port_code: this.previousPortCode.trim().toUpperCase(),
-            arrival_port_code: this.selectedPort,
-            next_port_code: this.nextPortCode ? this.nextPortCode.trim().toUpperCase() : null,
-            eta: this.eta ? new Date(this.eta).toISOString() : null,
-            etd: this.etd ? new Date(this.etd).toISOString() : null,
-            days_alongside: Number(this.daysAlongside) || 2,
-            ytd_cbp_paid: String(this.ytdCbpPaid || 0),
-            tonnage_year_paid: "0"
+            gross_tonnage: String(this.grossTonnage || 0), net_tonnage: String(this.netTonnage || 0),
+            loa_meters: String(this.loaMeters || 0), draft_meters: String(representativeDraft || 0), beam_meters: String(this.beamMeters || 0),
+            forward_draft_meters: draftString(fwdDraft), aft_draft_meters: draftString(aftDraft), air_draft_meters: draftString(airDraft),
+            previous_port_code: this.previousPortCode.trim().toUpperCase(), arrival_port_code: this.selectedPort, next_port_code: this.nextPortCode ? this.nextPortCode.trim().toUpperCase() : null,
+            eta: this.eta ? new Date(this.eta).toISOString() : null, etd: this.etd ? new Date(this.etd).toISOString() : null,
+            days_alongside: Number(this.daysAlongside) || 2, ytd_cbp_paid: String(this.ytdCbpPaid || 0), tonnage_year_paid: "0"
           };
    
           try {
-            const r = await fetch(`${API_BASE}/v2/estimate`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(body)
-            });
-            if (!r.ok) {
-              const t = await r.text();
-              throw new Error(t || 'v2 estimate failed');
-            }
+            const r = await fetch(`${API_BASE}/v2/estimate`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+            if (!r.ok) throw new Error(await r.text() || 'v2 estimate failed');
             this.estimateV2 = await r.json();
             this.saveEstimateToHistory(this.estimateV2, body);
             if (this.selectedVessel) await this.loadLiveData();
-          } catch (e) {
-            console.error('v2 estimate failed:', e);
-            alert('Failed to calculate v2 estimate.');
-          } finally {
-            this.estimateLoading = false;
-          }
+          } catch (e) { console.error('v2 estimate failed:', e); alert('Failed to calculate v2 estimate.'); } finally { this.estimateLoading = false; }
         },
   
-        // ----- NEW: PSIX-first enrichment flow -----
+        // ----- PSIX Enrichment -----
         async enrichVesselDimensions() {
           const hasDraftInfo = (Number(this.draftForwardMeters) > 0) || (Number(this.draftAftMeters) > 0) || (Number(this.airDraftMeters) > 0);
           const needsDims = !(Number(this.loaMeters) > 0 && Number(this.beamMeters) > 0) || !hasDraftInfo;
           const needsTons = !(Number(this.grossTonnage) > 0) || !(Number(this.netTonnage) > 0);
-          // Force run if we want to ensure we have the best data, even if we have basic search data
           if (!needsDims && !needsTons && !this.autoGT && !this.autoNT && !this.autoLOA && !this.autoBeam) return;
         
           const sv = this.selectedVessel || {};
           const selToken = (sv.VesselID || sv.VesselName || '') + ':' + (sv.CallSign || '');
-          const stillSelected = () =>
-            ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + (this.selectedVessel?.CallSign || '')) === selToken;
+          const stillSelected = () => ((this.selectedVessel?.VesselID || this.selectedVessel?.VesselName || '') + ':' + (this.selectedVessel?.CallSign || '')) === selToken;
         
           const setIf = (curr, next, flag, dp = 2) => {
-            // Allow updating if the current value is auto-filled (this[flag] == true)
             if (Number(curr) > 0 && !this[flag]) return curr;
             const n = Number(next);
             if (Number.isFinite(n) && n > 0) { this[flag] = true; return dp ? Number(n.toFixed(dp)) : n; }
@@ -2059,15 +1357,11 @@
           const setDraftIf = (field, value, dp = 2) => {
             if (Number(this[field]) > 0) return;
             const n = Number(value);
-            if (Number.isFinite(n) && n > 0) {
-              this[field] = dp ? Number(n.toFixed(dp)) : n;
-              updated = true;
-            }
+            if (Number.isFinite(n) && n > 0) { this[field] = dp ? Number(n.toFixed(dp)) : n; }
           };
         
           const qs = (obj) => Object.entries(obj).map(([k,v]) => `${encodeURIComponent(k)}=${encodeURIComponent(v)}`).join('&');
           const unify = (payload) => {
-            // Accept common shapes: {Table:[...]}, {rows:[...]}, [...], {data:{...}} …
             if (!payload) return [];
             if (Array.isArray(payload?.Table)) return payload.Table;
             if (Array.isArray(payload?.rows)) return payload.rows;
@@ -2080,25 +1374,17 @@
         
           const tryFetch = async (urls) => {
             for (const u of urls) {
-              try {
-                const r = await fetch(u);
-                if (!r.ok) continue;
-                const j = await r.json();
-                console.info('[enrich] ✅', u);
-                return j;
-              } catch (_) { /* keep trying */ }
+              try { const r = await fetch(u); if (!r.ok) continue; const j = await r.json(); return j; } catch (_) { }
             }
             return null;
           };
         
-          // 1) Resolve VesselID via our backend
           let vesselId = sv.VesselID || null;
           if (!vesselId) {
             const idParamSets = [{ id: sv.id }, { vessel_id: sv.id }, { VesselID: sv.id }].filter(p => Object.values(p)[0]);
             const keyParamSets = [];
             const cs = (sv.CallSign || sv.VesselCallSign || '').trim();
             const nm = (sv.VesselName || '').trim();
-        
             if (cs) keyParamSets.push({ callsign: cs }, { CallSign: cs }, { call_sign: cs });
             if (nm) keyParamSets.push({ vessel_name: nm }, { name: nm }, { VesselName: nm });
         
@@ -2108,7 +1394,6 @@
               idUrls.push(`${API_BASE}/vessels/details?${qs(p)}`);
               idUrls.push(`${API_BASE}/api/v2/vessels/details?${qs(p)}`);
             }
-        
             let summary = idUrls.length ? await tryFetch(idUrls) : null;
             if (!summary && keyParamSets.length) {
               const keyUrls = [];
@@ -2119,19 +1404,16 @@
               }
               summary = await tryFetch(keyUrls);
             }
-        
             const rows = unify(summary);
             if (rows.length) {
-              // Prefer exact callsign match
               const row = (cs && rows.find(r => String(r.VesselCallSign || r.CallSign || '').trim().toUpperCase() === cs.toUpperCase())) || rows[0];
               vesselId = row?.VesselID ?? row?.vessel_id ?? row?.ID ?? null;
-              if (vesselId && !sv.VesselID) this.selectedVessel.VesselID = vesselId; // cache it
+              if (vesselId && !sv.VesselID) this.selectedVessel.VesselID = vesselId;
             }
           }
         
           if (!stillSelected()) return;
         
-          // 2) Pull details
           const detailUrls = [];
           if (vesselId) {
             detailUrls.push(`${API_BASE}/vessels/details?${qs({ vessel_id: vesselId })}`);
@@ -2154,14 +1436,8 @@
           let merged = {};
           for (const u of detailUrls) {
             try {
-              const r = await fetch(u);
-              if (!r.ok) continue;
-              const j = await r.json();
-              const rows = unify(j);
-              if (!rows.length) continue;
-              // Prefer a row with dimensions/tonnage
+              const r = await fetch(u); if (!r.ok) continue; const j = await r.json(); const rows = unify(j); if (!rows.length) continue;
               const pickRow = rows.find(rw => rw.LengthInFeet || rw.GrossTonnage || rw.NetTonnage || rw.LOA_m || rw.Beam_m || rw.Draft_m) || rows[0];
-              // Convert PSIX feet
               const extra = {};
               if (pickRow.LengthInFeet != null)  extra.LOA_m  = Number(pickRow.LengthInFeet)  * 0.3048;
               if (pickRow.BreadthInFeet != null) extra.Beam_m = Number(pickRow.BreadthInFeet) * 0.3048;
@@ -2172,103 +1448,56 @@
               if (pickRow.AftDraftInMeters != null) extra.DraftAft_m = Number(pickRow.AftDraftInMeters);
               if (pickRow.AirDraftInFeet != null) extra.AirDraft_m = Number(pickRow.AirDraftInFeet) * 0.3048;
               if (pickRow.AirDraftInMeters != null) extra.AirDraft_m = Number(pickRow.AirDraftInMeters);
-
               merged = { ...merged, ...pickRow, ...extra };
               if (!vesselId) vesselId = pickRow.VesselID ?? pickRow.vessel_id ?? pickRow.ID ?? vesselId;
             } catch (_) {}
           }
         
           if (!stillSelected()) return;
-        
-          // 3) Normalize + apply
           const aug = this.augment(merged || {});
-          // *** FIX: Update the main selectedVessel object so the card refreshes ***
           this.selectedVessel = { ...this.selectedVessel, ...aug };
-          let updated = false;
         
           if (needsTons) {
-            const bGT = this.grossTonnage, bNT = this.netTonnage;
             this.grossTonnage = setIf(this.grossTonnage, aug.GrossTonnage, 'autoGT', 0);
             this.netTonnage   = setIf(this.netTonnage,   aug.NetTonnage,   'autoNT', 0);
-            updated ||= (this.grossTonnage !== bGT || this.netTonnage !== bNT);
           }
           if (needsDims) {
-            const bL = this.loaMeters, bB = this.beamMeters;
-            const bF = this.draftForwardMeters, bA = this.draftAftMeters, bAir = this.airDraftMeters;
             this.loaMeters  = setIf(this.loaMeters,  aug.LOA_m,  'autoLOA', 2);
             this.beamMeters = setIf(this.beamMeters, aug.Beam_m, 'autoBeam', 2);
-            // Only set real drafts if present
             setDraftIf('draftForwardMeters', aug.DraftForward_m ?? aug.Draft_m, 2);
             setDraftIf('draftAftMeters', aug.DraftAft_m ?? aug.Draft_m, 2);
             setDraftIf('airDraftMeters', aug.AirDraft_m, 2);
-            updated ||= (
-              this.loaMeters !== bL ||
-              this.beamMeters !== bB ||
-              this.draftForwardMeters !== bF ||
-              this.draftAftMeters !== bA ||
-              this.airDraftMeters !== bAir
-            );
           }
-        
-          console.info(updated ? '[enrich] Populated details' : '[enrich] No new details');
         },
 
-        // Live bundle (pilotage, marine exchange, docs, COFR, MISP)
+        // Live bundle
         async loadLiveData() {
           if (!this.selectedVessel || !this.selectedPort) return;
-  
-          const params = new URLSearchParams({
-            vessel_name: this.selectedVessel.VesselName || '',
-            port_code: this.selectedPort
-          });
-          const vid = this.selectedVessel.VesselID;
-          if (vid) params.set('vessel_id', vid);
-  
+          const params = new URLSearchParams({ vessel_name: this.selectedVessel.VesselName || '', port_code: this.selectedPort });
+          if (this.selectedVessel.VesselID) params.set('vessel_id', this.selectedVessel.VesselID);
           try {
             const r = await fetch(`${API_BASE}/live/portbundle?${params}`);
             if (!r.ok) throw new Error('Live data failed');
             this.liveData = await r.json();
-          } catch (e) {
-            console.error('Live data failed:', e);
-          }
+          } catch (e) { console.error('Live data failed:', e); }
         },
 
         async fetchPortInsights(zoneCode) {
           const code = (zoneCode || '').trim().toUpperCase();
-          if (!code) {
-            this.selectedPortDetails = null;
-            this.selectedPortHolidays = [];
-            return;
-          }
-          if (this.portDetailCache[code]) {
-            this.selectedPortDetails = this.portDetailCache[code];
-            this.selectedPortHolidays = Array.isArray(this.portDetailCache[code]?.upcoming_holidays)
-              ? this.portDetailCache[code].upcoming_holidays
-              : [];
-            return;
-          }
+          if (!code) { this.selectedPortDetails = null; this.selectedPortHolidays = []; return; }
+          if (this.portDetailCache[code]) { this.selectedPortDetails = this.portDetailCache[code]; this.selectedPortHolidays = Array.isArray(this.portDetailCache[code]?.upcoming_holidays) ? this.portDetailCache[code].upcoming_holidays : []; return; }
           try {
             const r = await fetch(`${API_BASE}/ports/${code}`);
             if (!r.ok) throw new Error(await r.text());
             const data = await r.json();
-            this.portDetailCache[code] = data;
-            this.selectedPortDetails = data;
-            this.selectedPortHolidays = Array.isArray(data?.upcoming_holidays) ? data.upcoming_holidays : [];
-          } catch (e) {
-            console.error('Port detail load failed:', e);
-            this.selectedPortDetails = null;
-            this.selectedPortHolidays = [];
-          }
+            this.portDetailCache[code] = data; this.selectedPortDetails = data; this.selectedPortHolidays = Array.isArray(data?.upcoming_holidays) ? data.upcoming_holidays : [];
+          } catch (e) { console.error('Port detail load failed:', e); this.selectedPortDetails = null; this.selectedPortHolidays = []; }
         },
 
         async loadWeatherSnapshot() {
           const coords = this.getSelectedCoordinates();
-          if (!coords) {
-            this.weatherSnapshot = null;
-            return;
-          }
-          this.weatherLoading = true;
-          this.weatherError = null;
+          if (!coords) { this.weatherSnapshot = null; return; }
+          this.weatherLoading = true; this.weatherError = null;
           try {
             const wxUrl = `https://api.open-meteo.com/v1/forecast?latitude=${coords.lat}&longitude=${coords.lon}&current_weather=true&windspeed_unit=kn&temperature_unit=fahrenheit`;
             const tideUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${coords.lat}&longitude=${coords.lon}&hourly=tide_height&timezone=auto`;
@@ -2276,74 +1505,56 @@
             const wx = wxResp.status === 'fulfilled' && wxResp.value.ok ? await wxResp.value.json() : null;
             const tide = tideResp.status === 'fulfilled' && tideResp.value.ok ? await tideResp.value.json() : null;
             const current = wx?.current_weather || {};
-            const tideInfo = this.resolveHighTide(tide?.hourly);
-            this.weatherSnapshot = {
-              temperature: current.temperature ?? null,
-              wind_speed: current.windspeed ?? null,
-              wind_direction: current.winddirection ?? null,
-              description: this.describeWeather(current.weathercode),
-              tide: tideInfo
-            };
-          } catch (e) {
-            console.error('Weather fetch failed:', e);
-            this.weatherError = 'Weather unavailable';
-            this.weatherSnapshot = null;
-          } finally {
-            this.weatherLoading = false;
-          }
+            this.weatherSnapshot = { temperature: current.temperature ?? null, wind_speed: current.windspeed ?? null, wind_direction: current.winddirection ?? null, description: this.describeWeather(current.weathercode), tide: this.resolveHighTide(tide?.hourly) };
+          } catch (e) { console.error('Weather fetch failed:', e); this.weatherError = 'Weather unavailable'; this.weatherSnapshot = null; } finally { this.weatherLoading = false; }
         },
 
         resolveHighTide(hourly) {
           if (!hourly || !Array.isArray(hourly.time) || !Array.isArray(hourly.tide_height)) return null;
-          const now = new Date();
-          const { time, tide_height: heights } = hourly;
-          let candidate = null;
+          const now = new Date(); const { time, tide_height: heights } = hourly; let candidate = null;
           for (let i = 1; i < time.length - 1; i += 1) {
-            const height = heights[i];
-            if (height == null) continue;
-            const ts = new Date(time[i]);
-            if (ts <= now) continue;
-            const prev = heights[i - 1];
-            const next = heights[i + 1];
-            if (prev == null || next == null) continue;
-            if (height >= prev && height >= next) {
-              candidate = { time: ts.toISOString(), height };
-              break;
-            }
+            const height = heights[i]; if (height == null) continue; const ts = new Date(time[i]); if (ts <= now) continue;
+            const prev = heights[i - 1]; const next = heights[i + 1]; if (prev == null || next == null) continue;
+            if (height >= prev && height >= next) { candidate = { time: ts.toISOString(), height }; break; }
           }
           if (!candidate) {
             for (let i = 0; i < time.length; i += 1) {
-              const ts = new Date(time[i]);
-              if (ts <= now) continue;
-              const height = heights[i];
-              if (height == null) continue;
-              if (!candidate || height > candidate.height) {
-                candidate = { time: ts.toISOString(), height };
-              }
+              const ts = new Date(time[i]); if (ts <= now) continue; const height = heights[i]; if (height == null) continue;
+              if (!candidate || height > candidate.height) { candidate = { time: ts.toISOString(), height }; }
             }
           }
           return candidate;
         },
   
-        // UN/LOCODE typeahead for previous/next/mp ports
+        // UN/LOCODE typeahead
         async searchUnloc(current = 'prev') {
           const base = current === 'prev' ? this.previousPortCode : this.nextPortCode;
           const q = (base || '').trim();
+          
+          // Default suggestions if empty
+          if (q.length === 0) {
+             const defaults = [
+                 { locode: 'SGSIN', port_name: 'Singapore' },
+                 { locode: 'CNSHA', port_name: 'Shanghai' },
+                 { locode: 'NLRTM', port_name: 'Rotterdam' },
+                 { locode: 'USNYC', port_name: 'New York' },
+                 { locode: 'USLAX', port_name: 'Los Angeles' },
+                 { locode: 'KRPUS', port_name: 'Busan' }
+             ];
+             if (current === 'prev') this.unlocPrev = defaults; else this.unlocNext = defaults;
+             return;
+          }
+
           if (q.length < 2) {
-            // When the query is too short, show some common West Coast LOCODEs
-            if (current === 'prev') this.unlocPrev = this.unlocDefaults.slice();
-            else this.unlocNext = this.unlocDefaults.slice();
+            if (current === 'prev') this.unlocPrev = []; else this.unlocNext = [];
             return;
           }
           try {
             const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(q)}&limit=8`);
             if (!r.ok) throw new Error('UN/LOCODE search failed');
             const rows = await r.json();
-            if (current === 'prev') this.unlocPrev = rows;
-            else this.unlocNext = rows;
-          } catch (e) {
-            console.error('UN/LOCODE search error:', e);
-          }
+            if (current === 'prev') this.unlocPrev = rows; else this.unlocNext = rows;
+          } catch (e) { console.error('UN/LOCODE search error:', e); }
         },
   
         // Client-side export
@@ -2351,265 +1562,152 @@
           if (this.estimateV2) {
             if (format === 'json') {
               const blob = new Blob([JSON.stringify(this.estimateV2, null, 2)], { type: 'application/json' });
-              const a = document.createElement('a');
-              a.href = URL.createObjectURL(blob);
-              a.download = `estimate_v2_${this.selectedPort}_${this.eta}.json`;
-              a.click();
-              return;
+              const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v2_${this.selectedPort}_${this.eta}.json`; a.click(); return;
             }
             const rows = [['Code','Name','Final Amount','Base','Confidence','Optional','Details']];
             for (const c of (this.estimateV2.calculations || [])) {
-              rows.push([
-                c.code, c.name, c.final_amount, c.base_amount, c.confidence,
-                c.is_optional ? 'yes' : 'no',
-                (c.details || '').replace(/\n/g, ' ')
-              ]);
+              rows.push([c.code, c.name, c.final_amount, c.base_amount, c.confidence, c.is_optional ? 'yes' : 'no', (c.details || '').replace(/\n/g, ' ')]);
             }
             const t = this.estimateV2?.totals || {};
             rows.push(['', 'TOTAL MANDATORY', t.mandatory ?? '', '', '', '', '']);
             rows.push(['', 'TOTAL HIGH', t.total_high ?? '', '', '', '', '']);
             const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
             const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `estimate_v2_${this.selectedPort}_${this.eta}.csv`;
-            a.click();
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v2_${this.selectedPort}_${this.eta}.csv`; a.click();
             return;
           }
-  
           if (!this.estimate) return;
           if (format === 'json') {
             const blob = new Blob([JSON.stringify(this.estimate, null, 2)], { type: 'application/json' });
-            const a = document.createElement('a');
-            a.href = URL.createObjectURL(blob);
-            a.download = `estimate_v1_${this.selectedPort}_${this.eta}.json`;
-            a.click();
-            return;
+            const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v1_${this.selectedPort}_${this.eta}.json`; a.click(); return;
           }
           const rows = [['Code','Name','Amount']];
-          for (const item of (this.estimate.line_items || [])) {
-            rows.push([item.code, item.name, item.amount]);
-          }
+          for (const item of (this.estimate.line_items || [])) { rows.push([item.code, item.name, item.amount]); }
           rows.push(['TOTAL','','' + (this.estimate.total || '0.00')]);
           const csv = rows.map(r => r.map(x => `"${String(x ?? '').replace(/"/g,'""')}"`).join(',')).join('\n');
           const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-          const a = document.createElement('a');
-          a.href = URL.createObjectURL(blob);
-          a.download = `estimate_v1_${this.selectedPort}_${this.eta}.csv`;
-          a.click();
+          const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = `estimate_v1_${this.selectedPort}_${this.eta}.csv`; a.click();
         },
 
         loadEstimateHistory() {
           try {
             const raw = localStorage.getItem('maritime_estimate_history');
             this.estimateHistory = raw ? JSON.parse(raw) : [];
-          } catch (e) {
-            console.warn('History load failed', e);
-            this.estimateHistory = [];
-          }
+          } catch (e) { console.warn('History load failed', e); this.estimateHistory = []; }
         },
 
         persistEstimateHistory() {
-          try {
-            localStorage.setItem('maritime_estimate_history', JSON.stringify(this.estimateHistory));
-          } catch (e) {
-            console.warn('History persist failed', e);
-          }
+          try { localStorage.setItem('maritime_estimate_history', JSON.stringify(this.estimateHistory)); } catch (e) { console.warn('History persist failed', e); }
         },
 
         saveEstimateToHistory(estimate, requestBody) {
           if (!estimate || !this.selectedPort) return;
           const entry = {
-            id: Date.now(),
-            timestamp: new Date().toISOString(),
-            portCode: this.selectedPort,
+            id: Date.now(), timestamp: new Date().toISOString(), portCode: this.selectedPort,
             portLabel: this.selectedPortContext?.label || this.selectedPort,
             vesselName: this.selectedVessel?.VesselName || requestBody?.vessel_name || 'Unknown Vessel',
-            totals: estimate?.totals || null,
-            request: { ...requestBody },
-            favorite: false,
+            totals: estimate?.totals || null, request: { ...requestBody }
           };
           this.estimateHistory = [entry, ...this.estimateHistory].slice(0, 5);
           this.persistEstimateHistory();
         },
 
-        toggleEstimateFavorite(id) {
-          this.estimateHistory = this.estimateHistory.map((item) =>
-            item.id === id ? { ...item, favorite: !item.favorite } : item
-          );
-          this.persistEstimateHistory();
-        },
-
-        // Multi-port history helpers
-        loadMultiPortHistory() {
-          try {
-            const raw = localStorage.getItem('maritime_multiport_history');
-            this.mpHistory = raw ? JSON.parse(raw) : [];
-          } catch (e) {
-            console.warn('Multi-port history load failed', e);
-            this.mpHistory = [];
-          }
-        },
-
-        persistMultiPortHistory() {
-          try {
-            localStorage.setItem('maritime_multiport_history', JSON.stringify(this.mpHistory));
-          } catch (e) {
-            console.warn('Multi-port history persist failed', e);
-          }
-        },
-
-        saveMultiPortToHistory(mpResult, request, vessel) {
-          if (!mpResult || !request || !Array.isArray(request.ports) || !request.ports.length) return;
-          const entry = {
-            id: Date.now(),
-            timestamp: new Date().toISOString(),
-            ports: request.ports.slice(),
-            startDate: request.start_date,
-            daysInPort: request.days_in_port,
-            vesselName: vessel.name || this.mpVesselName || 'Unknown Vessel',
-            totalMandatory: Number(mpResult?.total_voyage_cost?.mandatory || 0),
-          };
-          this.mpHistory = [entry, ...this.mpHistory].slice(0, 8);
-          this.persistMultiPortHistory();
-        },
-
-        applyMultiPortHistory(item) {
-          this.mpVesselName = item.vesselName || this.mpVesselName;
-          this.mpStartDate = item.startDate || this.mpStartDate;
-          this.mpDaysInPort = item.daysInPort || this.mpDaysInPort;
-
-          // Rebuild mpPorts from stored zone codes using the portSearchIndex
-          const ports = Array.isArray(item.ports) ? item.ports : [];
-          this.mpPorts = ports
-            .map((z) => {
-              const entry = this.portSearchIndex.find((e) => e.type === 'zone' && e.zoneCode === z)
-                || this.portSearchIndex.find((e) => e.zoneCode === z);
-              return entry ? this.makeSelectionContext(entry) : null;
-            })
-            .filter(Boolean);
-        },
-
         applyEstimateHistory(entry) {
           if (!entry) return;
-          this.useV2 = true;
-          this.historyDropdownOpen = false;
+          this.useV2 = true; this.historyDropdownOpen = false;
           const req = entry.request || {};
-          this.previousPortCode = req.previous_port_code || '';
-          this.nextPortCode = req.next_port_code || '';
-          this.eta = req.eta ? req.eta.split('T')[0] : this.eta;
-          this.etd = req.etd ? req.etd.split('T')[0] : this.etd;
+          this.previousPortCode = req.previous_port_code || ''; this.nextPortCode = req.next_port_code || '';
+          this.eta = req.eta ? req.eta.split('T')[0] : this.eta; this.etd = req.etd ? req.etd.split('T')[0] : this.etd;
           this.daysAlongside = Number(req.days_alongside) || this.daysAlongside;
-          this.grossTonnage = Number(req.gross_tonnage) || this.grossTonnage;
-          this.netTonnage = Number(req.net_tonnage) || this.netTonnage;
-          this.loaMeters = Number(req.loa_meters) || this.loaMeters;
-          this.beamMeters = Number(req.beam_meters) || this.beamMeters;
+          this.grossTonnage = Number(req.gross_tonnage) || this.grossTonnage; this.netTonnage = Number(req.net_tonnage) || this.netTonnage;
+          this.loaMeters = Number(req.loa_meters) || this.loaMeters; this.beamMeters = Number(req.beam_meters) || this.beamMeters;
           this.selectedPort = entry.portCode || '';
           this.syncPortQueryWithSelection();
-          if (this.selectedPort) {
-            this.fetchPortInsights(this.selectedPort);
-            this.loadWeatherSnapshot();
-          }
+          if (this.selectedPort) { this.fetchPortInsights(this.selectedPort); this.loadWeatherSnapshot(); }
         },
 
-        printEstimate() {
-          window.print();
+        // Multi-port History
+        initMpHistory() {
+            try {
+                const raw = localStorage.getItem('maritime_mp_history');
+                this.mpHistory = raw ? JSON.parse(raw) : [];
+            } catch (e) { this.mpHistory = []; }
         },
+        saveMpHistory(ports) {
+            const zones = ports.map(p => p.zoneCode);
+            const label = zones.join('→');
+            const entry = { id: Date.now(), label, zones };
+            this.mpHistory = [entry, ...this.mpHistory].slice(0, 3);
+            localStorage.setItem('maritime_mp_history', JSON.stringify(this.mpHistory));
+        },
+        applyMpHistory(entry) {
+            this.mpPorts = (entry.zones || []).map(z => {
+                const match = this.portSearchIndex.find(e => e.type === 'zone' && e.zoneCode === z) || this.portSearchIndex.find(e => e.zoneCode === z);
+                return match ? this.makeSelectionContext(match) : null;
+            }).filter(Boolean);
+        },
+
+        printEstimate() { window.print(); },
   
         // Multi-port methods
         addMpPort(entry = null) {
           let context = entry ? this.makeSelectionContext(entry) : null;
           if (!context) {
-            if (this.mpFilteredPorts.length) {
-              context = this.makeSelectionContext(this.mpFilteredPorts[0]);
-            } else {
+            if (this.mpFilteredPorts.length) { context = this.makeSelectionContext(this.mpFilteredPorts[0]); }
+            else {
               const direct = (this.mpPortInput || '').trim().toUpperCase();
               if (direct && this.zoneLookup[direct]) {
-                const fallback = this.portSearchIndex.find(
-                  (item) => item.zoneCode === direct && item.type === 'zone'
-                );
+                const fallback = this.portSearchIndex.find((item) => item.zoneCode === direct && item.type === 'zone');
                 context = this.makeSelectionContext(fallback ?? null);
               }
             }
           }
           if (!context) return;
-          this.mpPorts.push(context);
-          this.mpPortInput = '';
-          this.mpFilteredPorts = [];
-          this.showMpDropdown = false;
+          this.mpPorts.push(context); this.mpPortInput = ''; this.mpFilteredPorts = []; this.showMpDropdown = false;
         },
         removeMpPort(i) { this.mpPorts.splice(i, 1); },
         async submitMultiPort() {
           if (this.mpPorts.length < 2) { alert('Add at least two zones or ports.'); return; }
-  
+          // ... (Draft logic same as before)
           const mpFwdDraft = Number(this.draftForwardMeters) || 0;
           const mpAftDraft = Number(this.draftAftMeters) || 0;
           const mpAirDraft = Number(this.airDraftMeters) || 0;
           const mpDrafts = [mpFwdDraft, mpAftDraft].filter(v => v > 0);
-          const mpRepresentativeDraft = mpDrafts.length
-            ? Number((mpDrafts.reduce((sum, v) => sum + v, 0) / mpDrafts.length).toFixed(2))
-            : (mpFwdDraft || mpAftDraft || 0);
+          const mpRepresentativeDraft = mpDrafts.length ? Number((mpDrafts.reduce((sum, v) => sum + v, 0) / mpDrafts.length).toFixed(2)) : (mpFwdDraft || mpAftDraft || 0);
           const toDraftString = (val) => (val > 0 ? String(val) : null);
 
           const vessel = {
             name: this.mpVesselName || this.selectedVessel?.VesselName || 'Unknown Vessel',
             imo_number: this.selectedVessel?.IMONumber || null,
             vessel_type: this.vesselType,
-            gross_tonnage: String(this.grossTonnage || 0),
-            net_tonnage: String(this.netTonnage || 0),
-            loa_meters: String(this.loaMeters || 0),
-            beam_meters: String(this.beamMeters || 0),
+            gross_tonnage: String(this.grossTonnage || 0), net_tonnage: String(this.netTonnage || 0),
+            loa_meters: String(this.loaMeters || 0), beam_meters: String(this.beamMeters || 0),
             draft_meters: String(mpRepresentativeDraft || 0),
-            forward_draft_meters: toDraftString(mpFwdDraft),
-            aft_draft_meters: toDraftString(mpAftDraft),
-            air_draft_meters: toDraftString(mpAirDraft),
+            forward_draft_meters: toDraftString(mpFwdDraft), aft_draft_meters: toDraftString(mpAftDraft), air_draft_meters: toDraftString(mpAirDraft),
           };
-          const request = {
-            vessel_name: vessel.name,
-            ports: this.mpPorts.map((p) => p.zoneCode),
-            start_date: this.mpStartDate,
-            days_in_port: Number(this.mpDaysInPort) || 2,
-          };
+          const request = { vessel_name: vessel.name, ports: this.mpPorts.map((p) => p.zoneCode), start_date: this.mpStartDate, days_in_port: Number(this.mpDaysInPort) || 2 };
   
           try {
-            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ request, vessel })
-            });
+            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ request, vessel }) });
             if (!r.ok) throw new Error(await r.text());
             this.mpResult = await r.json();
-            this.saveMultiPortToHistory(this.mpResult, request, vessel);
-          } catch (e) {
-            console.error('Multi-port failed:', e);
-            alert('Failed to calculate multi-port voyage.');
-          }
+            this.saveMpHistory(this.mpPorts);
+          } catch (e) { console.error('Multi-port failed:', e); alert('Failed to calculate multi-port voyage.'); }
         },
   
         async refreshAll() {
           await this.checkHealth();
           if (this.selectedPort && this.eta) {
-            if (this.useV2) await this.getEstimateV2();
-            else await this.getEstimate();
-            await this.fetchPortInsights(this.selectedPort);
-            await this.loadWeatherSnapshot();
+            if (this.useV2) await this.getEstimateV2(); else await this.getEstimate();
+            await this.fetchPortInsights(this.selectedPort); await this.loadWeatherSnapshot();
           }
         },
   
         async clearCache() {
-          try {
-            const r = await fetch(`${API_BASE}/admin/cache/clear`, { method: 'POST' });
-            if (r.ok) {
-              await this.checkHealth();
-              alert('Cache cleared successfully');
-            }
-          } catch (e) {
-            console.error('Clear cache failed:', e);
-          }
+          try { const r = await fetch(`${API_BASE}/admin/cache/clear`, { method: 'POST' }); if (r.ok) { await this.checkHealth(); alert('Cache cleared successfully'); } } catch (e) { console.error('Clear cache failed:', e); }
         }
       }
     }
   </script>
-
 </body>
 </html>
