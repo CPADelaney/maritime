@@ -337,7 +337,7 @@
                   <div x-show="unlocPrev.length" class="absolute bottom-full mb-1 left-0 w-48 bg-white shadow-xl rounded-lg border border-slate-200 text-xs z-50 max-h-40 overflow-y-auto custom-scroll">
                       <div class="px-2 py-1 text-[10px] font-bold text-slate-400 uppercase bg-slate-50">Suggestions</div>
                       <template x-for="p in unlocPrev">
-                          <div @click="previousPortCode=p.locode; unlocPrev=[]" class="px-3 py-2 hover:bg-ocean-50 cursor-pointer border-b border-slate-50 last:border-0">
+                          <div @click="previousPortCode=p.locode; unlocPrev=[]; loadDocumentRequirements()" class="px-3 py-2 hover:bg-ocean-50 cursor-pointer border-b border-slate-50 last:border-0">
                               <span class="font-bold text-ocean-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
                           </div>
                       </template>
@@ -607,7 +607,7 @@
         </template>
 
         <!-- RESULT: Multi-Port -->
-        <div x-show="mpResult && mpResult.legs && mpResult.legs.length" class="card overflow-hidden animate-enter">
+        <div x-show="mpResult" class="card overflow-hidden animate-enter">
             <div class="bg-slate-50 px-6 py-4 border-b border-slate-200">
                 <h2 class="text-lg font-bold text-slate-800">Voyage Itinerary Plan</h2>
             </div>
@@ -622,6 +622,16 @@
                         </tr>
                     </thead>
                 <tbody class="bg-white divide-y divide-slate-100">
+                  <!-- If the API for some reason returns no legs, make that obvious -->
+                  <template x-if="!(mpResult?.legs && mpResult.legs.length)">
+                    <tr>
+                      <td colspan="4" class="px-6 py-4 text-xs text-slate-400">
+                        No voyage legs returned from the multi-port API. Check the backend response for this itinerary.
+                      </td>
+                    </tr>
+                  </template>
+
+                  <!-- Normal case: one summary row + expandable breakdown per leg -->
                   <template x-for="leg in (mpResult?.legs || [])" :key="leg.leg">
                     <template>
                       <!-- Summary row -->
@@ -710,7 +720,7 @@
                 <div class="w-px h-10 bg-white/20"></div>
                 <div class="text-right">
                   <div class="text-[11px] uppercase font-semibold text-ocean-200">With optional</div>
-                  <div class="text-2xl font-bold" x-text="formatCurrency(Number(mpResult?.total_voyage_cost?.mandatory || 0) + Number(mpResult?.total_voyage_cost?.optional_high || 0))"></div>
+                  <div class="text-2xl font-bold" x-text="formatCurrency(mpResult?.total_voyage_cost?.with_optional || mpResult?.total_voyage_cost?.mandatory || 0)"></div>
                 </div>
               </div>
             </div>
@@ -780,6 +790,7 @@
         selectedPort: '',
         selectedPortDetails: null,
         selectedPortHolidays: [],
+        documentRequirements: [],
         portDetailCache: {},
         portQuery: '',
         filteredPorts: [],
@@ -1194,39 +1205,39 @@
           return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
         },
 
+        async loadDocumentRequirements() {
+          // Pull structured doc requirements from the v2 API, not from /ports
+          if (!this.selectedPortContext) {
+            this.documentRequirements = [];
+            return;
+          }
+
+          // Prefer the zone / internal code for document lookup
+          const portCode =
+            (this.selectedPortContext.zoneCode || this.selectedPort || '').toString().trim().toUpperCase();
+          if (!portCode) {
+            this.documentRequirements = [];
+            return;
+          }
+
+          const params = new URLSearchParams({ port_code: portCode });
+          if (this.vesselType) params.set('vessel_type', this.vesselType);
+          if (this.previousPortCode && this.previousPortCode.trim()) {
+            params.set('previous_port', this.previousPortCode.trim());
+          }
+
+          try {
+            const r = await fetch(`${API_BASE}/api/v2/documents/requirements?${params.toString()}`);
+            if (!r.ok) throw new Error('documents request failed');
+            const data = await r.json();
+            this.documentRequirements = Array.isArray(data) ? data : [];
+          } catch (e) { console.error('Document requirements load failed:', e); this.documentRequirements = []; }
+        },
+
         portDocuments() {
-          const out = [];
-
-          // Port-level docs from /ports/{code}
-          if (this.selectedPortDetails) {
-            const candidates = [
-              this.selectedPortDetails.documents,
-              this.selectedPortDetails.document_requirements,
-              this.selectedPortDetails.documents_required,
-              this.selectedPortDetails.required_documents,
-            ];
-            for (const docs of candidates) {
-              if (Array.isArray(docs)) {
-                out.push(...docs);
-                break;
-              }
-            }
-          }
-
-          // Live bundle docs (if backend sticks anything useful in there)
-          if (this.liveData && Array.isArray(this.liveData.documents)) {
-            out.push(...this.liveData.documents);
-          }
-
-          // Very cheap dedupe by (code + name)
-          const seen = new Set();
-          const key = (d) => `${d.document_code || d.code || ''}::${d.document_name || d.name || d.title || ''}`;
-          return out.filter((d) => {
-            const k = key(d);
-            if (seen.has(k)) return false;
-            seen.add(k);
-            return true;
-          });
+          if (!this.selectedPortDetails) return [];
+          // Now driven by /api/v2/documents/requirements instead of /ports
+          return Array.isArray(this.documentRequirements) ? this.documentRequirements : [];
         },
 
         portResultTitle(entry) { return entry ? (entry.label || '') : ''; },
@@ -1236,6 +1247,7 @@
           if (!this.selectedPort) {
             this.selectedPortDetails = null;
             this.selectedPortHolidays = [];
+            this.documentRequirements = [];
             return;
           }
           try {
@@ -1248,6 +1260,7 @@
               this.selectedPortDetails = null;
               this.selectedPortHolidays = [];
             }
+            await this.loadDocumentRequirements();
           } catch (e) { console.error('afterPortSelection failed:', e); }
         },
 
@@ -1756,19 +1769,25 @@
             return;
           }
           try {
-            const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(q)}&limit=50&country=US`);
+            // IMPORTANT:
+            //  - previousPortCode must allow foreign ports so arrival_type/docs work
+            //  - for nextPortCode we still *prefer* West Coast, but don't hard-block others
+            const r = await fetch(`${API_BASE}/imo_ports/search?q=${encodeURIComponent(q)}&limit=50`);
             if (!r.ok) throw new Error('UN/LOCODE search failed');
-            const rows = await r.json();
-            const allowed = new Set([
-              'USLAX','USLGB','USOAK','USSFO',
-              'USSEA','USTAC','USPDX','USAST'
-            ]);
-            const filtered = (rows || []).filter(r => {
-              const code = String(r.locode || '').toUpperCase();
-              return allowed.has(code);
-            });
-            if (current === 'prev') this.unlocPrev = filtered;
-            else this.unlocNext = filtered;
+            const rows = await r.json() || [];
+
+            if (current === 'prev') {
+              // global: foreign + US, since this drives FOREIGN vs COASTWISE + docs
+              this.unlocPrev = rows;
+            } else {
+              // nextPort: prefer US West Coast, fall back to all rows if none match
+              const allowed = new Set([
+                'USLAX','USLGB','USOAK','USSFO',
+                'USSEA','USTAC','USPDX','USAST',
+              ]);
+              const preferred = rows.filter(r => allowed.has(String(r.locode || '').toUpperCase()));
+              this.unlocNext = preferred.length ? preferred : rows;
+            }
           } catch (e) { console.error('UN/LOCODE search error:', e); }
         },
   
@@ -1864,6 +1883,7 @@
             } else {
               this.selectedPortDetails = null;
             }
+            this.loadDocumentRequirements();
           }
         },
 
