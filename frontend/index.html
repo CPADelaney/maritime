@@ -653,7 +653,10 @@
                     <!-- Summary row -->
                     <tr
                       class="cursor-pointer hover:bg-slate-50"
-                      @click="mpExpandedLeg === leg.leg ? mpExpandedLeg = null : mpExpandedLeg = leg.leg"
+                      @click="
+                        const legId = Number(leg.leg);
+                        mpExpandedLeg === legId ? mpExpandedLeg = null : mpExpandedLeg = legId
+                      "
                     >
                       <td class="px-6 py-3 text-sm text-slate-500" x-text="leg.leg"></td>
                       <td class="px-6 py-3 text-sm font-medium text-slate-800"
@@ -670,7 +673,10 @@
                       </td>
                     </tr>
                     <!-- Expanded breakdown row -->
-                    <tr x-show="mpExpandedLeg === leg.leg" class="bg-slate-50/80">
+                    <tr
+                      x-show="mpExpandedLeg === Number(leg.leg)"
+                      class="bg-slate-50/80"
+                    >
                       <td colspan="4" class="px-6 py-3">
                           <div class="text-xs font-semibold text-slate-500 mb-2">Fee breakdown for this port</div>
 
