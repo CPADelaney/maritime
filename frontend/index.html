@@ -279,121 +279,7 @@
               </div>
             </div>
 
-            <!-- Voyage itinerary (optional multi-port) -->
-            <div class="mt-4 pt-3 border-t border-slate-200 space-y-2 text-xs text-slate-500">
-              <div class="flex items-center justify-between">
-                <div>
-                  <span class="font-semibold text-slate-700">Voyage itinerary</span>
-                  <span class="ml-1 text-[11px] text-slate-400">(optional additional stops)</span>
-                </div>
-              </div>
-
-              <!-- Stop rows -->
-              <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-2 max-h-60 overflow-y-auto custom-scroll">
-                <template x-if="!stops.length">
-                  <div class="text-[11px] text-slate-400">
-                    No additional stops added. Single-port estimate only uses the arrival port.
-                  </div>
-                </template>
-
-                <template x-for="(stop, idx) in stops" :key="stop.id">
-                  <div class="bg-white border border-slate-200 rounded-md px-2 py-2 space-y-1">
-                    <div class="flex items-center justify-between gap-2">
-                      <div class="flex-1">
-                        <div class="text-[10px] text-slate-400 mb-0.5">
-                          <span class="font-semibold uppercase">Stop <span x-text="idx + 1"></span></span>
-                          <span class="ml-1 text-slate-400">
-                            (from
-                            <span x-text="idx === 0
-                              ? (selectedPortContext?.label || 'arrival port')
-                              : (stops[idx - 1]?.label || 'previous stop')"></span>)
-                          </span>
-                        </div>
-                        <div class="relative" @click.away="stop.showDropdown = false">
-                          <input
-                            x-model="stop.query"
-                            @input="searchStopPorts(idx)"
-                            @focus="searchStopPorts(idx)"
-                            @keydown.enter.prevent="selectFirstStopResult(idx)"
-                            class="field pl-8 h-8 text-[11px]"
-                            placeholder="Select stop port..."
-                          />
-                          <div class="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none text-slate-400">
-                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
-                            </svg>
-                          </div>
-
-                          <!-- Dropdown for this stop -->
-                          <div
-                            x-show="stop.showDropdown"
-                            class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 custom-scroll overflow-y-auto"
-                          >
-                            <template x-for="p in stop.matches" :key="`stop-${stop.id}-${p.zoneCode}-${p.portCode}-${p.terminalCode}`">
-                              <button
-                                type="button"
-                                class="w-full text-left px-3 py-2 hover:bg-ocean-50 border-b border-slate-50 last:border-0 group"
-                                @click="selectStopPort(idx, p)"
-                              >
-                                <div class="font-medium text-[11px] text-slate-800 group-hover:text-ocean-700"
-                                     x-text="portResultTitle(p)"></div>
-                                <div class="text-[10px] text-slate-500" x-text="portResultDescription(p)"></div>
-                              </button>
-                            </template>
-                          </div>
-                        </div>
-                        <div class="text-[10px] text-slate-400 mt-0.5" x-show="stop.label">
-                          Selected: <span class="font-medium text-slate-600" x-text="stop.label"></span>
-                        </div>
-                      </div>
-
-                      <!-- Days alongside for this stop -->
-                      <div class="w-20">
-                        <label class="label-text mb-1">Days</label>
-                        <input
-                          type="number"
-                          min="1"
-                          x-model.number="stop.daysInPort"
-                          class="field h-8 text-[11px] text-center"
-                        />
-                      </div>
-
-                      <!-- Remove -->
-                      <button
-                        type="button"
-                        class="text-slate-400 hover:text-red-500 text-base leading-none self-start mt-5"
-                        @click="removeStop(idx)"
-                      >
-                        ×
-                      </button>
-                    </div>
-                  </div>
-                </template>
-              </div>
-
-              <!-- Add stop button -->
-              <div class="flex items-center justify-between pt-1">
-                <button
-                  type="button"
-                  class="px-2.5 py-1 rounded-md border border-ocean-200 text-[11px] font-semibold text-ocean-700 hover:bg-ocean-50 disabled:opacity-40"
-                  @click="addStop"
-                  :disabled="!selectedPortContext || stops.length >= 5"
-                >
-                  + Add stop
-                </button>
-                <button
-                  type="button"
-                  class="px-2 py-1 rounded-md border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-40"
-                  @click="clearItinerary"
-                  :disabled="!stops.length && !mpResult"
-                >
-                  Clear itinerary
-                </button>
-              </div>
-            </div>
-
-            <!-- Route -->
+            <!-- Route (moved above multi-port) -->
             <div class="bg-slate-50 p-4 rounded-lg border border-slate-200">
               <label class="label-text mb-2">Voyage Route (UN/LOCODE)</label>
               <div class="flex items-center gap-2">
@@ -436,8 +322,8 @@
                            <span class="font-bold text-ocean-600" x-text="p.locode"></span> <span class="text-slate-600" x-text="p.port_name"></span>
                        </div>
                    </template>
-               </div>
-               </div>
+                  </div>
+                </div>
               </div>
               <div class="mt-2 flex items-center gap-2 text-xs" x-show="derivedArrivalType()">
                 <span class="uppercase tracking-wide text-slate-400 font-semibold">Arrival Type</span>
@@ -451,6 +337,123 @@
               </div>
             </div>
 
+            <!-- Voyage itinerary (optional multi-port, now collapsible) -->
+            <div class="pt-3 border-t border-slate-200 text-xs text-slate-500">
+              <div class="flex items-center justify-between">
+                <div>
+                  <span class="font-semibold text-slate-700">Voyage itinerary</span>
+                  <span class="ml-1 text-[11px] text-slate-400">(optional multi-port)</span>
+                </div>
+                <div class="flex items-center gap-2">
+                  <span
+                    x-show="mpPorts.length"
+                    class="text-[11px] text-slate-400"
+                    x-text="mpPorts.length + ' stop' + (mpPorts.length === 1 ? '' : 's')"
+                  ></span>
+                  <button
+                    type="button"
+                    class="inline-flex items-center gap-1 text-[11px] text-slate-500 hover:text-slate-700"
+                    @click="showMultiPort = !showMultiPort"
+                  >
+                    <span x-text="showMultiPort ? 'Hide' : 'Show'"></span>
+                    <svg
+                      class="w-3 h-3 transition-transform"
+                      :class="showMultiPort ? 'rotate-90' : 'rotate-0'"
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7" />
+                    </svg>
+                  </button>
+                </div>
+              </div>
+
+              <div x-show="showMultiPort" class="mt-3 space-y-2">
+                <div class="flex items-center justify-between">
+                  <div class="text-[11px] text-slate-400" x-show="!mpPorts.length">
+                    Build a multi-port voyage by adding stops in order.
+                  </div>
+                  <div class="flex items-center gap-2 ml-auto">
+                    <button
+                      type="button"
+                      class="px-2.5 py-1 rounded-md border border-ocean-200 text-[11px] font-semibold text-ocean-700 hover:bg-ocean-50 disabled:opacity-40"
+                      @click="addCurrentPortToItinerary"
+                      :disabled="!selectedPortContext || mpPorts.length >= 5"
+                    >
+                      Add current port
+                    </button>
+                    <button
+                      type="button"
+                      class="px-2 py-1 rounded-md border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+                      @click="clearItinerary"
+                      :disabled="!mpPorts.length"
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
+
+                <!-- Queue of ports -->
+                <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-1 max-h-40 overflow-y-auto custom-scroll">
+                  <template x-if="!mpPorts.length">
+                    <div class="text-[11px] text-slate-400">
+                      No ports added. Single-port estimate uses only the current arrival port.
+                    </div>
+                  </template>
+
+                  <template x-for="(p, idx) in mpPorts" :key="p.zoneCode || idx">
+                    <div class="flex items-center justify-between text-[11px] bg-white border border-slate-200 rounded-md px-2 py-1.5">
+                      <div class="flex flex-col">
+                        <div class="font-semibold text-slate-700" x-text="`Stop ${idx + 1}: ${p.label}`"></div>
+                        <div class="text-[10px] text-slate-500" x-text="p.description"></div>
+                      </div>
+                      <button
+                        type="button"
+                        class="text-slate-400 hover:text-red-500 text-base leading-none"
+                        @click="removeMpPort(idx)"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  </template>
+                </div>
+
+                <!-- Multi-port timing + action -->
+                <div class="flex items-center justify-between pt-1">
+                  <div class="flex items-center gap-2 text-[11px]">
+                    <div>
+                      <span class="uppercase text-slate-400 font-semibold mr-1">Start</span>
+                      <input
+                        type="date"
+                        x-model="mpStartDate"
+                        class="field py-1 px-2 h-7 text-[11px]"
+                      />
+                    </div>
+                    <div>
+                      <span class="uppercase text-slate-400 font-semibold mr-1">Days / port</span>
+                      <input
+                        type="number"
+                        min="1"
+                        x-model.number="mpDaysInPort"
+                        class="field py-1 px-2 h-7 w-16 text-[11px]"
+                      />
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    class="px-3 py-1.5 rounded-md bg-slate-900 text-white text-[11px] font-semibold hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed"
+                    @click="submitMultiPort()"
+                    :disabled="mpPorts.length < 2 || estimateLoading"
+                  >
+                    Estimate voyage
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- ETA / Days Alongside -->
             <div class="grid grid-cols-2 gap-4">
               <div>
                 <label class="label-text">ETA</label>
@@ -987,7 +990,9 @@
   
         // multi-port
         mpVesselName: '',
-        stops: [],
+        mpPorts: [],
+        mpStartDate: new Date().toISOString().split('T')[0],
+        mpDaysInPort: 2,
         mpResult: null,
         mpHistory: [],
         mpExpandedLeg: null,
@@ -998,6 +1003,9 @@
         liveData: null,
         estimateHistory: [],
         historyDropdownOpen: false,
+
+        // UI toggles
+        showMultiPort: false,
   
         async init() {
           await this.checkHealth();
@@ -1521,9 +1529,12 @@
 
           this.selectedPortDetails = null;
           this.selectedPortHolidays = [];
-          this.stops = [];
+          this.mpPorts = [];
           this.mpResult = null;
           this.mpExpandedLeg = null;
+          this.showMultiPort = false;
+          this.mpStartDate = new Date().toISOString().split('T')[0];
+          this.mpDaysInPort = 2;
           this.liveData = null;
         },
 
@@ -2087,133 +2098,48 @@
             localStorage.setItem('maritime_mp_history', JSON.stringify(this.mpHistory));
         },
         applyMpHistory(entry) {
-            const zones = entry?.zones || [];
-            if (!zones.length) return;
-
-            const findCtx = (code) => {
-              const match = this.portSearchIndex.find(e => (e.zoneCode === code || e.portCode === code));
-              return match ? this.makeSelectionContext(match) : null;
-            };
-
-            const arrivalCtx = findCtx(zones[0]);
-            if (arrivalCtx) {
-              this.selectedPortContext = arrivalCtx;
-              this.selectedPort = arrivalCtx.zoneCode || arrivalCtx.portCode || '';
-              this.portQuery = arrivalCtx.label || '';
-              this.afterPortSelection();
-            }
-
-            this.stops = zones.slice(1).map((code) => {
-              const ctx = findCtx(code);
-              const stop = this.createStop();
-              if (ctx) {
-                stop.zoneCode = ctx.zoneCode || null;
-                stop.portCode = ctx.portCode || null;
-                stop.label = ctx.label || '';
-                stop.description = ctx.description || '';
-                stop.query = ctx.label || '';
-              }
-              return stop;
-            });
-
-            this.mpResult = null;
-            this.mpExpandedLeg = null;
+          const zones = entry?.zones || [];
+          this.mpPorts = zones.map(z => {
+            const match = this.portSearchIndex.find(e => (e.type === 'zone' || e.type === 'port') && (e.zoneCode === z || e.portCode === z))
+              || this.portSearchIndex.find(e => e.zoneCode === z || e.portCode === z);
+            return match ? this.makeSelectionContext(match) : null;
+          }).filter(Boolean);
+          this.mpResult = null;
+          this.mpExpandedLeg = null;
+          this.showMultiPort = !!this.mpPorts.length;
         },
 
         printEstimate() { window.print(); },
 
         // Multi-port methods
-        createStop() {
-          return {
-            id: Date.now() + Math.random(),
-            zoneCode: null,
-            portCode: null,
-            label: '',
-            description: '',
-            query: '',
-            matches: [],
-            showDropdown: false,
-            daysInPort: 2,
-          };
-        },
-        addStop() {
+        addCurrentPortToItinerary() {
           if (!this.selectedPortContext) {
             alert('Select an arrival port first.');
             return;
           }
-          if (this.stops.length >= 5) return;
-          this.stops.push(this.createStop());
+          if (this.mpPorts.length >= 5) return;
+
+          const ctx = { ...this.selectedPortContext };
+          this.mpPorts.push(ctx);
+          this.showMultiPort = true;
         },
-        removeStop(idx) {
-          this.stops.splice(idx, 1);
+        removeMpPort(idx) {
+          this.mpPorts.splice(idx, 1);
         },
         clearItinerary() {
-          this.stops = [];
+          this.mpPorts = [];
           this.mpResult = null;
           this.mpExpandedLeg = null;
         },
-        searchStopPorts(idx) {
-          const stop = this.stops[idx];
-          if (!stop || !Array.isArray(this.portSearchIndex) || !this.portSearchIndex.length) return;
-
-          const q = (stop.query || '').trim().toLowerCase();
-          if (!q) {
-            stop.matches = this.portSearchIndex.slice(0, 10);
-            stop.showDropdown = true;
-            return;
-          }
-
-          const tokens = q.split(/[^a-z0-9]+/g).filter(Boolean);
-          if (!tokens.length) {
-            stop.matches = this.portSearchIndex.slice(0, 10);
-            stop.showDropdown = true;
-            return;
-          }
-
-          const matches = this.rankPortMatches(tokens);
-          stop.matches = matches;
-          stop.showDropdown = matches.length > 0;
-        },
-        selectStopPort(idx, entry) {
-          const stop = this.stops[idx];
-          if (!stop || !entry) return;
-
-          const ctx = this.makeSelectionContext(entry);
-          stop.zoneCode = ctx.zoneCode || null;
-          stop.portCode = ctx.portCode || null;
-          stop.label = ctx.label || '';
-          stop.description = ctx.description || '';
-          stop.query = ctx.label || '';
-          stop.matches = [];
-          stop.showDropdown = false;
-        },
-        selectFirstStopResult(idx) {
-          const stop = this.stops[idx];
-          if (!stop || !stop.matches || !stop.matches.length) return;
-          this.selectStopPort(idx, stop.matches[0]);
-        },
         async submitMultiPort() {
-          if (!this.selectedPortContext) {
-            alert('Select an arrival port first.');
-            return;
-          }
-
-          const initialCode = this.selectedPortContext.zoneCode || this.selectedPortContext.portCode;
-          if (!initialCode) {
-            alert('Could not resolve arrival port code.');
-            return;
-          }
-
-          const stopCodes = this.stops
-            .map(s => s.zoneCode || s.portCode)
+          const ports = this.mpPorts
+            .map(p => p.zoneCode || p.portCode)
             .filter(Boolean);
 
-          if (!stopCodes.length) {
-            alert('Add at least one stop to build a voyage.');
+          if (ports.length < 2) {
+            alert('Add at least two ports to build a voyage.');
             return;
           }
-
-          const ports = [initialCode, ...stopCodes];
 
           const mpFwdDraft = Number(this.draftForwardMeters) || 0;
           const mpAftDraft = Number(this.draftAftMeters) || 0;
@@ -2241,8 +2167,8 @@
           const request = {
             vessel_name: vessel.name,
             ports,
-            start_date: this.eta || new Date().toISOString().split('T')[0],
-            days_in_port: Number(this.daysAlongside) || 2,
+            start_date: this.mpStartDate || this.eta || new Date().toISOString().split('T')[0],
+            days_in_port: Number(this.mpDaysInPort) || Number(this.daysAlongside) || 2,
           };
 
           try {
@@ -2282,7 +2208,7 @@
           this.estimateLoading = true;
           try {
             await this.getEstimateV2();
-            if (this.stops.length > 0) {
+            if (this.mpPorts.length > 1) {
               await this.submitMultiPort();
             } else {
               this.mpResult = null;
