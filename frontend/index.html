@@ -284,82 +284,111 @@
               <div class="flex items-center justify-between">
                 <div>
                   <span class="font-semibold text-slate-700">Voyage itinerary</span>
-                  <span class="ml-1 text-[11px] text-slate-400">(optional multi-port)</span>
-                </div>
-                <div class="flex items-center gap-2">
-                  <button
-                    type="button"
-                    class="px-2.5 py-1 rounded-md border border-ocean-200 text-[11px] font-semibold text-ocean-700 hover:bg-ocean-50 disabled:opacity-40"
-                    @click="addCurrentPortToItinerary"
-                    :disabled="!selectedPortContext || mpPorts.length >= 5"
-                  >
-                    Add current port
-                  </button>
-                  <button
-                    type="button"
-                    class="px-2 py-1 rounded-md border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-40"
-                    @click="clearItinerary"
-                    :disabled="!mpPorts.length"
-                  >
-                    Clear
-                  </button>
+                  <span class="ml-1 text-[11px] text-slate-400">(optional additional stops)</span>
                 </div>
               </div>
 
-              <!-- Queue of ports -->
-              <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-1 max-h-40 overflow-y-auto custom-scroll">
-                <template x-if="!mpPorts.length">
+              <!-- Stop rows -->
+              <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-2 max-h-60 overflow-y-auto custom-scroll">
+                <template x-if="!stops.length">
                   <div class="text-[11px] text-slate-400">
-                    No ports added. Single-port estimate uses only the current arrival port.
+                    No additional stops added. Single-port estimate only uses the arrival port.
                   </div>
                 </template>
 
-                <template x-for="(p, idx) in mpPorts" :key="p.zoneCode || idx">
-                  <div class="flex items-center justify-between text-[11px] bg-white border border-slate-200 rounded-md px-2 py-1.5">
-                    <div class="flex flex-col">
-                      <div class="font-semibold text-slate-700" x-text="`Stop ${idx + 1}: ${p.label}`"></div>
-                      <div class="text-[10px] text-slate-500" x-text="p.description"></div>
+                <template x-for="(stop, idx) in stops" :key="stop.id">
+                  <div class="bg-white border border-slate-200 rounded-md px-2 py-2 space-y-1">
+                    <div class="flex items-center justify-between gap-2">
+                      <div class="flex-1">
+                        <div class="text-[10px] text-slate-400 mb-0.5">
+                          <span class="font-semibold uppercase">Stop <span x-text="idx + 1"></span></span>
+                          <span class="ml-1 text-slate-400">
+                            (from
+                            <span x-text="idx === 0
+                              ? (selectedPortContext?.label || 'arrival port')
+                              : (stops[idx - 1]?.label || 'previous stop')"></span>)
+                          </span>
+                        </div>
+                        <div class="relative" @click.away="stop.showDropdown = false">
+                          <input
+                            x-model="stop.query"
+                            @input="searchStopPorts(idx)"
+                            @focus="searchStopPorts(idx)"
+                            @keydown.enter.prevent="selectFirstStopResult(idx)"
+                            class="field pl-8 h-8 text-[11px]"
+                            placeholder="Select stop port..."
+                          />
+                          <div class="absolute inset-y-0 left-0 flex items-center pl-2 pointer-events-none text-slate-400">
+                            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                    d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z"/>
+                            </svg>
+                          </div>
+
+                          <!-- Dropdown for this stop -->
+                          <div
+                            x-show="stop.showDropdown"
+                            class="absolute z-50 mt-1 w-full bg-white border border-slate-200 rounded-lg shadow-xl max-h-48 custom-scroll overflow-y-auto"
+                          >
+                            <template x-for="p in stop.matches" :key="`stop-${stop.id}-${p.zoneCode}-${p.portCode}-${p.terminalCode}`">
+                              <button
+                                type="button"
+                                class="w-full text-left px-3 py-2 hover:bg-ocean-50 border-b border-slate-50 last:border-0 group"
+                                @click="selectStopPort(idx, p)"
+                              >
+                                <div class="font-medium text-[11px] text-slate-800 group-hover:text-ocean-700"
+                                     x-text="portResultTitle(p)"></div>
+                                <div class="text-[10px] text-slate-500" x-text="portResultDescription(p)"></div>
+                              </button>
+                            </template>
+                          </div>
+                        </div>
+                        <div class="text-[10px] text-slate-400 mt-0.5" x-show="stop.label">
+                          Selected: <span class="font-medium text-slate-600" x-text="stop.label"></span>
+                        </div>
+                      </div>
+
+                      <!-- Days alongside for this stop -->
+                      <div class="w-20">
+                        <label class="label-text mb-1">Days</label>
+                        <input
+                          type="number"
+                          min="1"
+                          x-model.number="stop.daysInPort"
+                          class="field h-8 text-[11px] text-center"
+                        />
+                      </div>
+
+                      <!-- Remove -->
+                      <button
+                        type="button"
+                        class="text-slate-400 hover:text-red-500 text-base leading-none self-start mt-5"
+                        @click="removeStop(idx)"
+                      >
+                        ×
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      class="text-slate-400 hover:text-red-500 text-base leading-none"
-                      @click="removeMpPort(idx)"
-                    >
-                      ×
-                    </button>
                   </div>
                 </template>
               </div>
 
-              <!-- Multi-port timing + action -->
+              <!-- Add stop button -->
               <div class="flex items-center justify-between pt-1">
-                <div class="flex items-center gap-2 text-[11px]">
-                  <div>
-                    <span class="uppercase text-slate-400 font-semibold mr-1">Start</span>
-                    <input
-                      type="date"
-                      x-model="mpStartDate"
-                      class="field py-1 px-2 h-7 text-[11px]"
-                    />
-                  </div>
-                  <div>
-                    <span class="uppercase text-slate-400 font-semibold mr-1">Days / port</span>
-                    <input
-                      type="number"
-                      min="1"
-                      x-model.number="mpDaysInPort"
-                      class="field py-1 px-2 h-7 w-16 text-[11px]"
-                    />
-                  </div>
-                </div>
-
                 <button
                   type="button"
-                  class="px-3 py-1.5 rounded-md bg-slate-900 text-white text-[11px] font-semibold hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed"
-                  @click="submitMultiPort()"
-                  :disabled="mpPorts.length < 2 || estimateLoading"
+                  class="px-2.5 py-1 rounded-md border border-ocean-200 text-[11px] font-semibold text-ocean-700 hover:bg-ocean-50 disabled:opacity-40"
+                  @click="addStop"
+                  :disabled="!selectedPortContext || stops.length >= 5"
                 >
-                  Estimate voyage
+                  + Add stop
+                </button>
+                <button
+                  type="button"
+                  class="px-2 py-1 rounded-md border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-40"
+                  @click="clearItinerary"
+                  :disabled="!stops.length && !mpResult"
+                >
+                  Clear itinerary
                 </button>
               </div>
             </div>
@@ -477,10 +506,10 @@
           <!-- Action Button -->
           <div class="mt-6 pt-4 border-t border-slate-100">
             <button
-              @click="getEstimateV2()"
-              :disabled="!selectedPort || estimateLoading || !previousPortCode.trim()"
+              @click="calculateVoyage()"
+              :disabled="!selectedPort || !previousPortCode.trim() || estimateLoading"
               class="w-full bg-ocean-600 hover:bg-ocean-700 disabled:bg-slate-300 disabled:cursor-not-allowed text-white font-bold py-3.5 px-4 rounded-lg shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-2">
-              <span x-show="!estimateLoading">Calculate Port Fees</span>
+              <span x-show="!estimateLoading">Calculate Port Fees & Itinerary</span>
               <svg x-show="estimateLoading" class="animate-spin h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
                 <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
@@ -925,11 +954,8 @@
         portDetailCache: {},
         portQuery: '',
         filteredPorts: [],
-        mpFilteredPorts: [],
         showPortDropdown: false,
-        showMpDropdown: false,
         portSearchTimeout: null,
-        mpPortSearchTimeout: null,
         eta: new Date().toISOString().split('T')[0],
         netTonnage: '',
         ytdCbpPaid: '0',
@@ -961,10 +987,7 @@
   
         // multi-port
         mpVesselName: '',
-        mpStartDate: new Date().toISOString().split('T')[0],
-        mpDaysInPort: 2,
-        mpPortInput: '',
-        mpPorts: [],
+        stops: [],
         mpResult: null,
         mpHistory: [],
         mpExpandedLeg: null,
@@ -1002,9 +1025,7 @@
             const zones = Array.isArray(payload) ? payload : Array.isArray(payload.zones) ? payload.zones : Array.isArray(payload.data) ? payload.data : [];
             this.buildPortCaches(zones);
             this.filteredPorts = [];
-            this.mpFilteredPorts = [];
             this.showPortDropdown = false;
-            this.showMpDropdown = false;
             this.syncPortQueryWithSelection();
           } catch (e) {
             console.error('Ports load failed:', e);
@@ -1500,7 +1521,7 @@
 
           this.selectedPortDetails = null;
           this.selectedPortHolidays = [];
-          this.mpPorts = [];
+          this.stops = [];
           this.mpResult = null;
           this.mpExpandedLeg = null;
           this.liveData = null;
@@ -1543,41 +1564,31 @@
           return prioritized.slice(0, 12).map((m) => m.entry);
         },
 
-        searchPorts(immediate = false, target = 'single') {
-          const configs = {
-            single: {
-              getQuery: () => this.portQuery,
-              clear: () => { this.filteredPorts = []; this.showPortDropdown = false; },
-              apply: (matches) => { this.filteredPorts = matches; this.showPortDropdown = matches.length > 0; },
-              timeoutProp: 'portSearchTimeout',
-            },
-            multi: {
-              getQuery: () => this.mpPortInput,
-              clear: () => { this.mpFilteredPorts = []; this.showMpDropdown = false; },
-              apply: (matches) => { this.mpFilteredPorts = matches; this.showMpDropdown = matches.length > 0; },
-              timeoutProp: 'mpPortSearchTimeout',
-            },
-          };
-          const cfg = configs[target] || configs.single;
-          if (!Array.isArray(this.portSearchIndex) || this.portSearchIndex.length === 0) { cfg.clear(); return; }
-          if (this[cfg.timeoutProp]) { clearTimeout(this[cfg.timeoutProp]); this[cfg.timeoutProp] = null; }
+        searchPorts(immediate = false) {
+          if (!Array.isArray(this.portSearchIndex) || this.portSearchIndex.length === 0) {
+            this.filteredPorts = [];
+            this.showPortDropdown = false;
+            return;
+          }
+          if (this.portSearchTimeout) { clearTimeout(this.portSearchTimeout); this.portSearchTimeout = null; }
 
           const run = () => {
-            this[cfg.timeoutProp] = null;
-            const query = (cfg.getQuery() || '').trim().toLowerCase();
-            if (!query) { cfg.apply(this.portSearchIndex.slice(0, 12)); return; }
+            this.portSearchTimeout = null;
+            const query = (this.portQuery || '').trim().toLowerCase();
+            if (!query) { this.filteredPorts = this.portSearchIndex.slice(0, 12); this.showPortDropdown = this.filteredPorts.length > 0; return; }
             const tokens = query.split(/[^a-z0-9]+/g).filter(Boolean);
-            if (!tokens.length) { cfg.apply(this.portSearchIndex.slice(0, 12)); return; }
+            if (!tokens.length) { this.filteredPorts = this.portSearchIndex.slice(0, 12); this.showPortDropdown = this.filteredPorts.length > 0; return; }
             const matches = this.rankPortMatches(tokens);
-            cfg.apply(matches);
+            this.filteredPorts = matches;
+            this.showPortDropdown = matches.length > 0;
           };
-          if (immediate) run(); else this[cfg.timeoutProp] = setTimeout(run, 180);
+          if (immediate) run(); else this.portSearchTimeout = setTimeout(run, 180);
         },
 
         selectFirstPortResult(target = 'single') {
-          const results = target === 'multi' ? this.mpFilteredPorts : this.filteredPorts;
+          const results = this.filteredPorts;
           if (results.length) {
-            if (target === 'multi') this.addMpPort(results[0]);
+            if (target === 'multi') this.selectStopPort(0, results[0]);
             else this.selectPort(results[0]);
           }
         },
@@ -2068,8 +2079,8 @@
                 this.mpHistory = raw ? JSON.parse(raw) : [];
             } catch (e) { this.mpHistory = []; }
         },
-        saveMpHistory(ports) {
-            const zones = ports.map(p => p.zoneCode || p.portCode).filter(Boolean);
+        saveMpHistory(ports = []) {
+            const zones = ports.map(p => (typeof p === 'string' ? p : (p?.zoneCode || p?.portCode))).filter(Boolean);
             const label = zones.join('→');
             const entry = { id: Date.now(), label, zones };
             this.mpHistory = [entry, ...this.mpHistory].slice(0, 3);
@@ -2077,10 +2088,34 @@
         },
         applyMpHistory(entry) {
             const zones = entry?.zones || [];
-            this.mpPorts = zones.map(z => {
-              const match = this.portSearchIndex.find(e => (e.type === 'zone' || e.type === 'port') && (e.zoneCode === z || e.portCode === z)) || this.portSearchIndex.find(e => e.zoneCode === z || e.portCode === z);
+            if (!zones.length) return;
+
+            const findCtx = (code) => {
+              const match = this.portSearchIndex.find(e => (e.zoneCode === code || e.portCode === code));
               return match ? this.makeSelectionContext(match) : null;
-            }).filter(Boolean);
+            };
+
+            const arrivalCtx = findCtx(zones[0]);
+            if (arrivalCtx) {
+              this.selectedPortContext = arrivalCtx;
+              this.selectedPort = arrivalCtx.zoneCode || arrivalCtx.portCode || '';
+              this.portQuery = arrivalCtx.label || '';
+              this.afterPortSelection();
+            }
+
+            this.stops = zones.slice(1).map((code) => {
+              const ctx = findCtx(code);
+              const stop = this.createStop();
+              if (ctx) {
+                stop.zoneCode = ctx.zoneCode || null;
+                stop.portCode = ctx.portCode || null;
+                stop.label = ctx.label || '';
+                stop.description = ctx.description || '';
+                stop.query = ctx.label || '';
+              }
+              return stop;
+            });
+
             this.mpResult = null;
             this.mpExpandedLeg = null;
         },
@@ -2088,45 +2123,97 @@
         printEstimate() { window.print(); },
 
         // Multi-port methods
-        addCurrentPortToItinerary() {
-          const ctx = this.selectedPortContext;
-          if (!ctx) {
+        createStop() {
+          return {
+            id: Date.now() + Math.random(),
+            zoneCode: null,
+            portCode: null,
+            label: '',
+            description: '',
+            query: '',
+            matches: [],
+            showDropdown: false,
+            daysInPort: 2,
+          };
+        },
+        addStop() {
+          if (!this.selectedPortContext) {
+            alert('Select an arrival port first.');
+            return;
+          }
+          if (this.stops.length >= 5) return;
+          this.stops.push(this.createStop());
+        },
+        removeStop(idx) {
+          this.stops.splice(idx, 1);
+        },
+        clearItinerary() {
+          this.stops = [];
+          this.mpResult = null;
+          this.mpExpandedLeg = null;
+        },
+        searchStopPorts(idx) {
+          const stop = this.stops[idx];
+          if (!stop || !Array.isArray(this.portSearchIndex) || !this.portSearchIndex.length) return;
+
+          const q = (stop.query || '').trim().toLowerCase();
+          if (!q) {
+            stop.matches = this.portSearchIndex.slice(0, 10);
+            stop.showDropdown = true;
+            return;
+          }
+
+          const tokens = q.split(/[^a-z0-9]+/g).filter(Boolean);
+          if (!tokens.length) {
+            stop.matches = this.portSearchIndex.slice(0, 10);
+            stop.showDropdown = true;
+            return;
+          }
+
+          const matches = this.rankPortMatches(tokens);
+          stop.matches = matches;
+          stop.showDropdown = matches.length > 0;
+        },
+        selectStopPort(idx, entry) {
+          const stop = this.stops[idx];
+          if (!stop || !entry) return;
+
+          const ctx = this.makeSelectionContext(entry);
+          stop.zoneCode = ctx.zoneCode || null;
+          stop.portCode = ctx.portCode || null;
+          stop.label = ctx.label || '';
+          stop.description = ctx.description || '';
+          stop.query = ctx.label || '';
+          stop.matches = [];
+          stop.showDropdown = false;
+        },
+        selectFirstStopResult(idx) {
+          const stop = this.stops[idx];
+          if (!stop || !stop.matches || !stop.matches.length) return;
+          this.selectStopPort(idx, stop.matches[0]);
+        },
+        async submitMultiPort() {
+          if (!this.selectedPortContext) {
             alert('Select an arrival port first.');
             return;
           }
 
-          const code = ctx.zoneCode || ctx.portCode;
-          if (!code) return;
-
-          // Prevent adding the exact same zone twice in a row
-          if (this.mpPorts.length) {
-            const last = this.mpPorts[this.mpPorts.length - 1];
-            if ((last.zoneCode || last.portCode) === code) {
-              return;
-            }
-          }
-
-          if (this.mpPorts.length >= 5) return;
-
-          this.mpPorts.push(ctx);
-        },
-        clearItinerary() {
-          this.mpPorts = [];
-          this.mpResult = null;
-          this.mpExpandedLeg = null;
-        },
-        removeMpPort(i) { this.mpPorts.splice(i, 1); },
-        async submitMultiPort() {
-          if (this.mpPorts.length < 2) {
-            alert('Add at least two ports to estimate a multi-port voyage.');
+          const initialCode = this.selectedPortContext.zoneCode || this.selectedPortContext.portCode;
+          if (!initialCode) {
+            alert('Could not resolve arrival port code.');
             return;
           }
 
-          const ports = this.mpPorts.map(p => p.zoneCode || p.portCode).filter(Boolean);
-          if (ports.length < 2) {
-            alert('Could not resolve internal port codes for this itinerary.');
+          const stopCodes = this.stops
+            .map(s => s.zoneCode || s.portCode)
+            .filter(Boolean);
+
+          if (!stopCodes.length) {
+            alert('Add at least one stop to build a voyage.');
             return;
           }
+
+          const ports = [initialCode, ...stopCodes];
 
           const mpFwdDraft = Number(this.draftForwardMeters) || 0;
           const mpAftDraft = Number(this.draftAftMeters) || 0;
@@ -2154,8 +2241,8 @@
           const request = {
             vessel_name: vessel.name,
             ports,
-            start_date: this.mpStartDate || this.eta || new Date().toISOString().split('T')[0],
-            days_in_port: Number(this.mpDaysInPort) || 2,
+            start_date: this.eta || new Date().toISOString().split('T')[0],
+            days_in_port: Number(this.daysAlongside) || 2,
           };
 
           try {
@@ -2168,7 +2255,6 @@
             if (!r.ok) throw new Error(await r.text());
 
             const raw = await r.json();
-            console.log('[multi-port] raw response', raw);
 
             let mp = raw;
             if (!Array.isArray(mp.legs)) {
@@ -2181,10 +2267,28 @@
 
             this.mpResult = mp;
             this.mpExpandedLeg = null;
-            this.saveMpHistory(this.mpPorts);
+            this.saveMpHistory(ports);
           } catch (e) {
             console.error('Multi-port failed:', e);
             alert('Failed to calculate multi-port voyage.');
+          }
+        },
+        async calculateVoyage() {
+          if (!this.selectedPort || !this.eta || !this.previousPortCode.trim()) {
+            alert('Previous port, arrival port, and ETA are required.');
+            return;
+          }
+
+          this.estimateLoading = true;
+          try {
+            await this.getEstimateV2();
+            if (this.stops.length > 0) {
+              await this.submitMultiPort();
+            } else {
+              this.mpResult = null;
+            }
+          } finally {
+            this.estimateLoading = false;
           }
         },
         updateLegEta(leg, newDate) {
@@ -2216,21 +2320,6 @@
         applyLegToVoyage(leg) {
           if (!leg) return;
           if (leg.eta) this.eta = this.formatIsoDate(leg.eta);
-        },
-        addMpPort(entry = null) {
-          let context = entry ? this.makeSelectionContext(entry) : null;
-          if (!context) {
-            if (this.mpFilteredPorts.length) { context = this.makeSelectionContext(this.mpFilteredPorts[0]); }
-            else {
-              const direct = (this.mpPortInput || '').trim().toUpperCase();
-              if (direct && this.zoneLookup[direct]) {
-                const fallback = this.portSearchIndex.find((item) => item.zoneCode === direct && item.type === 'zone');
-                context = this.makeSelectionContext(fallback ?? null);
-              }
-            }
-          }
-          if (!context) return;
-          this.mpPorts.push(context); this.mpPortInput = ''; this.mpFilteredPorts = []; this.showMpDropdown = false;
         },
         async refreshAll() {
           await this.checkHealth();
