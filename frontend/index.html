@@ -279,55 +279,51 @@
               </div>
             </div>
 
-            <!-- Itinerary controls (leg-based multi-port route) -->
-            <div class="mt-3 space-y-2 text-xs text-slate-500">
+            <!-- Voyage itinerary (optional multi-port) -->
+            <div class="mt-4 pt-3 border-t border-slate-200 space-y-2 text-xs text-slate-500">
               <div class="flex items-center justify-between">
-                <div class="flex items-center gap-2">
-                  <span class="font-semibold text-slate-600">Port calls</span>
-                  <span class="text-[11px] text-slate-400" x-show="!mpLegs.length">(optional multi-port planning)</span>
+                <div>
+                  <span class="font-semibold text-slate-700">Voyage itinerary</span>
+                  <span class="ml-1 text-[11px] text-slate-400">(optional multi-port)</span>
                 </div>
                 <div class="flex items-center gap-2">
                   <button
                     type="button"
                     class="px-2.5 py-1 rounded-md border border-ocean-200 text-[11px] font-semibold text-ocean-700 hover:bg-ocean-50 disabled:opacity-40"
-                    @click="addPortCall()"
-                    :disabled="!selectedPortContext || !previousPortCode.trim() || mpLegs.length >= 5"
+                    @click="addCurrentPortToItinerary"
+                    :disabled="!selectedPortContext || mpPorts.length >= 5"
                   >
-                    Add port call
+                    Add current port
                   </button>
                   <button
                     type="button"
                     class="px-2 py-1 rounded-md border border-slate-200 text-[11px] text-slate-500 hover:bg-slate-100 disabled:opacity-40"
                     @click="clearItinerary"
-                    :disabled="!mpLegs.length"
+                    :disabled="!mpPorts.length"
                   >
                     Clear
                   </button>
                 </div>
               </div>
 
-              <!-- Leg list -->
+              <!-- Queue of ports -->
               <div class="bg-slate-50 rounded-lg border border-slate-200 p-2 space-y-1 max-h-40 overflow-y-auto custom-scroll">
-                <template x-if="!mpLegs.length">
+                <template x-if="!mpPorts.length">
                   <div class="text-[11px] text-slate-400">
-                    No port calls added. Single-port estimate will only use the current arrival port.
+                    No ports added. Single-port estimate uses only the current arrival port.
                   </div>
                 </template>
 
-                <template x-for="leg in mpLegs" :key="leg.leg">
+                <template x-for="(p, idx) in mpPorts" :key="p.zoneCode || idx">
                   <div class="flex items-center justify-between text-[11px] bg-white border border-slate-200 rounded-md px-2 py-1.5">
                     <div class="flex flex-col">
-                      <div class="font-semibold text-slate-700" x-text="`Leg ${leg.leg}: ${leg.from_port} → ${leg.to_zone}`"></div>
-                      <div class="text-[10px] text-slate-500">
-                        <span>ETA </span><span x-text="formatIsoDate(leg.eta)"></span>
-                        <span class="mx-1">·</span>
-                        <span>Days in port: </span><span x-text="leg.days_in_port"></span>
-                      </div>
+                      <div class="font-semibold text-slate-700" x-text="`Stop ${idx + 1}: ${p.label}`"></div>
+                      <div class="text-[10px] text-slate-500" x-text="p.description"></div>
                     </div>
                     <button
                       type="button"
                       class="text-slate-400 hover:text-red-500 text-base leading-none"
-                      @click="removeLeg(leg.leg)"
+                      @click="removeMpPort(idx)"
                     >
                       ×
                     </button>
@@ -335,13 +331,33 @@
                 </template>
               </div>
 
-              <!-- Multi-port trigger (reuses existing submitMultiPort) -->
-              <div class="flex items-center justify-end gap-2 pt-1">
+              <!-- Multi-port timing + action -->
+              <div class="flex items-center justify-between pt-1">
+                <div class="flex items-center gap-2 text-[11px]">
+                  <div>
+                    <span class="uppercase text-slate-400 font-semibold mr-1">Start</span>
+                    <input
+                      type="date"
+                      x-model="mpStartDate"
+                      class="field py-1 px-2 h-7 text-[11px]"
+                    />
+                  </div>
+                  <div>
+                    <span class="uppercase text-slate-400 font-semibold mr-1">Days / port</span>
+                    <input
+                      type="number"
+                      min="1"
+                      x-model.number="mpDaysInPort"
+                      class="field py-1 px-2 h-7 w-16 text-[11px]"
+                    />
+                  </div>
+                </div>
+
                 <button
                   type="button"
-                  class="px-2.5 py-1.5 rounded-md border border-slate-200 bg-white text-[11px] font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-40"
+                  class="px-3 py-1.5 rounded-md bg-slate-900 text-white text-[11px] font-semibold hover:bg-slate-800 disabled:bg-slate-300 disabled:cursor-not-allowed"
                   @click="submitMultiPort()"
-                  :disabled="mpLegs.length < 2 || estimateLoading"
+                  :disabled="mpPorts.length < 2 || estimateLoading"
                 >
                   Estimate voyage
                 </button>
@@ -948,7 +964,6 @@
         mpStartDate: new Date().toISOString().split('T')[0],
         mpDaysInPort: 2,
         mpPortInput: '',
-        mpLegs: [], // array of legs: { leg, from_port, to_zone, eta, etd, days_in_port }
         mpPorts: [],
         mpResult: null,
         mpHistory: [],
@@ -1485,7 +1500,6 @@
 
           this.selectedPortDetails = null;
           this.selectedPortHolidays = [];
-          this.mpLegs = [];
           this.mpPorts = [];
           this.mpResult = null;
           this.mpExpandedLeg = null;
@@ -2055,124 +2069,123 @@
             } catch (e) { this.mpHistory = []; }
         },
         saveMpHistory(ports) {
-            const zones = ports.map(p => p.zoneCode);
+            const zones = ports.map(p => p.zoneCode || p.portCode).filter(Boolean);
             const label = zones.join('→');
             const entry = { id: Date.now(), label, zones };
             this.mpHistory = [entry, ...this.mpHistory].slice(0, 3);
             localStorage.setItem('maritime_mp_history', JSON.stringify(this.mpHistory));
         },
         applyMpHistory(entry) {
-            const zones = entry.zones || [];
+            const zones = entry?.zones || [];
             this.mpPorts = zones.map(z => {
-                const match = this.portSearchIndex.find(e => e.type === 'zone' && e.zoneCode === z) || this.portSearchIndex.find(e => e.zoneCode === z);
-                return match ? this.makeSelectionContext(match) : null;
+              const match = this.portSearchIndex.find(e => (e.type === 'zone' || e.type === 'port') && (e.zoneCode === z || e.portCode === z)) || this.portSearchIndex.find(e => e.zoneCode === z || e.portCode === z);
+              return match ? this.makeSelectionContext(match) : null;
             }).filter(Boolean);
-            const startEta = this.eta || new Date().toISOString().split('T')[0];
-            const days = Number(this.daysAlongside) || 2;
-            const baseEta = new Date(startEta);
-            const legs = [];
-            let currentEta = new Date(baseEta);
-            let from = (this.previousPortCode || '').trim().toUpperCase();
-            zones.forEach((zone, idx) => {
-              if (!from) { from = idx === 0 ? zone : zones[idx - 1]; }
-              const etaIso = currentEta.toISOString();
-              const etdDate = new Date(currentEta.getTime() + days * 24 * 60 * 60 * 1000);
-              legs.push({
-                leg: legs.length + 1,
-                from_port: from,
-                to_zone: zone,
-                eta: etaIso,
-                etd: etdDate.toISOString(),
-                days_in_port: days,
-              });
-              from = zone;
-              currentEta = new Date(etdDate);
-            });
-            this.mpLegs = legs;
-            if (!legs.length) { this.mpResult = null; this.mpExpandedLeg = null; }
+            this.mpResult = null;
+            this.mpExpandedLeg = null;
         },
 
         printEstimate() { window.print(); },
 
         // Multi-port methods
-        addPortCall() {
-          if (!this.selectedPortContext || !this.selectedPort) {
-            alert('Select an arrival port before adding a port call.');
+        addCurrentPortToItinerary() {
+          const ctx = this.selectedPortContext;
+          if (!ctx) {
+            alert('Select an arrival port first.');
             return;
           }
-          if (!this.previousPortCode.trim()) {
-            alert('Set the previous (UN/LOCODE) port before building a voyage.');
-            return;
-          }
-          if (this.mpLegs.length >= 5) return;
 
-          // First leg: previous UN/LOCODE -> selected arrival zone
-          if (!this.mpLegs.length) {
-            const from = this.previousPortCode.trim().toUpperCase();
-            const toZone = this.selectedPortContext.zoneCode || this.selectedPort;
-            const eta = this.eta || new Date().toISOString().split('T')[0];
-            const days = Number(this.daysAlongside) || 2;
+          const code = ctx.zoneCode || ctx.portCode;
+          if (!code) return;
 
-            const start = new Date(eta);
-            const etdDate = new Date(start.getTime() + days * 24 * 60 * 60 * 1000);
-
-            this.mpLegs.push({
-              leg: 1,
-              from_port: from,
-              to_zone: toZone,
-              eta: start.toISOString(),
-              etd: etdDate.toISOString(),
-              days_in_port: days,
-            });
-          } else {
-            // Subsequent leg: prior dest -> new dest
-            const last = this.mpLegs[this.mpLegs.length - 1];
-            const from = last.to_zone;
-            const toZone = this.selectedPortContext.zoneCode || this.selectedPort;
-            const etaDate = new Date(last.etd);
-            const days = Number(this.daysAlongside) || last.days_in_port || 2;
-            const etdDate = new Date(etaDate.getTime() + days * 24 * 60 * 60 * 1000);
-
-            this.mpLegs.push({
-              leg: this.mpLegs.length + 1,
-              from_port: from,
-              to_zone: toZone,
-              eta: etaDate.toISOString(),
-              etd: etdDate.toISOString(),
-              days_in_port: days,
-            });
+          // Prevent adding the exact same zone twice in a row
+          if (this.mpPorts.length) {
+            const last = this.mpPorts[this.mpPorts.length - 1];
+            if ((last.zoneCode || last.portCode) === code) {
+              return;
+            }
           }
 
-          // Keep mpPorts loosely in sync for history / display compatibility
-          this.mpPorts = this.mpLegs.map(l => {
-            const ctx = this.portSearchIndex.find(
-              e => e.zoneCode === l.to_zone && e.type === 'zone'
-            ) || { zoneCode: l.to_zone, portCode: null, label: l.to_zone };
-            return this.makeSelectionContext(ctx);
-          });
+          if (this.mpPorts.length >= 5) return;
+
+          this.mpPorts.push(ctx);
         },
-
-        removeLeg(legNumber) {
-          this.mpLegs = this.mpLegs.filter(l => l.leg !== legNumber);
-          // re-number legs
-          this.mpLegs.forEach((l, idx) => { l.leg = idx + 1; });
-          this.mpPorts = this.mpLegs.map(l => {
-            const ctx = this.portSearchIndex.find(
-              e => e.zoneCode === l.to_zone && e.type === 'zone'
-            ) || { zoneCode: l.to_zone, portCode: null, label: l.to_zone };
-            return this.makeSelectionContext(ctx);
-          });
-          if (!this.mpLegs.length) {
-            this.mpResult = null;
-            this.mpExpandedLeg = null;
-          }
-        },
-
         clearItinerary() {
-          this.mpLegs = [];
           this.mpPorts = [];
           this.mpResult = null;
           this.mpExpandedLeg = null;
+        },
+        removeMpPort(i) { this.mpPorts.splice(i, 1); },
+        async submitMultiPort() {
+          if (this.mpPorts.length < 2) {
+            alert('Add at least two ports to estimate a multi-port voyage.');
+            return;
+          }
+
+          const ports = this.mpPorts.map(p => p.zoneCode || p.portCode).filter(Boolean);
+          if (ports.length < 2) {
+            alert('Could not resolve internal port codes for this itinerary.');
+            return;
+          }
+
+          const mpFwdDraft = Number(this.draftForwardMeters) || 0;
+          const mpAftDraft = Number(this.draftAftMeters) || 0;
+          const mpAirDraft = Number(this.airDraftMeters) || 0;
+          const mpDrafts = [mpFwdDraft, mpAftDraft].filter(v => v > 0);
+          const mpRepresentativeDraft = mpDrafts.length
+            ? Number((mpDrafts.reduce((sum, v) => sum + v, 0) / mpDrafts.length).toFixed(2))
+            : (mpFwdDraft || mpAftDraft || 0);
+          const toDraftString = (val) => (val > 0 ? String(val) : null);
+
+          const vessel = {
+            name: this.mpVesselName || this.selectedVessel?.VesselName || 'Unknown Vessel',
+            imo_number: this.selectedVessel?.IMONumber || null,
+            vessel_type: this.vesselType,
+            gross_tonnage: String(this.grossTonnage || 0),
+            net_tonnage: String(this.netTonnage || 0),
+            loa_meters: String(this.loaMeters || 0),
+            beam_meters: String(this.beamMeters || 0),
+            draft_meters: String(mpRepresentativeDraft || 0),
+            forward_draft_meters: toDraftString(mpFwdDraft),
+            aft_draft_meters: toDraftString(mpAftDraft),
+            air_draft_meters: toDraftString(mpAirDraft),
+          };
+
+          const request = {
+            vessel_name: vessel.name,
+            ports,
+            start_date: this.mpStartDate || this.eta || new Date().toISOString().split('T')[0],
+            days_in_port: Number(this.mpDaysInPort) || 2,
+          };
+
+          try {
+            this.mpExpandedLeg = null;
+            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ request, vessel })
+            });
+            if (!r.ok) throw new Error(await r.text());
+
+            const raw = await r.json();
+            console.log('[multi-port] raw response', raw);
+
+            let mp = raw;
+            if (!Array.isArray(mp.legs)) {
+              if (Array.isArray(raw?.voyage?.legs)) {
+                mp = raw.voyage;
+              } else if (Array.isArray(raw?.result?.legs)) {
+                mp = raw.result;
+              }
+            }
+
+            this.mpResult = mp;
+            this.mpExpandedLeg = null;
+            this.saveMpHistory(this.mpPorts);
+          } catch (e) {
+            console.error('Multi-port failed:', e);
+            alert('Failed to calculate multi-port voyage.');
+          }
         },
         updateLegEta(leg, newDate) {
           if (!this.mpResult || !Array.isArray(this.mpResult.legs)) return;
@@ -2201,58 +2214,8 @@
         },
 
         applyLegToVoyage(leg) {
-          if (!leg || !this.mpResult || !Array.isArray(this.mpResult.legs)) return;
-
-          const legs = this.mpResult.legs;
-          const idx = legs.findIndex(l => l.leg === leg.leg);
-          if (idx === -1) return;
-
-          const prevLeg = legs[idx - 1] || null;
-          const nextLeg = legs[idx + 1] || null;
-
-          // previousPortCode: use the prior leg's arrival, otherwise this leg's from_port
-          const prevCode =
-            (prevLeg && (prevLeg.to_port || prevLeg.internal_port_code || prevLeg.zone_code)) ||
-            (leg.from_port || leg.internal_port_code || leg.zone_code) ||
-            '';
-
-          this.previousPortCode = prevCode;
-
-          // nextPortCode: use next leg's to_port if present
-          const nextCode =
-            (nextLeg && (nextLeg.to_port || nextLeg.internal_port_code || nextLeg.zone_code)) || '';
-          this.nextPortCode = nextCode;
-
-          // Arrival port: prefer internal_port_code; fall back to to_port/zone_code
-          const internal = leg.internal_port_code || leg.to_port || leg.zone_code || '';
-          if (internal) {
-            this.selectedPort = internal;
-
-            const entry =
-              this.portSearchIndex.find(e => e.portCode === internal && e.type === 'port') ||
-              this.portSearchIndex.find(e => e.zoneCode === internal && e.type === 'zone');
-
-            this.selectedPortContext = this.makeSelectionContext(entry || null);
-            this.portQuery = this.selectedPortContext?.label || internal;
-
-            // After changing arrival, refresh docs for this leg context
-            this.loadDocumentRequirements();
-          }
-
-          // Sync ETA / daysAlongside into the left-hand form
-          if (leg.eta) {
-            this.eta = this.formatIsoDate(leg.eta);
-          }
-
-          if (leg.eta && leg.etd) {
-            const start = new Date(leg.eta);
-            const end = new Date(leg.etd);
-            const ms = end - start;
-            if (!Number.isNaN(ms) && ms > 0) {
-              const days = Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)));
-              this.daysAlongside = days;
-            }
-          }
+          if (!leg) return;
+          if (leg.eta) this.eta = this.formatIsoDate(leg.eta);
         },
         addMpPort(entry = null) {
           let context = entry ? this.makeSelectionContext(entry) : null;
@@ -2268,87 +2231,6 @@
           }
           if (!context) return;
           this.mpPorts.push(context); this.mpPortInput = ''; this.mpFilteredPorts = []; this.showMpDropdown = false;
-        },
-        removeMpPort(i) { this.mpPorts.splice(i, 1); },
-        async submitMultiPort() {
-          if (this.mpLegs.length < 2) {
-            alert('Add at least two port calls to estimate a multi-port voyage.');
-            return;
-          }
-
-          const prev = (this.previousPortCode || '').trim().toUpperCase();
-          if (!prev) {
-            alert('Previous (UN/LOCODE) port is required for multi-port planning.');
-            return;
-          }
-
-          const ports = [prev, ...this.mpLegs.map(l => l.to_zone)];
-          const startDate = this.eta || this.mpStartDate || new Date().toISOString().split('T')[0];
-          const daysInPort = Number(this.mpDaysInPort || this.daysAlongside || 2);
-
-          const mpFwdDraft = Number(this.draftForwardMeters) || 0;
-          const mpAftDraft = Number(this.draftAftMeters) || 0;
-          const mpAirDraft = Number(this.airDraftMeters) || 0;
-          const mpDrafts = [mpFwdDraft, mpAftDraft].filter(v => v > 0);
-          const mpRepresentativeDraft = mpDrafts.length
-            ? Number((mpDrafts.reduce((sum, v) => sum + v, 0) / mpDrafts.length).toFixed(2))
-            : (mpFwdDraft || mpAftDraft || 0);
-          const toDraftString = (val) => (val > 0 ? String(val) : null);
-
-          const vessel = {
-            name: this.mpVesselName || this.selectedVessel?.VesselName || 'Unknown Vessel',
-            imo_number: this.selectedVessel?.IMONumber || null,
-            vessel_type: this.vesselType,
-            gross_tonnage: String(this.grossTonnage || 0),
-            net_tonnage: String(this.netTonnage || 0),
-            loa_meters: String(this.loaMeters || 0),
-            beam_meters: String(this.beamMeters || 0),
-            draft_meters: String(mpRepresentativeDraft || 0),
-            forward_draft_meters: toDraftString(mpFwdDraft),
-            aft_draft_meters: toDraftString(mpAftDraft),
-            air_draft_meters: toDraftString(mpAirDraft),
-          };
-
-          const request = {
-            vessel_name: vessel.name,
-            ports,
-            start_date: startDate,
-            days_in_port: daysInPort,
-          };
-
-          try {
-            this.mpExpandedLeg = null;
-            const r = await fetch(`${API_BASE}/api/v2/voyage/multi-port`, {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ request, vessel })
-            });
-            if (!r.ok) throw new Error(await r.text());
-
-            const raw = await r.json();
-            console.log('[multi-port] raw response', raw);
-
-            // Normalize a couple of common shapes:
-            //  1) { legs: [...] }
-            //  2) { voyage: { legs: [...] } }
-            //  3) { result: { legs: [...] } }
-            let mp = raw;
-            if (!Array.isArray(mp.legs)) {
-              if (Array.isArray(raw?.voyage?.legs)) {
-                mp = raw.voyage;
-              } else if (Array.isArray(raw?.result?.legs)) {
-                mp = raw.result;
-              }
-            }
-
-            this.mpResult = mp;
-            this.saveMpHistory(
-              this.mpLegs.map(l => ({ zoneCode: l.to_zone }))
-            );
-          } catch (e) {
-            console.error('Multi-port failed:', e);
-            alert('Failed to calculate multi-port voyage.');
-          }
         },
         async refreshAll() {
           await this.checkHealth();
