@@ -556,14 +556,31 @@
                 <div class="p-6 grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div class="bg-slate-900 text-white rounded-xl p-5 shadow-lg relative overflow-hidden">
                         <div class="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-xl"></div>
-                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">Mandatory Fees</p>
-                        <p class="text-3xl font-bold tracking-tight" x-text="formatCurrency(profileTotals().mandatory)"></p>
-                        <p class="text-xs text-slate-400 mt-2">Baseline port costs</p>
+                        <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          Profile Total · <span class="capitalize" x-text="audienceProfile"></span>
+                        </p>
+                        <p class="text-3xl font-bold tracking-tight" x-text="formatCurrency(profileTotals().total_high)"></p>
+                        <p class="text-xs text-slate-400 mt-2">
+                          Sum of all visible items for the current view (agent / owner / full).
+                        </p>
                     </div>
                     <div class="bg-white border border-slate-200 rounded-xl p-5">
-                        <p class="text-xs font-bold text-ocean-600 uppercase tracking-wider mb-1">Best case (with optional)</p>
-                        <p class="text-3xl font-bold text-slate-900 tracking-tight" x-text="formatCurrency(profileTotals().total_high)"></p>
-                        <p class="text-xs text-slate-500 mt-2">Includes optional services & contingencies</p>
+                        <p class="text-xs font-bold text-ocean-600 uppercase tracking-wider mb-2">
+                          Breakdown
+                        </p>
+                        <div class="space-y-1 text-xs text-slate-600">
+                          <div class="flex items-center justify-between">
+                            <span>Regulatory (CBP / APHIS / tonnage / MISP)</span>
+                            <span class="font-mono" x-text="formatCurrency(regOpsTotals().regulatory)"></span>
+                          </div>
+                          <div class="flex items-center justify-between">
+                            <span>Port &amp; operations</span>
+                            <span class="font-mono" x-text="formatCurrency(regOpsTotals().portOps)"></span>
+                          </div>
+                        </div>
+                        <p class="text-[11px] text-slate-400 mt-2">
+                          Uses the same filtered list as the current profile view.
+                        </p>
                     </div>
                 </div>
 
@@ -1139,17 +1156,48 @@
           const calcs = this.filteredCalculations();
           if (!calcs.length) return { mandatory: '0.00', total_high: '0.00' };
 
-          let sum = 0;
+          let mandatory = 0;
+          let best = 0;
+
           for (const c of calcs) {
             const n = Number(c.final_amount);
-            if (Number.isFinite(n)) sum += n;
+            if (!Number.isFinite(n)) continue;
+
+            if (c.is_optional && !c.manual_entry) {
+              // only contributes to best-case
+              best += n;
+            } else {
+              // mandatory shows up in both
+              mandatory += n;
+              best += n;
+            }
           }
-          const base = sum;
-          // For now, profile total == sum of visible items.
-          // If you want low/high ranges later, you can get fancy.
+
           return {
-            mandatory: base.toFixed(2),
-            total_high: base.toFixed(2),
+            mandatory: mandatory.toFixed(2),
+            total_high: best.toFixed(2),
+          };
+        },
+
+        regOpsTotals() {
+          const calcs = this.filteredCalculations();
+          let regulatory = 0;
+          let portOps = 0;
+
+          for (const c of calcs) {
+            const n = Number(c.final_amount);
+            if (!Number.isFinite(n)) continue;
+
+            if (this.isRegulatoryFee(c)) {
+              regulatory += n;
+            } else {
+              portOps += n;
+            }
+          }
+
+          return {
+            regulatory,
+            portOps,
           };
         },
 
