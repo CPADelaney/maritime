@@ -1369,6 +1369,7 @@ def get_pilotage_info(port_code: str) -> Dict[str, Any]:
 def list_fees(
     scope: Optional[str] = Query(None),
     port_code: Optional[str] = Query(None),
+    state_code: Optional[str] = Query(None),
     effective_date: date = Query(date.today()),
 ) -> List[Dict[str, Any]]:
     db: Session = SessionLocal()
@@ -1376,8 +1377,26 @@ def list_fees(
         q = select(Fee)
         if scope:
             q = q.where(Fee.scope == scope)
+        port: Optional[Port] = None
+        port_state = (state_code or "").strip().upper() or None
+
         if port_code:
-            q = q.where((Fee.applies_port_code == port_code) | (Fee.applies_port_code.is_(None)))
+            port_code = port_code.strip().upper()
+            port = (
+                db.execute(select(Port).where(Port.code == port_code))
+                .scalars()
+                .first()
+            )
+            if not port:
+                raise HTTPException(status_code=404, detail=f"port '{port_code}' not found")
+
+            if port_state is None:
+                port_state = (port.state or "").strip().upper() or None
+
+            q = q.where((Fee.applies_port_code == port.code) | (Fee.applies_port_code.is_(None)))
+
+        if port_state:
+            q = q.where((Fee.applies_state == port_state) | (Fee.applies_state.is_(None)))
         q = q.where(Fee.effective_start <= effective_date)
         q = q.where((Fee.effective_end >= effective_date) | (Fee.effective_end.is_(None)))
         fees = db.execute(q.order_by(Fee.code, Fee.effective_start.desc())).scalars().all()
