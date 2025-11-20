@@ -654,8 +654,8 @@
                     <tr
                       class="cursor-pointer hover:bg-slate-50"
                       @click="
-                        const legId = Number(leg.leg);
-                        mpExpandedLeg === legId ? mpExpandedLeg = null : mpExpandedLeg = legId
+                        mpExpandedLeg === leg.leg ? mpExpandedLeg = null : mpExpandedLeg = leg.leg;
+                        applyLegToVoyage(leg)
                       "
                     >
                       <td class="px-6 py-3 text-sm text-slate-500" x-text="leg.leg"></td>
@@ -674,11 +674,22 @@
                     </tr>
                     <!-- Expanded breakdown row -->
                     <tr
-                      x-show="mpExpandedLeg === Number(leg.leg)"
+                      x-show="mpExpandedLeg === leg.leg"
                       class="bg-slate-50/80"
                     >
                       <td colspan="4" class="px-6 py-3">
-                          <div class="text-xs font-semibold text-slate-500 mb-2">Fee breakdown for this port</div>
+                          <div class="flex items-center justify-between mb-2">
+                            <div class="text-xs font-semibold text-slate-500">Fee breakdown for this port</div>
+                            <div class="flex items-center gap-2 text-[11px] text-slate-500">
+                              <span>ETA</span>
+                              <input
+                                type="date"
+                                class="field py-0.5 px-2 text-[11px] h-7"
+                                :value="formatIsoDate(leg.eta)"
+                                @change="updateLegEta(leg, $event.target.value)"
+                              />
+                            </div>
+                          </div>
 
                           <template x-if="leg.fee_breakdown && leg.fee_breakdown.length">
                             <div class="border border-slate-200 rounded-lg overflow-hidden bg-white">
@@ -1980,6 +1991,86 @@
         clearItinerary() {
           this.mpPorts = [];
           this.mpResult = null;
+        },
+        updateLegEta(leg, newDate) {
+          if (!this.mpResult || !Array.isArray(this.mpResult.legs)) return;
+          if (!newDate) return;
+
+          const idx = this.mpResult.legs.findIndex(l => l.leg === leg.leg);
+          if (idx === -1) return;
+
+          const d = new Date(newDate);
+          if (Number.isNaN(d.getTime())) return;
+
+          let iso;
+          try {
+            const old = new Date(this.mpResult.legs[idx].eta);
+            if (!Number.isNaN(old.getTime())) {
+              old.setFullYear(d.getFullYear(), d.getMonth(), d.getDate());
+              iso = old.toISOString();
+            } else {
+              iso = d.toISOString();
+            }
+          } catch (e) {
+            iso = d.toISOString();
+          }
+
+          this.mpResult.legs[idx].eta = iso;
+        },
+
+        applyLegToVoyage(leg) {
+          if (!leg || !this.mpResult || !Array.isArray(this.mpResult.legs)) return;
+
+          const legs = this.mpResult.legs;
+          const idx = legs.findIndex(l => l.leg === leg.leg);
+          if (idx === -1) return;
+
+          const prevLeg = legs[idx - 1] || null;
+          const nextLeg = legs[idx + 1] || null;
+
+          // previousPortCode: use the prior leg's arrival, otherwise this leg's from_port
+          const prevCode =
+            (prevLeg && (prevLeg.to_port || prevLeg.internal_port_code || prevLeg.zone_code)) ||
+            (leg.from_port || leg.internal_port_code || leg.zone_code) ||
+            '';
+
+          this.previousPortCode = prevCode;
+
+          // nextPortCode: use next leg's to_port if present
+          const nextCode =
+            (nextLeg && (nextLeg.to_port || nextLeg.internal_port_code || nextLeg.zone_code)) || '';
+          this.nextPortCode = nextCode;
+
+          // Arrival port: prefer internal_port_code; fall back to to_port/zone_code
+          const internal = leg.internal_port_code || leg.to_port || leg.zone_code || '';
+          if (internal) {
+            this.selectedPort = internal;
+
+            const entry =
+              this.portSearchIndex.find(e => e.portCode === internal && e.type === 'port') ||
+              this.portSearchIndex.find(e => e.zoneCode === internal && e.type === 'zone');
+
+            this.selectedPortContext = this.makeSelectionContext(entry || null);
+            this.portQuery = this.selectedPortContext?.label || internal;
+
+            // After changing arrival, refresh docs for this leg context
+            this.loadDocumentRequirements();
+          }
+
+          // Sync ETA / daysAlongside into the left-hand form
+          if (leg.eta) {
+            this.eta = this.formatIsoDate(leg.eta);
+          }
+
+          if (leg.eta && leg.etd) {
+            const start = new Date(leg.eta);
+            const end = new Date(leg.etd);
+            const ms = end - start;
+            if (!Number.isNaN(ms) && ms > 0) {
+              const days = Math.max(1, Math.round(ms / (1000 * 60 * 60 * 24)));
+              this.daysAlongside = days;
+            }
+          }
         },
         addMpPort(entry = null) {
           let context = entry ? this.makeSelectionContext(entry) : null;
