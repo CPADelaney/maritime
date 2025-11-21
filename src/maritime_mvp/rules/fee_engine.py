@@ -884,6 +884,14 @@ class FeeEngine:
 
     def _calc_tonnage_tax(self, vessel: VesselSpecs, voyage: VoyageContext, port: Port) -> FeeCalculation:
         on = voyage.eta.date()
+        logger.info(
+            "TONNAGE DEBUG: vessel=%s gross=%s net=%s previous=%s arrival_port=%s",
+            vessel.name,
+            vessel.gross_tonnage,
+            vessel.net_tonnage,
+            voyage.previous_port_code,
+            voyage.arrival_port_code,
+        )
         db = self._active_fee("TONNAGE_TAX_PER_TON", on, port)
         if db:
             rate = _money(db.rate)
