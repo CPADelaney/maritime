@@ -943,7 +943,7 @@ def search_vessels(
         raw = client.get_vessel_summary(vessel_id=None, vessel_name=name)
     except Exception:
         logger.exception("PSIX search failed for name=%r", name)
-        raise HTTPException(status_code=502, detail="PSIX search failed")
+        raise HTTPException(status_code=502, detail="Vessel search temporarily unavailable")
 
     rows = (raw or {}).get("Table") or []
 
@@ -993,7 +993,7 @@ def get_vessel_by_id(vessel_id: int) -> Dict[str, Any]:
         return client.get_vessel_summary(vessel_id=vessel_id)
     except Exception as e:
         logger.exception("PSIX lookup failed for ID %s", vessel_id)
-        raise HTTPException(status_code=502, detail=f"PSIX lookup failed: {e!s}")
+        raise HTTPException(status_code=502, detail="Vessel details lookup failed")
 
 # ----- Fee Estimation (Legacy/simple) -----
 @app.get("/estimate", tags=["Estimates"])
@@ -1273,15 +1273,17 @@ def estimate_v2(
 
         # ---- Quick totals convenience ----
         try:
-            mand = Decimal(result["totals"]["mandatory"])
-            low = Decimal(result["totals"]["optional_low"])
-            high = Decimal(result["totals"]["optional_high"])
+            totals = result.get("totals", {}) or {}
+            mand = Decimal(totals.get("mandatory", "0"))
+            best = Decimal(totals.get("best_case_optional", totals.get("optional_low", "0")))
+            high = Decimal(totals.get("optional_high", "0"))
         except Exception:
-            mand = Decimal("0"); low = Decimal("0"); high = Decimal("0")
+            mand = Decimal("0"); best = Decimal("0"); high = Decimal("0")
 
         result["quick_totals"] = {
             "mandatory": str(mand),
-            "with_optional_low": str(mand + low),
+            "best_case_optional": str(best),
+            "best_case_total": str(mand + best),
             "with_optional_high": str(mand + high),
         }
 
