@@ -1474,6 +1474,12 @@
             params.set('previous_port', this.previousPortCode.trim());
           }
 
+          // Pass vessel context so backend can enrich expiries from live sources
+          const imo = this.selectedVessel?.IMONumber || this.selectedVessel?.imoNumber;
+          const vesselName = this.selectedVessel?.VesselName || this.selectedVessel?.vesselName;
+          if (imo) params.set('vessel_imo', String(imo));
+          if (vesselName) params.set('vessel_name', vesselName);
+
           try {
             const r = await fetch(`${API_BASE}/api/v2/documents/requirements?${params.toString()}`);
             if (!r.ok) throw new Error('documents request failed');
