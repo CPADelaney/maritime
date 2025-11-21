@@ -14,3 +14,4 @@ gunicorn==22.0.0
 lxml>=4.9,<6.0
 redis>=5.0
 holidays>=0.50
+openpyxl>=3.1

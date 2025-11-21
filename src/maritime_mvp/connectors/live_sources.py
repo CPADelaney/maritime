@@ -6,11 +6,19 @@ import logging
 from dataclasses import dataclass, asdict
 from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple, List
+from datetime import datetime
 import httpx
 from lxml import html
+import io
 
 # Import the fixed PSIX client
 from ..clients.psix_client import PsixClient
+
+try:
+    import openpyxl
+    _OPENPYXL_AVAILABLE = True
+except Exception:
+    _OPENPYXL_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -494,35 +502,190 @@ COFR_URLS = {
     "api_check": "https://cgmix.uscg.mil/xml/COFRData.asmx?WSDL"  # if exists
 }
 
+COFR_ACTIVE_XLSX = (
+    "https://www.uscg.mil/Portals/0/NPFC/COFR/"
+    "ECOFR%20active%20vessel%20cofr.xlsx"
+)
+
+
+def _fetch_cofr_active_rows(ttl_s: int = 3600) -> List[Dict[str, Any]]:
+    """
+    Download and parse the ECOFR active vessel spreadsheet into a list of dicts.
+
+    Each dict is {header: value, ...}, with headers taken from the first row.
+    """
+    ck = "cofr::active_rows"
+    cached = _get_cached(ck)
+    if cached is not None:
+        return cached
+
+    if not _OPENPYXL_AVAILABLE:
+        logger.warning("openpyxl not available; skipping COFR active list parsing")
+        _set_cached(ck, [])
+        return []
+
+    try:
+        with httpx.Client(timeout=DEFAULT_TIMEOUT, headers={"User-Agent": UA}, verify=False) as client:
+            r = client.get(COFR_ACTIVE_XLSX, follow_redirects=True)
+            r.raise_for_status()
+            data = r.content
+    except Exception as e:
+        logger.warning(f"Failed to fetch COFR active list: {e}")
+        _set_cached(ck, [])
+        return []
+
+    try:
+        wb = openpyxl.load_workbook(io.BytesIO(data), data_only=True)
+        ws = wb.active
+        header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
+        headers = [str(h).strip() if h is not None else "" for h in header_row]
+
+        rows: List[Dict[str, Any]] = []
+        for row in ws.iter_rows(min_row=2, values_only=True):
+            if all(v is None for v in row):
+                continue
+            rec: Dict[str, Any] = {}
+            for h, v in zip(headers, row):
+                if not h:
+                    continue
+                rec[h] = v
+            rows.append(rec)
+
+        _set_cached(ck, rows, ttl_s)
+        return rows
+    except Exception as e:
+        logger.warning(f"Failed to parse COFR active list: {e}")
+        _set_cached(ck, [])
+        return []
+
+
+def _cofr_get_field(rec: Dict[str, Any], *predicates) -> str:
+    """
+    Find first column whose header matches one of the given predicates.
+    predicates are callables that take header:str -> bool.
+    """
+    for h, v in rec.items():
+        h_lower = str(h).lower()
+        for pred in predicates:
+            if pred(h_lower):
+                return "" if v is None else str(v).strip()
+    return ""
+
+
+def _match_cofr_record(
+    rows: List[Dict[str, Any]],
+    vessel_name: Optional[str],
+    imo_or_official_no: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    if not rows:
+        return None
+
+    norm_id = (imo_or_official_no or "").strip().lstrip("0")
+    norm_name = re.sub(r"\W+", "", (vessel_name or "").upper())
+
+    best: Optional[Dict[str, Any]] = None
+
+    # 1) Strong match on IMO / Official #
+    if norm_id:
+        for rec in rows:
+            id_candidate = _cofr_get_field(
+                rec,
+                lambda h: "imo" in h,
+                lambda h: "official" in h and "number" in h,
+            )
+            cand_norm = id_candidate.strip().lstrip("0")
+            if cand_norm and cand_norm == norm_id:
+                best = rec
+                break
+
+    # 2) Fallback to exact vessel name match (sanitized)
+    if best is None and norm_name:
+        for rec in rows:
+            name_candidate = _cofr_get_field(
+                rec,
+                lambda h: "vessel" in h and "name" in h,
+                lambda h: h == "name",
+            )
+            cand_norm = re.sub(r"\W+", "", name_candidate.upper())
+            if cand_norm and cand_norm == norm_name:
+                best = rec
+                break
+
+    if best is None:
+        return None
+
+    raw_expiry = _cofr_get_field(
+        best,
+        lambda h: "exp" in h and "date" in h,
+        lambda h: "valid" in h and "thru" in h,
+    )
+    status = _cofr_get_field(
+        best,
+        lambda h: "status" in h,
+        lambda h: "cofr" in h and "status" in h,
+    )
+    vessel_nm = _cofr_get_field(
+        best,
+        lambda h: "vessel" in h and "name" in h,
+        lambda h: h == "name",
+    )
+    imo_val = _cofr_get_field(best, lambda h: "imo" in h)
+    off_val = _cofr_get_field(best, lambda h: "official" in h and "number" in h)
+
+    # Normalize expiry into ISO if possible
+    exp_iso: Optional[str] = None
+    if raw_expiry:
+        for fmt in ("%m/%d/%Y", "%Y-%m-%d", "%m/%d/%y"):
+            try:
+                exp_iso = datetime.strptime(raw_expiry.strip()[:10], fmt).date().isoformat()
+                break
+            except Exception:
+                continue
+
+    return {
+        "vessel_name": vessel_nm or vessel_name,
+        "imo_number": imo_val or None,
+        "official_number": off_val or None,
+        "raw_expiry": raw_expiry or None,
+        "expiry_date": exp_iso,
+        "status": status or None,
+    }
+
 def cofr_snapshot(vessel_name: Optional[str], imo_or_official_no: Optional[str]) -> Dict[str, Any]:
-    """Get COFR lookup information and guidance."""
+    """Get COFR lookup information and, when possible, an active record with expiry."""
     try:
         snap = fetch_html(COFR_URLS["search"], parse_extra=True)
     except Exception as e:
         logger.warning(f"Failed to fetch COFR page: {e}")
         snap = {"url": COFR_URLS["search"], "error": str(e)}
-    
-    # Build search guidance
+
     guidance = []
     if vessel_name:
         guidance.append(f"Search by vessel name: '{vessel_name}'")
     if imo_or_official_no:
         guidance.append(f"Search by IMO/Official #: '{imo_or_official_no}'")
-    
-    # Check if vessel needs COFR (>300 GT tankers, all vessels >400 GT)
+
     cofr_required = {
         "tankers_over_300gt": True,
         "vessels_over_400gt": True,
-        "exceptions": ["Public vessels", "Oil spill response vessels"]
+        "exceptions": ["Public vessels", "Oil spill response vessels"],
     }
-    
+
+    active_record: Optional[Dict[str, Any]] = None
+    try:
+        rows = _fetch_cofr_active_rows()
+        active_record = _match_cofr_record(rows, vessel_name, imo_or_official_no)
+    except Exception as e:
+        logger.warning(f"Failed to match COFR active list: {e}")
+
     return {
         "entrypoint": COFR_URLS["search"],
         "active_list": COFR_URLS["active_list"],
         "page": snap,
         "query": {"vessel_name": vessel_name, "id": imo_or_official_no},
         "search_guidance": guidance,
-        "requirements": cofr_required
+        "requirements": cofr_required,
+        "active_record": active_record,
     }
 
 # ---- Additional Document Checks ----------------------------------------------
@@ -641,15 +804,13 @@ def build_live_bundle(*,
         logger.error(f"Exception getting PSIX data: {e}")
         vrow = {}
     
-    # Extract documents and check for alerts
-    docs = extract_docs_from_psix_row(vrow) if vrow else []
-    alerts = check_document_alerts(docs)
-    
-    # 2) Determine maritime region
+    docs: List[VesselDoc] = extract_docs_from_psix_row(vrow) if vrow else []
+
+    # 2) Region + pilot/MX/MISP
     region = choose_region(port_code, port_name, state, is_cascadia)
     logger.info(f"Selected region: {region}")
-    
-    # 3) Fetch regional information with error handling
+
+    # Fetch regional information with error handling
     pilot = {}
     mx = {}
     misp = {}
@@ -665,14 +826,14 @@ def build_live_bundle(*,
     except Exception as e:
         logger.warning(f"Failed to get marine exchange info: {e}")
     
-    # 4) California-specific fees
+    # California-specific fees
     if (state or "").upper() == "CA":
         try:
             misp = fetch_misp_snapshot()
         except Exception as e:
             logger.warning(f"Failed to get MISP info: {e}")
     
-    # 5) COFR lookup
+    # 3) COFR (now with active record)
     try:
         cofr_data = cofr_snapshot(
             vessel_name=vessel_name or vrow.get("VesselName") or vrow.get("vesselname"),
@@ -681,8 +842,22 @@ def build_live_bundle(*,
     except Exception as e:
         logger.warning(f"Failed to get COFR info: {e}")
         cofr_data = {"error": str(e)}
-    
-    # 6) Build final bundle
+
+    active = cofr_data.get("active_record") or {}
+    if active.get("expiry_date") or active.get("raw_expiry"):
+        docs.append(
+            VesselDoc(
+                name="Certificate of Financial Responsibility (COFR)",
+                expires_on=active.get("expiry_date") or active.get("raw_expiry"),
+                status=active.get("status") or "Active",
+                source="NPFC",
+            )
+        )
+
+    # 4) Now compute alerts with COFR included
+    alerts = check_document_alerts(docs)
+
+    # 5) Build final bundle
     bundle = LiveBundle(
         vessel=vrow,
         documents=[asdict(d) for d in docs],
