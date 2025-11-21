@@ -303,7 +303,7 @@
                 <div class="text-slate-300">→</div>
                 
                 <div class="w-16 h-9 flex items-center justify-center bg-white border border-slate-300 rounded-md text-xs font-bold text-ocean-600 shadow-sm">
-                  <span x-text="selectedPortContext?.portCode || selectedPortContext?.zoneCode || 'ARR'"></span>
+                  <span x-text="selectedPortContext?.zoneCode || selectedPortContext?.portCode || 'ARR'"></span>
                 </div>
                 
                 <div class="text-slate-300">→</div>
@@ -407,6 +407,15 @@
                       <div class="flex flex-col">
                         <div class="font-semibold text-slate-700" x-text="`Stop ${idx + 1}: ${p.label}`"></div>
                         <div class="text-[10px] text-slate-500" x-text="p.description"></div>
+                        <div class="flex items-center gap-2 mt-1 text-[10px] text-slate-500">
+                          <span class="uppercase text-slate-400 font-semibold">Days</span>
+                          <input
+                            type="number"
+                            min="1"
+                            class="field h-7 w-14 text-[10px] py-1 px-2"
+                            x-model.number="p.daysAlongside"
+                          />
+                        </div>
                       </div>
                       <button
                         type="button"
@@ -630,11 +639,11 @@
                     <div class="bg-slate-900 text-white rounded-xl p-5 shadow-lg relative overflow-hidden">
                         <div class="absolute top-0 right-0 w-32 h-32 bg-white/5 rounded-full -mr-10 -mt-10 blur-xl"></div>
                         <p class="text-xs font-bold text-slate-400 uppercase tracking-wider mb-1">
-                          Profile Total · <span class="capitalize" x-text="audienceProfile"></span>
+                          Total estimate (best case) · <span class="capitalize" x-text="audienceProfile"></span>
                         </p>
-                        <p class="text-3xl font-bold tracking-tight" x-text="formatCurrency(profileTotals().total_high)"></p>
+                        <p class="text-3xl font-bold tracking-tight" x-text="formatCurrency(profileTotals().best_case_total)"></p>
                         <p class="text-xs text-slate-400 mt-2">
-                          Sum of all visible items for the current view (agent / owner / full).
+                          Mandatory items plus any priced optional services currently shown.
                         </p>
                     </div>
                     <div class="bg-white border border-slate-200 rounded-xl p-5">
@@ -749,12 +758,12 @@
                     <td class="px-6 py-3 text-sm text-slate-500"
                         x-text="formatIsoDate(leg.eta)"></td>
                     <td class="px-6 py-3 text-right text-sm font-mono font-bold text-ocean-600">
-                      <span
-                        x-text="formatCurrency(
-                          Number(leg.fees?.mandatory || 0) +
-                          Number(leg.fees?.optional_high || 0)
-                        )"
-                      ></span>
+                        <span
+                          x-text="formatCurrency(
+                            Number(leg.fees?.mandatory || 0) +
+                            Number(leg.fees?.best_case_optional || 0)
+                          )"
+                        ></span>
                     </td>
                   </tr>
                   <!-- Expanded breakdown row -->
@@ -882,11 +891,33 @@
                 </div>
                 <div class="w-px h-10 bg-white/20"></div>
                 <div class="text-right">
-                  <div class="text-[11px] uppercase font-semibold text-ocean-200">With optional</div>
-                  <div class="text-2xl font-bold" x-text="formatCurrency(mpResult?.total_voyage_cost?.with_optional || mpResult?.total_voyage_cost?.mandatory || 0)"></div>
+                  <div class="text-[11px] uppercase font-semibold text-ocean-200">Best case total</div>
+                  <div class="text-2xl font-bold" x-text="formatCurrency(mpResult?.total_voyage_cost?.best_case_total || mpResult?.total_voyage_cost?.mandatory || 0)"></div>
                 </div>
               </div>
             </div>
+        </div>
+
+        <!-- Compliance / CBP Documents -->
+        <div
+          x-show="complianceDocuments().length"
+          class="card p-4 no-print"
+        >
+          <h3 class="text-sm font-bold text-slate-800 mb-2">Compliance / CBP Documents</h3>
+          <ul class="text-xs text-slate-600 space-y-2">
+            <template x-for="doc in complianceDocuments()" :key="doc.document_code || doc.document_name || doc.name || doc.title || doc.code">
+              <li class="flex items-center justify-between gap-3">
+                <div>
+                  <div class="font-semibold" x-text="doc.document_name || doc.name || doc.title || doc.code || 'Document'"></div>
+                  <div class="text-[11px] text-slate-400" x-text="doc.authority || doc.notes"></div>
+                </div>
+                <div class="text-right text-[11px] text-slate-500">
+                  <div class="uppercase tracking-wide text-slate-400 font-semibold">Expiry</div>
+                  <div class="font-mono" x-text="complianceExpiry(doc)"></div>
+                </div>
+              </li>
+            </template>
+          </ul>
         </div>
 
         <!-- Port Documents -->
@@ -968,8 +999,6 @@
         nextPortCode: '',
         etd: '',
         daysAlongside: 2,
-        laytimeAllowedDays: 2,
-        demurrageRate: 0,
         vesselType: 'general_cargo',
         grossTonnage: 0,
         loaMeters: 0,
@@ -1145,7 +1174,7 @@
           
           // Sort index: Zones first, then Ports, then Terminals, then Alphabetical
           index.sort((a, b) => {
-              const typeScore = { zone: 1, port: 2, terminal: 3 };
+              const typeScore = { terminal: 1, port: 2, zone: 3 };
               if (typeScore[a.type] !== typeScore[b.type]) return typeScore[a.type] - typeScore[b.type];
               return (a.label || '').localeCompare(b.label || '');
           });
@@ -1275,7 +1304,7 @@
         },
 
         filteredCalculations() {
-          const calcs = this.estimateV2?.calculations || [];
+          const calcs = (this.estimateV2?.calculations || []).filter((c) => !c.manual_entry);
           if (!calcs.length) return [];
 
           if (this.audienceProfile === 'full') {
@@ -1299,7 +1328,7 @@
 
         profileTotals() {
           const calcs = this.filteredCalculations();
-          if (!calcs.length) return { mandatory: '0.00', total_high: '0.00' };
+          if (!calcs.length) return { mandatory: '0.00', best_case_total: '0.00', best_case_optional: '0.00' };
 
           let mandatory = 0;
           let best = 0;
@@ -1320,7 +1349,8 @@
 
           return {
             mandatory: mandatory.toFixed(2),
-            total_high: best.toFixed(2),
+            best_case_optional: Math.max(0, best - mandatory).toFixed(2),
+            best_case_total: best.toFixed(2),
           };
         },
 
@@ -1346,36 +1376,6 @@
           };
         },
 
-        potentialDemurrage() {
-          const days = Number(this.daysAlongside) || 0;
-          const allowed = Number(this.laytimeAllowedDays) || 0;
-          const rate = Number(this.demurrageRate) || 0;
-          const excess = Math.max(0, days - allowed);
-          return Math.max(0, excess * rate);
-        },
-
-        formatIsoDate(dateString) {
-          if (!dateString) return '';
-          const d = new Date(dateString);
-          if (Number.isNaN(d.getTime())) return dateString;
-          return d.toISOString().slice(0, 10);
-        },
-        formatIsoTime(dateString) {
-          if (!dateString) return '';
-          const d = new Date(dateString);
-          if (Number.isNaN(d.getTime())) return dateString;
-          const hh = String(d.getHours()).padStart(2, '0');
-          const mm = String(d.getMinutes()).padStart(2, '0');
-          return `${hh}:${mm}`;
-        },
-
-        formatDate(dateString) {
-          if (!dateString) return '';
-          const d = new Date(dateString);
-          if (Number.isNaN(d.getTime())) return dateString;
-          return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
-        },
-
         formatIsoDate(dateString) {
           if (!dateString) return '';
           if (typeof dateString === 'string' && dateString.includes('T')) {
@@ -1389,11 +1389,29 @@
           return dateString;
         },
 
+        formatIsoTime(dateString) {
+          if (!dateString) return '';
+          const d = new Date(dateString);
+          if (Number.isNaN(d.getTime())) return dateString;
+          const hh = String(d.getHours()).padStart(2, '0');
+          const mm = String(d.getMinutes()).padStart(2, '0');
+          return `${hh}:${mm}`;
+        },
+
+        formatDate(dateString) {
+          return this.formatIsoDate(dateString);
+        },
+
         formatLocalTime(isoString) {
           if (!isoString) return '';
           const d = new Date(isoString);
           if (Number.isNaN(d.getTime())) return isoString;
-          return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+          const yyyy = d.getFullYear();
+          const mm = String(d.getMonth() + 1).padStart(2, '0');
+          const dd = String(d.getDate()).padStart(2, '0');
+          const hh = String(d.getHours()).padStart(2, '0');
+          const min = String(d.getMinutes()).padStart(2, '0');
+          return `${yyyy}-${mm}-${dd} ${hh}:${min}`;
         },
 
         legDurationDays(leg) {
@@ -1440,6 +1458,17 @@
           if (!this.selectedPortDetails) return [];
           // Now driven by /api/v2/documents/requirements instead of /ports
           return Array.isArray(this.documentRequirements) ? this.documentRequirements : [];
+        },
+
+        complianceDocuments() {
+          return Array.isArray(this.documentRequirements) ? this.documentRequirements : [];
+        },
+
+        complianceExpiry(doc) {
+          if (!doc) return 'Valid / unknown expiry';
+          const raw = doc.expiry_date || doc.expiryDate || doc.expiry;
+          const iso = this.formatIsoDate(raw);
+          return iso || 'Valid / unknown expiry';
         },
 
         portResultTitle(entry) { return entry ? (entry.label || '') : ''; },
@@ -1518,8 +1547,6 @@
           this.eta = new Date().toISOString().split('T')[0];
           this.etd = '';
           this.daysAlongside = 2;
-          this.laytimeAllowedDays = 2;
-          this.demurrageRate = 0;
 
           this.selectedPort = '';
           this.selectedPortContext = null;
@@ -1542,6 +1569,14 @@
           const matches = [];
           for (const entry of this.portSearchIndex) {
             if (!entry?.haystack) continue;
+            if (entry.type === 'zone') {
+              const zoneMatch = tokens.some((token) => {
+                const code = (entry.zoneCode || '').toLowerCase();
+                const name = (entry.zoneName || '').toLowerCase();
+                return code === token || (name && name.includes(token));
+              });
+              if (!zoneMatch) continue;
+            }
             const haystack = entry.haystack;
             const allMatch = tokens.every((token) => haystack.includes(token));
             if (!allMatch) continue;
@@ -1557,7 +1592,6 @@
               if ((entry.terminalCode || '').toLowerCase().includes(token)) score += 2;
               if (primaryMatches.some((v) => v && v.includes(token))) score += 1;
             }
-            if (entry.type === 'zone') score += 1;
             if (entry.type === 'port') score += 2;
             if (entry.type === 'terminal') score += 3;
             matches.push({ entry, score });
@@ -1586,9 +1620,17 @@
           const run = () => {
             this.portSearchTimeout = null;
             const query = (this.portQuery || '').trim().toLowerCase();
-            if (!query) { this.filteredPorts = this.portSearchIndex.slice(0, 12); this.showPortDropdown = this.filteredPorts.length > 0; return; }
+            if (!query) {
+              this.filteredPorts = this.portSearchIndex.filter((p) => p.type !== 'zone').slice(0, 12);
+              this.showPortDropdown = this.filteredPorts.length > 0;
+              return;
+            }
             const tokens = query.split(/[^a-z0-9]+/g).filter(Boolean);
-            if (!tokens.length) { this.filteredPorts = this.portSearchIndex.slice(0, 12); this.showPortDropdown = this.filteredPorts.length > 0; return; }
+            if (!tokens.length) {
+              this.filteredPorts = this.portSearchIndex.filter((p) => p.type !== 'zone').slice(0, 12);
+              this.showPortDropdown = this.filteredPorts.length > 0;
+              return;
+            }
             const matches = this.rankPortMatches(tokens);
             this.filteredPorts = matches;
             this.showPortDropdown = matches.length > 0;
@@ -1608,8 +1650,8 @@
           if (!entry) return;
           const context = this.makeSelectionContext(entry);
           this.selectedPortContext = context;
-          // Use the actual port code for API calls; fall back to zone if we ever select a pure zone row.
-          this.selectedPort = context?.portCode || context?.zoneCode || '';
+          // Use the parent zone code for API calls while preserving port/terminal context for display.
+          this.selectedPort = context?.zoneCode || context?.portCode || '';
           this.portQuery = context?.label || '';
           this.filteredPorts = [];
           this.showPortDropdown = false;
@@ -2102,7 +2144,10 @@
           this.mpPorts = zones.map(z => {
             const match = this.portSearchIndex.find(e => (e.type === 'zone' || e.type === 'port') && (e.zoneCode === z || e.portCode === z))
               || this.portSearchIndex.find(e => e.zoneCode === z || e.portCode === z);
-            return match ? this.makeSelectionContext(match) : null;
+            if (!match) return null;
+            const ctx = this.makeSelectionContext(match);
+            ctx.daysAlongside = Number(this.mpDaysInPort) || Number(this.daysAlongside) || 1;
+            return ctx;
           }).filter(Boolean);
           this.mpResult = null;
           this.mpExpandedLeg = null;
@@ -2120,6 +2165,7 @@
           if (this.mpPorts.length >= 5) return;
 
           const ctx = { ...this.selectedPortContext };
+          ctx.daysAlongside = Number(this.mpDaysInPort) || Number(this.daysAlongside) || 1;
           this.mpPorts.push(ctx);
           this.showMultiPort = true;
         },
@@ -2135,6 +2181,13 @@
           const ports = this.mpPorts
             .map(p => p.zoneCode || p.portCode)
             .filter(Boolean);
+
+          const stops = this.mpPorts.map((p) => ({
+            zone_code: p.zoneCode || p.portCode || null,
+            port_code: p.portCode || null,
+            terminal_code: p.terminalCode || null,
+            days_alongside: Number(p.daysAlongside) || Number(this.mpDaysInPort) || Number(this.daysAlongside) || 1,
+          }));
 
           if (ports.length < 2) {
             alert('Add at least two ports to build a voyage.');
@@ -2169,6 +2222,7 @@
             ports,
             start_date: this.mpStartDate || this.eta || new Date().toISOString().split('T')[0],
             days_in_port: Number(this.mpDaysInPort) || Number(this.daysAlongside) || 2,
+            stops,
           };
 
           try {

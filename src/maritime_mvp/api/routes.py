@@ -83,6 +83,15 @@ class DocumentRequirement(BaseModel):
     lead_time_hours: int
     authority: str
     description: Optional[str] = None
+    expiry_date: Optional[date] = None
+    notes: Optional[str] = None
+
+
+class VoyageStop(BaseModel):
+    zone_code: Optional[str] = Field(None, description="Parent zone code")
+    port_code: Optional[str] = Field(None, description="Internal port code")
+    terminal_code: Optional[str] = Field(None, description="Terminal identifier")
+    days_alongside: Optional[int] = Field(None, description="Days at this stop")
 
 
 class ContractAdjustmentIn(BaseModel):
@@ -122,44 +131,83 @@ def _static_fallback_documents(
     prev = (previous_port or "").strip().upper()
     is_foreign = bool(prev) and not prev.startswith("US")
 
-    if not is_foreign:
-        return docs
-
-    # Customs declaration for foreign arrivals.
-    docs.append(
-        DocumentRequirement(
-            document_name="Customs Declaration for Foreign Arrival",
-            document_code="CBP-1300",
-            is_mandatory=True,
-            lead_time_hours=24,
-            authority="CBP",
-            description="Standard customs declaration for arrivals from foreign ports.",
+    if is_foreign:
+        # Customs declaration for foreign arrivals.
+        docs.append(
+            DocumentRequirement(
+                document_name="Customs Declaration for Foreign Arrival",
+                document_code="CBP-1300",
+                is_mandatory=True,
+                lead_time_hours=24,
+                authority="CBP",
+                description="Standard customs declaration for arrivals from foreign ports.",
+                expiry_date=None,
+                notes="Capture the same data historically collected via CBP Form 1300.",
+            )
         )
-    )
 
-    # Notice of Arrival/Departure (NOA/NOAD) – typical 96-hour window for foreign voyages.
-    docs.append(
-        DocumentRequirement(
-            document_name="Notice of Arrival/Departure (NOA/NOAD)",
-            document_code="NOA/NOAD",
-            is_mandatory=True,
-            lead_time_hours=96,
-            authority="USCG",
-            description="Advance notice of arrival/departure; commonly 96 hours for foreign voyages.",
+        # Notice of Arrival/Departure (NOA/NOAD) – typical 96-hour window for foreign voyages.
+        docs.append(
+            DocumentRequirement(
+                document_name="Notice of Arrival/Departure (NOA/NOAD)",
+                document_code="NOA/NOAD",
+                is_mandatory=True,
+                lead_time_hours=96,
+                authority="USCG",
+                description="Advance notice of arrival/departure; commonly 96 hours for foreign voyages.",
+                expiry_date=None,
+                notes="Aligns with data historically captured on CBP Form 3171.",
+            )
         )
-    )
 
-    # Ballast water management/reporting – broadly required for seagoing vessels.
-    docs.append(
-        DocumentRequirement(
-            document_name="Ballast Water Management Report",
-            document_code="BWMR",
-            is_mandatory=True,
-            lead_time_hours=24,
-            authority="USCG",
-            description="Ballast water management/reporting in accordance with U.S. regulations.",
+        # Ballast water management/reporting – broadly required for seagoing vessels.
+        docs.append(
+            DocumentRequirement(
+                document_name="Ballast Water Management Report",
+                document_code="BWMR",
+                is_mandatory=True,
+                lead_time_hours=24,
+                authority="USCG",
+                description="Ballast water management/reporting in accordance with U.S. regulations.",
+                expiry_date=None,
+                notes="Maintain latest submission guidance for CBP review.",
+            )
         )
-    )
+
+    compliance_docs = [
+        DocumentRequirement(
+            document_name="Certificate of Financial Responsibility (COFR)",
+            document_code="COFR",
+            is_mandatory=True,
+            lead_time_hours=0,
+            authority="USCG/EPA",
+            description="Pollution financial responsibility evidence for U.S. waters.",
+            expiry_date=None,
+            notes="Renewal typically every 2-3 years; keep proof of current coverage.",
+        ),
+        DocumentRequirement(
+            document_name="International Tonnage Certificate",
+            document_code="ITC",
+            is_mandatory=True,
+            lead_time_hours=0,
+            authority="Flag State",
+            description="Flag-state tonnage certificate kept on board for clearance.",
+            expiry_date=None,
+            notes="Confirm validity and reissue after major modifications.",
+        ),
+        DocumentRequirement(
+            document_name="Certificate of Documentation or Registry",
+            document_code="COD/Registry",
+            is_mandatory=True,
+            lead_time_hours=0,
+            authority="Flag State",
+            description="Evidence of vessel registry for entry and clearance.",
+            expiry_date=None,
+            notes="Verify registry renewals per flag requirements.",
+        ),
+    ]
+
+    docs.extend(compliance_docs)
 
     return docs
 
@@ -168,6 +216,10 @@ class PortSequenceRequest(BaseModel):
     ports: List[str] = Field(..., example=["CNSHA", "USOAK", "USSEA", "USLAX"])
     start_date: date = Field(..., example="2025-09-01")
     days_in_port: int = Field(2, example=2)
+    stops: Optional[List[VoyageStop]] = Field(
+        None,
+        description="Optional ordered list of within-zone stops (metadata only)",
+    )
 
 
 # ============ Database Dependency ============
@@ -526,6 +578,8 @@ async def calculate_comprehensive_estimate(
         result["calculations"] = keep
         result["totals"] = {
             "mandatory": str(mand),
+            "best_case_optional": "0.00",
+            "best_case_total": str(mand),
             "optional_low": "0.00",
             "optional_high": "0.00",
             "total_low": str(mand),
@@ -669,21 +723,35 @@ def _document_requirements_core(
                 lead_time_hours=int(r[3] or 0),
                 authority=r[4] or "",
                 description=r[5],
+                expiry_date=None,
+                notes=None,
             )
         )
 
+    fallback_docs = _static_fallback_documents(port_code_input, vessel_type, previous_port)
+    for doc in fallback_docs:
+        key = ((doc.document_code or "").upper(), (doc.document_name or "").lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        docs.append(doc)
+
     # Ensure CBP-1300 for foreign arrivals
     if is_foreign:
-        docs.append(
-            DocumentRequirement(
-                document_name="Customs Declaration for Foreign Arrival",
-                document_code="CBP-1300",
-                is_mandatory=True,
-                lead_time_hours=24,
-                authority="CBP",
-                description="Required for all arrivals from foreign ports.",
+        cbp_key = ("CBP-1300", "customs declaration for foreign arrival")
+        if cbp_key not in seen:
+            docs.append(
+                DocumentRequirement(
+                    document_name="Customs Declaration for Foreign Arrival",
+                    document_code="CBP-1300",
+                    is_mandatory=True,
+                    lead_time_hours=24,
+                    authority="CBP",
+                    description="Required for all arrivals from foreign ports.",
+                    expiry_date=None,
+                    notes="Collects arrival particulars in line with CBP processes.",
+                )
             )
-        )
 
     return docs
 
@@ -895,6 +963,8 @@ async def calculate_multi_port_voyage(
         docs = _document_requirements_core(db, arrival_port_raw, vessel.vessel_type, prev_port)
 
         fees_totals = leg_estimate.get("totals", {}) or {}
+        best_optional = _dec(fees_totals.get("best_case_optional", fees_totals.get("optional_low", "0")))
+        best_total = _dec(fees_totals.get("best_case_total", fees_totals.get("total_low", "0")))
 
         # Slimmed per-fee breakdown for this leg
         fee_breakdown = []
@@ -924,14 +994,18 @@ async def calculate_multi_port_voyage(
                 "etd": etd.isoformat(),
                 "fees": {
                     "mandatory": str(_dec(fees_totals.get("mandatory", "0"))),
+                    "best_case_optional": str(best_optional),
+                    "best_case_total": str(best_total),
                     "optional_low": str(_dec(fees_totals.get("optional_low", "0"))),
                     "optional_high": str(_dec(fees_totals.get("optional_high", "0"))),
                 },
                 "totals": {
                     "mandatory": str(_dec(fees_totals.get("mandatory", "0"))),
+                    "best_case_optional": str(best_optional),
+                    "best_case_total": str(best_total),
                     "optional_low": str(_dec(fees_totals.get("optional_low", "0"))),
                     "optional_high": str(_dec(fees_totals.get("optional_high", "0"))),
-                    "total_low": str(_dec(fees_totals.get("total_low", "0"))),
+                    "total_low": str(best_total),
                     "total_high": str(_dec(fees_totals.get("total_high", "0"))),
                 },
                 "fee_breakdown": fee_breakdown,
@@ -944,7 +1018,7 @@ async def calculate_multi_port_voyage(
         current_date += timedelta(days=request.days_in_port)
 
     total_mandatory = sum(_dec(leg["fees"]["mandatory"]) for leg in voyage_legs)
-    total_optional_high = sum(_dec(leg["fees"]["optional_high"]) for leg in voyage_legs)
+    total_best_case = sum(_dec(leg["fees"].get("best_case_optional", "0")) for leg in voyage_legs)
 
     return {
         "vessel_name": request.vessel_name,
@@ -955,10 +1029,11 @@ async def calculate_multi_port_voyage(
             "start_date": request.start_date.isoformat(),
             "end_date": current_date.isoformat(),
         },
+        "rotation": [stop.model_dump() for stop in request.stops] if request.stops else [],
         "legs": voyage_legs,
         "total_voyage_cost": {
             "mandatory": str(total_mandatory),
-            "with_optional": str(total_mandatory + total_optional_high),
+            "best_case_total": str(total_mandatory + total_best_case),
             "currency": "USD",
         },
         "optimization_suggestions": _get_voyage_optimizations(voyage_legs),

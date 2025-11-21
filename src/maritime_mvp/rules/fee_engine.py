@@ -233,6 +233,19 @@ class FeeEngine:
         "STKN": Decimal("275"),
     }
 
+    # Map internal/zone codes to canonical pilotage/dockage pricing zones
+    CANONICAL_ZONE_MAP = {
+        "SFBAY": "NORCAL",
+        "NORCAL": "NORCAL",
+        "STKN": "NORCAL",
+        "LALB": "SOCAL",
+        "SOCAL": "SOCAL",
+        "PUGET": "PUGET",
+        "COLRIV": "COLUMBIA",
+        "COLUMBIA": "COLUMBIA",
+        "OREGON": "COLUMBIA",
+    }
+
     # Pilotage formula fallbacks used when registry lookups fail.
     _LEGACY_PILOTAGE_PORT_RATES = {
         "LALB": {"base": 3500, "per_foot": 8.50, "draft_mult": 1.15},
@@ -670,6 +683,10 @@ class FeeEngine:
             )
         )
 
+        best_case_optional = opt_low
+        best_case_total = _money(mandatory_total + best_case_optional)
+        high_total = _money(mandatory_total + opt_high)
+
         confidences = [c.confidence for c in calcs if not c.is_optional]
         overall_conf = (sum(confidences) / Decimal(len(confidences))) if confidences else Decimal("0.85")
 
@@ -717,10 +734,12 @@ class FeeEngine:
             ],
             "totals": {
                 "mandatory": str(mandatory_total),
+                "best_case_optional": str(best_case_optional),
+                "best_case_total": str(best_case_total),
                 "optional_low": str(opt_low),
                 "optional_high": str(opt_high),
-                "total_low": str(_money(mandatory_total + opt_low)),
-                "total_high": str(_money(mandatory_total + opt_high)),
+                "total_low": str(best_case_total),
+                "total_high": str(high_total),
             },
             "confidence": str(overall_conf),
             "accuracy_statement": f"Estimate accuracy: ±{((Decimal('1') - overall_conf) * Decimal('100')):.1f}%",
@@ -850,7 +869,7 @@ class FeeEngine:
         else:
             base = dyn_base
             details = (
-                f"Derived from APHIS AQI commercial vessel fee schedule "
+                "Derived from current public fee schedule "
                 f"(risk='{risk}', prev='{prev}', is_cascadia={bool(getattr(port, 'is_cascadia', False))})"
             )
 
@@ -955,7 +974,7 @@ class FeeEngine:
 
             if parsed is not None:
                 amount = parsed
-                details = "Derived from CA MISP public sources"
+                details = "Based on current published tariff guidance"
         except Exception:
             logger.debug("MISP live snapshot lookup failed; using static fallback", exc_info=True)
 
@@ -1003,7 +1022,8 @@ class FeeEngine:
             zone = getattr(port, "region", None)
         if not zone:
             zone = port.code
-        return str(zone)
+        canonical = FeeEngine.CANONICAL_ZONE_MAP.get(str(zone).upper(), str(zone).upper())
+        return canonical
 
     def _default_legs_for_zone(self, zone: str) -> List[MovementLeg]:
         zone_up = (zone or "").upper()
@@ -1445,74 +1465,18 @@ class FeeEngine:
           - Hourly rate and tug count scale with GRT
           - Fuel surcharge applied as a percentage uplift
         """
-        try:
-            gt = float(vessel.gross_tonnage)
-        except Exception:
-            gt = 0.0
-
-        if gt <= 0:
-            # No meaningful GRT: keep as a soft placeholder
-            return FeeCalculation(
-                code="TUGBOAT",
-                name="Tugboat Services (Estimate)",
-                base_amount=Decimal("0"),
-                final_amount=Decimal("0"),
-                confidence=Decimal("0.40"),
-                calculation_details="Insufficient GRT data – manual tug quote required.",
-                is_optional=True,
-                manual_entry=True,
-            )
-
-        # Try to use vessel_types config for tug count if available
-        vt_cfg = self._get_vessel_type_config(vessel)
-        base_tugs: Optional[float] = None
-        if vt_cfg and vt_cfg.typical_tug_count is not None:
-            try:
-                base_tugs = float(vt_cfg.typical_tug_count)
-            except Exception:
-                base_tugs = None
-
-        if base_tugs is not None and base_tugs > 0:
-            tugs_per_move = base_tugs
-        else:
-            # Fallback to GT-based heuristic
-            if gt < 20000:
-                tugs_per_move = 1.5
-            elif gt < 60000:
-                tugs_per_move = 2.0
-            else:
-                tugs_per_move = 2.5
-
-        # Hourly rate remains GT-based; we can refine by type later if desired.
-        if gt < 20000:
-            hourly_rate = 1800.0
-        elif gt < 60000:
-            hourly_rate = 2400.0
-        else:
-            hourly_rate = 3200.0
-
-        moves = 2
-        hours_per_tug_job = 2.5
-        total_tug_hours = moves * tugs_per_move * hours_per_tug_job
-
-        fuel_surcharge_pct = 0.18  # ~18% FSC common in 2024/25
-
-        base_cost = Decimal(str(total_tug_hours * hourly_rate))
-        total_cost = base_cost * Decimal(str(1 + fuel_surcharge_pct))
-
         return FeeCalculation(
             code="TOWAGE",
-            name="Tugboat Services (Estimate)",
-            base_amount=_money(hourly_rate),
-            final_amount=_money(total_cost),
-            confidence=Decimal("0.75"),
+            name="Tugboat Services",
+            base_amount=Decimal("0"),
+            final_amount=Decimal("0"),
+            confidence=Decimal("0.40"),
             calculation_details=(
-                f"Est. {int(tugs_per_move)} tugs in/out for {vessel.vessel_type.value} "
-                f"@ ${int(hourly_rate)}/hr/tug "
-                f"for {total_tug_hours:.1f} tug-hours + {int(fuel_surcharge_pct*100)}% FSC."
+                "Tugboat services are typically contracted; no default tariff available. "
+                "Use local towage contract rates."
             ),
-            is_optional=False,
-            manual_entry=False,
+            is_optional=True,
+            manual_entry=True,
         )
 
     def _calc_mx(self, voyage: VoyageContext, port: Port) -> FeeCalculation:
@@ -1571,12 +1535,12 @@ class FeeEngine:
             FeeCalculation(
                 code="LINE_HANDLING",
                 name="Line Handling (Mooring/Unmooring)",
-                base_amount=_money(1500),
-                final_amount=_money(1500),
-                confidence=Decimal("0.80"),
-                calculation_details="Dockworkers for mooring",
+                base_amount=_money(0),
+                final_amount=_money(0),
+                confidence=Decimal("0.40"),
+                calculation_details="Manual entry only – negotiated line handling",
                 is_optional=True,
-                estimated_range=(Decimal("1000.00"), Decimal("2500.00")),
+                manual_entry=True,
             )
         )
         if include_legacy:
@@ -1584,41 +1548,37 @@ class FeeEngine:
                 FeeCalculation(
                     code="LAUNCH_SERVICE",
                     name="Launch/Water Taxi Service",
-                    base_amount=_money(800),
-                    final_amount=_money(800),
-                    confidence=Decimal("0.75"),
-                    calculation_details="Crew transportation",
+                    base_amount=_money(0),
+                    final_amount=_money(0),
+                    confidence=Decimal("0.40"),
+                    calculation_details="Manual entry only – contracted launch service",
                     is_optional=True,
-                    estimated_range=(Decimal("500.00"), Decimal("1500.00")),
+                    manual_entry=True,
                 )
             )
             out.append(
                 FeeCalculation(
                     code="GARBAGE",
                     name="Garbage Disposal",
-                    base_amount=_money(600),
-                    final_amount=_money(600),
-                    confidence=Decimal("0.90"),
-                    calculation_details="Waste removal",
+                    base_amount=_money(0),
+                    final_amount=_money(0),
+                    confidence=Decimal("0.40"),
+                    calculation_details="Manual entry only – coordinate with vendor",
                     is_optional=True,
-                    estimated_range=(Decimal("400.00"), Decimal("1000.00")),
+                    manual_entry=True,
                 )
             )
             if voyage.days_alongside > 1:
-                amt = _money(200) * Decimal(str(voyage.days_alongside))
                 out.append(
                     FeeCalculation(
                         code="FRESH_WATER",
                         name="Fresh Water Supply",
-                        base_amount=amt,
-                        final_amount=amt,
-                        confidence=Decimal("0.85"),
-                        calculation_details=f"$200/day × {voyage.days_alongside} days",
+                        base_amount=_money(0),
+                        final_amount=_money(0),
+                        confidence=Decimal("0.40"),
+                        calculation_details="Manual entry only – fresh water via terminal tariff",
                         is_optional=True,
-                        estimated_range=(
-                            _money(amt * Decimal("0.8")),
-                            _money(amt * Decimal("1.2")),
-                        ),
+                        manual_entry=True,
                     )
                 )
         return out
