@@ -654,6 +654,8 @@ def _document_requirements_core(
     port_code_input: str,
     vessel_type: Optional[str],
     previous_port: Optional[str],
+    vessel_imo: Optional[str] = None,
+    vessel_name: Optional[str] = None,
 ) -> List[DocumentRequirement]:
     """
     Build document requirements from port_documents:
