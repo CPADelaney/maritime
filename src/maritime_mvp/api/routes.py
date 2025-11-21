@@ -30,6 +30,7 @@ from ..rules.fee_engine import (
     VesselType,
 )
 from ..models import Port, PortZone, Terminal, ContractAdjustment
+from ..connectors.live_sources import build_live_bundle
 
 logger = logging.getLogger("maritime-api")
 
@@ -252,6 +253,66 @@ def _arrival_type(prev_port_code: Optional[str]) -> str:
     if prev_port_code and prev_port_code.strip().upper().startswith("US"):
         return "COASTWISE"
     return "FOREIGN"
+
+
+def _parse_any_date(raw: Any) -> Optional[date]:
+    """
+    Try to handle common ISO / non-ISO date formats and return a date object.
+    Accepts things like:
+      - '2025-01-31'
+      - '2025-01-31T00:00:00'
+      - '01/31/2025'
+      - '1/31/25'
+      - '2025/01/31'
+      - '31-Jan-2025'
+    Returns None if parsing fails.
+    """
+    if raw is None:
+        return None
+
+    s = str(raw).strip()
+    if not s:
+        return None
+
+    # Candidate substrings with obvious time bits stripped
+    candidates: List[str] = []
+    if len(s) >= 8:
+        candidates.append(s[:10])
+    if " " in s:
+        candidates.append(s.split(" ", 1)[0])
+    if "T" in s:
+        candidates.append(s.split("T", 1)[0])
+    candidates.append(s)
+
+    norm_candidates: List[str] = []
+    for c in candidates:
+        c = c.strip().strip(",")
+        if c and c not in norm_candidates:
+            norm_candidates.append(c)
+
+    fmts = [
+        "%Y-%m-%d",
+        "%m/%d/%Y",
+        "%m/%d/%y",
+        "%Y/%m/%d",
+        "%d-%b-%Y",
+        "%d-%b-%y",
+        "%d %b %Y",
+        "%d %b %y",
+    ]
+
+    for cand in norm_candidates:
+        for fmt in fmts:
+            try:
+                return datetime.strptime(cand, fmt).date()
+            except Exception:
+                continue
+
+    # Last‑ditch: let fromisoformat try whatever Frankenstein ISO string this is
+    try:
+        return datetime.fromisoformat(norm_candidates[0]).date()
+    except Exception:
+        return None
 
 
 def _table_exists(db: Session, table_name: str) -> bool:
@@ -662,25 +723,29 @@ def _document_requirements_core(
     - Includes ALL_US and specific port_code matches.
     - Honors applies_to_vessel_types (array) and applies_if_foreign (bool).
     - Always adds CBP-1300 for foreign arrivals.
+    - Optionally enriches expiries from live sources (PSIX / NPFC).
     """
-    docs: List[DocumentRequirement] = []
-    if not _use_port_documents(db):
-        # If the structured port_documents table is missing, fall back to a
-        # small set of common U.S. arrival docs derived from public guidance.
-        return _static_fallback_documents(port_code_input, vessel_type, previous_port)
-
     port_code = (port_code_input or "").strip().upper()
     vt = (vessel_type or "").strip().lower() or None
     is_foreign = not ((previous_port or "").strip().upper().startswith("US"))
 
-    # Also consider internal code variant for port_documents if you store internal codes there
-    resolved = None
-    try:
-        resolved = _resolve_port_code(db, port_code)
-    except HTTPException:
-        resolved = None
+    docs: List[DocumentRequirement] = []
+    use_port_documents = _use_port_documents(db)
 
-    code_candidates = {port_code.strip().upper()}
+    # Also consider internal code variant for port_documents if you store internal codes there
+    resolved: Optional[ResolvedPort] = None
+    if port_code:
+        try:
+            resolved = _resolve_port_code(db, port_code)
+        except HTTPException:
+            resolved = None
+
+    # Deduplicate by (document_code, document_name)
+    seen: set[tuple[str, str]] = set()
+
+    code_candidates: set[str] = set()
+    if port_code:
+        code_candidates.add(port_code)
     if resolved:
         if resolved.port_code:
             code_candidates.add(resolved.port_code.upper())
@@ -689,46 +754,49 @@ def _document_requirements_core(
 
     port_codes_to_check = [c for c in code_candidates if c]
 
-    # Common + specific
-    sql = text(
-        """
-        SELECT document_name, document_code, COALESCE(is_mandatory, true),
-               COALESCE(lead_time_hours, 0), COALESCE(authority, ''), description
-        FROM port_documents
-        WHERE (port_code = 'ALL_US' OR port_code = ANY(:pcs))
-          AND (applies_to_vessel_types IS NULL OR :vt = ANY(applies_to_vessel_types))
-          AND (COALESCE(applies_if_foreign, false) = false OR :is_foreign = true)
-        ORDER BY document_name
-        """
-    )
-    rows = db.execute(
-        sql,
-        {
-            "pcs": port_codes_to_check,
-            "vt": vt,
-            "is_foreign": is_foreign,
-        },
-    ).fetchall()
-
-    # Deduplicate by (document_code, document_name)
-    seen: set[tuple[str, str]] = set()
-    for r in rows:
-        key = ((r[1] or "").upper(), (r[0] or "").lower())
-        if key in seen:
-            continue
-        seen.add(key)
-        docs.append(
-            DocumentRequirement(
-                document_name=r[0],
-                document_code=r[1] or "",
-                is_mandatory=bool(r[2]),
-                lead_time_hours=int(r[3] or 0),
-                authority=r[4] or "",
-                description=r[5],
-                expiry_date=None,
-                notes=None,
-            )
+    if use_port_documents and port_codes_to_check:
+        # Common + specific
+        sql = text(
+            """
+            SELECT document_name,
+                   document_code,
+                   COALESCE(is_mandatory, true),
+                   COALESCE(lead_time_hours, 0),
+                   COALESCE(authority, ''),
+                   description
+            FROM port_documents
+            WHERE (port_code = 'ALL_US' OR port_code = ANY(:pcs))
+              AND (applies_to_vessel_types IS NULL OR :vt = ANY(applies_to_vessel_types))
+              AND (COALESCE(applies_if_foreign, false) = false OR :is_foreign = true)
+            ORDER BY document_name
+            """
         )
+        rows = db.execute(
+            sql,
+            {
+                "pcs": port_codes_to_check,
+                "vt": vt,
+                "is_foreign": is_foreign,
+            },
+        ).fetchall()
+
+        for r in rows:
+            key = ((r[1] or "").upper(), (r[0] or "").lower())
+            if key in seen:
+                continue
+            seen.add(key)
+            docs.append(
+                DocumentRequirement(
+                    document_name=r[0],
+                    document_code=r[1] or "",
+                    is_mandatory=bool(r[2]),
+                    lead_time_hours=int(r[3] or 0),
+                    authority=r[4] or "",
+                    description=r[5],
+                    expiry_date=None,
+                    notes=None,
+                )
+            )
 
     fallback_docs = _static_fallback_documents(port_code_input, vessel_type, previous_port)
     for doc in fallback_docs:
@@ -755,6 +823,73 @@ def _document_requirements_core(
                 )
             )
 
+    # --- Enrich with live document expiries from PSIX / NPFC, if vessel is known ---
+    if vessel_imo or vessel_name:
+        try:
+            resolved_for_live = resolved
+            if resolved_for_live is None and port_code:
+                try:
+                    resolved_for_live = _resolve_port_code(db, port_code)
+                except HTTPException:
+                    resolved_for_live = None
+
+            bundle = build_live_bundle(
+                vessel_name=vessel_name,
+                imo_or_official_no=vessel_imo,
+                port_code=(resolved_for_live.port_code if resolved_for_live else None),
+                port_name=(resolved_for_live.port_name if resolved_for_live else None),
+                state=None,
+                is_cascadia=None,
+            )
+
+            live_docs = bundle.get("documents") or []
+
+            # Map live docs to requirement "codes"
+            live_by_code: Dict[str, Dict[str, Any]] = {}
+
+            for d in live_docs:
+                name = (d.get("name") or "").lower()
+                raw_exp = d.get("expires_on") or d.get("expiry_date") or d.get("raw_expiry")
+                if not raw_exp:
+                    continue
+
+                code: Optional[str] = None
+                if "financial responsibility" in name or "cofr" in name:
+                    code = "COFR"
+                elif "tonnage certificate" in name:
+                    code = "ITC"
+                elif "certificate of documentation" in name or "certificate of registry" in name:
+                    code = "COD/Registry"
+                elif "certificate of inspection" in name and "safety" not in name:
+                    code = "COI"
+
+                if code and code not in live_by_code:
+                    live_by_code[code] = d
+
+            # Now attach expiry to matching DocumentRequirement objects
+            for doc in docs:
+                live = live_by_code.get(doc.document_code)
+                if not live:
+                    continue
+
+                raw_exp = live.get("expires_on") or live.get("expiry_date") or live.get("raw_expiry")
+                if not raw_exp:
+                    continue
+
+                exp_date = _parse_any_date(raw_exp)
+                if exp_date:
+                    doc.expiry_date = exp_date
+                else:
+                    note = f"Expiry (unparsed): {raw_exp}"
+                    doc.notes = f"{doc.notes} {note}".strip() if doc.notes else note
+
+        except Exception as e:
+            logger.warning(
+                "Failed to enrich document expiries from live sources: %s",
+                e,
+                exc_info=True,
+            )
+
     return docs
 
 
@@ -763,9 +898,22 @@ async def get_document_requirements(
     port_code: str = Query(..., description="UN/LOCODE or internal code"),
     vessel_type: Optional[str] = Query(None, description="Vessel type (e.g., container, tanker)"),
     previous_port: Optional[str] = Query(None, description="Previous port code (UN/LOCODE)"),
+    vessel_imo: Optional[str] = Query(
+        None, description="IMO or official number for live doc lookups"
+    ),
+    vessel_name: Optional[str] = Query(
+        None, description="Vessel name for PSIX/COFR matching"
+    ),
     db: Session = Depends(get_db),
 ):
-    return _document_requirements_core(db, port_code, vessel_type, previous_port)
+    return _document_requirements_core(
+        db,
+        port_code,
+        vessel_type,
+        previous_port,
+        vessel_imo=vessel_imo,
+        vessel_name=vessel_name,
+    )
 
 
 # ============ Contract Adjustments (Profiles) ============
@@ -962,7 +1110,14 @@ async def calculate_multi_port_voyage(
 
         arr_type = _arrival_type(prev_port)
         weekend_arrival = eta.weekday() >= 5  # Sat/Sun
-        docs = _document_requirements_core(db, arrival_port_raw, vessel.vessel_type, prev_port)
+        docs = _document_requirements_core(
+            db,
+            arrival_port_raw,
+            vessel.vessel_type,
+            prev_port,
+            vessel_imo=vessel.imo_number,
+            vessel_name=vessel.name,
+        )
 
         fees_totals = leg_estimate.get("totals", {}) or {}
         best_optional = _dec(fees_totals.get("best_case_optional", fees_totals.get("optional_low", "0")))
