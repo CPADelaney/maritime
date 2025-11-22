@@ -1,34 +1,84 @@
-# src/maritime_mvp/clinets/COFR_client.py
+# src/maritime_mvp/clients/COFR_client.py
 
 import io
 import os
+import re
 from datetime import datetime, date
 from typing import List, Dict, Any
+from urllib.parse import urljoin
 
 import httpx
 import openpyxl
 import psycopg2
 from psycopg2.extras import execute_batch, Json
 
-COFR_XLSX_URL = (
-    "https://www.uscg.mil/Portals/0/NPFC/COFR/"
-    "ECOFR%20active%20vessel%20cofr.xlsx"
+COFR_STATUS_URL = (
+    "https://www.uscg.mil/Mariners/National-Pollution-Funds-Center/COFRs/"
+    "ECOFR-Active-Vessel-Status/"
 )
 
 # Example DSN: "postgres://user:pass@host:5432/postgres"
 PG_DSN = os.environ["DATABASE_URL"]
 
 
-def fetch_xlsx_bytes() -> bytes:
-    """Download the ECOFR active vessel spreadsheet."""
-    with httpx.Client(
+def _build_client() -> httpx.Client:
+    # Use a boring browser UA instead of loudly announcing "hi I'm an ETL bot"
+    return httpx.Client(
         timeout=30,
-        headers={"User-Agent": "MaritimeMVP-ETL/0.1"},
-        verify=False,  # you can flip this once you're happy
-    ) as client:
-        r = client.get(COFR_XLSX_URL, follow_redirects=True)
-        r.raise_for_status()
-        return r.content
+        follow_redirects=True,
+        headers={
+            "User-Agent": (
+                "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+                "(KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+            ),
+            "Accept": (
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,"
+                "application/octet-stream;q=0.9,*/*;q=0.8"
+            ),
+        },
+    )
+
+
+def _discover_xlsx_url(html: str) -> str:
+    """
+    Scrape the ECOFR Active Vessel Status page to find the XLSX link.
+    We look for the first .xlsx href and resolve it relative to COFR_STATUS_URL.
+    """
+    m = re.search(r'href="([^"]+\.xlsx[^"]*)"', html, re.IGNORECASE)
+    if not m:
+        raise RuntimeError("Could not find XLSX link on ECOFR Active Vessel Status page")
+    href = m.group(1)
+    return urljoin(COFR_STATUS_URL, href)
+
+
+def fetch_xlsx_bytes() -> bytes:
+    """Download the current Active Vessel COFR XLSX via the status page."""
+    with _build_client() as client:
+        # 1) Get the status page
+        status_resp = client.get(COFR_STATUS_URL)
+        try:
+            status_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"Failed to load ECOFR status page: {exc.response.status_code}"
+            ) from exc
+
+        # 2) Extract current XLSX link (with ?ver=... token)
+        xlsx_url = _discover_xlsx_url(status_resp.text)
+
+        # 3) Download the spreadsheet
+        xlsx_resp = client.get(xlsx_url)
+        try:
+            xlsx_resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            # Give yourself some debugging context in logs
+            snippet = xlsx_resp.text[:200] if xlsx_resp.text else ""
+            raise RuntimeError(
+                f"Failed to download COFR XLSX ({xlsx_url}): "
+                f"{xlsx_resp.status_code} {snippet!r}"
+            ) from exc
+
+        return xlsx_resp.content
 
 
 def parse_rows(data: bytes) -> List[Dict[str, Any]]:
