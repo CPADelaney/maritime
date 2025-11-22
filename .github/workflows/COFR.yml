@@ -29,4 +29,4 @@ jobs:
           pip install httpx openpyxl psycopg2-binary
 
       - name: Run COFR ETL
-        run: python src.maritime_mvp.clinets.COFR_client.py
+        run: python src/maritime_mvp/clients/COFR_client.py
