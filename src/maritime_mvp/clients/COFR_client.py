@@ -16,7 +16,7 @@ COFR_XLSX_URL = (
 )
 
 # Example DSN: "postgres://user:pass@host:5432/postgres"
-PG_DSN = os.environ["SUPABASE_DB_DSN"]
+PG_DSN = os.environ["DATABASE_URL"]
 
 
 def fetch_xlsx_bytes() -> bytes:
