@@ -2,7 +2,7 @@
 
 import io
 import os
-from datetime import datetime
+from datetime import datetime, date
 from typing import List, Dict, Any
 
 import httpx
@@ -52,7 +52,7 @@ def parse_rows(data: bytes) -> List[Dict[str, Any]]:
     return records
 
 
-def _to_date(x) -> datetime.date | None:
+def _to_date(x) -> date | None:
     """Handle Excel datetime, string dates, or None."""
     if x is None:
         return None
