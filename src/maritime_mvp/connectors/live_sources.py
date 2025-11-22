@@ -7,12 +7,14 @@ from dataclasses import dataclass, asdict
 from decimal import Decimal
 from typing import Any, Dict, Optional, Tuple, List
 from datetime import datetime
+from sqlalchemy import text
 import httpx
 from lxml import html
 import io
 
 # Import the fixed PSIX client
 from ..clients.psix_client import PsixClient
+from ..db import SessionLocal
 
 try:
     import openpyxl
@@ -508,6 +510,97 @@ COFR_ACTIVE_XLSX = (
 )
 
 
+def _fetch_cofr_from_db(
+    imo_or_official_no: Optional[str],
+    vessel_name: Optional[str]
+) -> Optional[Dict[str, Any]]:
+    """
+    Look up an active COFR record in cofr_active_vessels by VIN or vessel name.
+    Note: this file doesn't provide IMO, only Vin.
+    """
+    norm_id = (imo_or_official_no or "").strip()
+    norm_name = re.sub(r"\W+", "", (vessel_name or "").upper())
+
+    with SessionLocal() as db:
+        # 1) Try exact VIN match
+        if norm_id:
+            row = db.execute(
+                text(
+                    """
+                    SELECT vessel_name,
+                           vin,
+                           vessel_type_code,
+                           vessel_type_desc,
+                           gross_tonnage,
+                           status,
+                           expiration_date,
+                           insurance_cancel_flag,
+                           raw_expiry
+                    FROM (
+                        SELECT
+                          vessel_name,
+                          vin,
+                          vessel_type_code,
+                          vessel_type_desc,
+                          gross_tonnage,
+                          insurance_cancel_flag AS status,
+                          expiration_date,
+                          raw_record->>'Expiration Date' AS raw_expiry
+                        FROM cofr_active_vessels
+                    ) t
+                    WHERE vin = :id
+                    LIMIT 1
+                """
+                ),
+                {"id": norm_id},
+            ).fetchone()
+            if row:
+                return {
+                    "vessel_name": row[0],
+                    "vin": row[1],
+                    "vessel_type_code": row[2],
+                    "vessel_type_desc": row[3],
+                    "gross_tonnage": row[4],
+                    "status": row[5],
+                    "expiry_date": row[6].isoformat() if row[6] else None,
+                    "raw_expiry": row[7],
+                }
+
+        # 2) Fallback to name match
+        if norm_name:
+            row = db.execute(
+                text(
+                    """
+                    SELECT vessel_name,
+                           vin,
+                           vessel_type_code,
+                           vessel_type_desc,
+                           gross_tonnage,
+                           insurance_cancel_flag AS status,
+                           expiration_date,
+                           raw_record->>'Expiration Date' AS raw_expiry
+                    FROM cofr_active_vessels
+                    WHERE regexp_replace(upper(vessel_name), '\\W+', '', 'g') = :nm
+                    LIMIT 1
+                """
+                ),
+                {"nm": norm_name},
+            ).fetchone()
+            if row:
+                return {
+                    "vessel_name": row[0],
+                    "vin": row[1],
+                    "vessel_type_code": row[2],
+                    "vessel_type_desc": row[3],
+                    "gross_tonnage": row[4],
+                    "status": row[5],
+                    "expiry_date": row[6].isoformat() if row[6] else None,
+                    "raw_expiry": row[7],
+                }
+
+    return None
+
+
 def _fetch_cofr_active_rows(ttl_s: int = 3600) -> List[Dict[str, Any]]:
     """
     Download and parse the ECOFR active vessel spreadsheet into a list of dicts.
@@ -653,6 +746,14 @@ def _match_cofr_record(
 
 def cofr_snapshot(vessel_name: Optional[str], imo_or_official_no: Optional[str]) -> Dict[str, Any]:
     """Get COFR lookup information and, when possible, an active record with expiry."""
+    # 1) Try DB first
+    active_record: Optional[Dict[str, Any]] = None
+    try:
+        active_record = _fetch_cofr_from_db(imo_or_official_no, vessel_name)
+    except Exception as e:
+        logger.warning(f"COFR DB lookup failed: {e}")
+
+    # 2) (Optional) still fetch the HTML page for guidance only
     try:
         snap = fetch_html(COFR_URLS["search"], parse_extra=True)
     except Exception as e:
@@ -670,13 +771,6 @@ def cofr_snapshot(vessel_name: Optional[str], imo_or_official_no: Optional[str])
         "vessels_over_400gt": True,
         "exceptions": ["Public vessels", "Oil spill response vessels"],
     }
-
-    active_record: Optional[Dict[str, Any]] = None
-    try:
-        rows = _fetch_cofr_active_rows()
-        active_record = _match_cofr_record(rows, vessel_name, imo_or_official_no)
-    except Exception as e:
-        logger.warning(f"Failed to match COFR active list: {e}")
 
     return {
         "entrypoint": COFR_URLS["search"],
