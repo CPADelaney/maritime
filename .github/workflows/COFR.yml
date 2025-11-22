@@ -73,7 +73,6 @@ def _to_date(x) -> datetime.date | None:
 def normalize_record(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
     Map Excel columns → DB schema.
-
     Expected columns:
       Vessel Name, Vin, Vessel Type Code, Vsl Vessel Type Desc,
       Gross Tonnage, Case Control Id, Case- Examiner Id, Case- Operator Name,
