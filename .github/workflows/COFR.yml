@@ -7,7 +7,7 @@ on:
 
 jobs:
   run-cofr-loader:
-    runs-on: [self-hosted, cofr-runner]
+    runs-on: [self-hosted, cofr-runner-personal]
 
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
