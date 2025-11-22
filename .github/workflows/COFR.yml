@@ -1,15 +1,13 @@
 name: COFR loader
 
 on:
-  # run manually
   workflow_dispatch:
-  # optional: daily at 09:00 UTC
   schedule:
-    - cron: '0 9 * * *'
+    - cron: '0 9 * * *'  # 09:00 UTC daily, adjust if you want
 
 jobs:
   run-cofr-loader:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, cofr-runner]
 
     env:
       DATABASE_URL: ${{ secrets.DATABASE_URL }}
